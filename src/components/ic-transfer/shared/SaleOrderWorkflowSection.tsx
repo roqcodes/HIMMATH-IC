@@ -1,0 +1,119 @@
+'use client';
+
+import React from 'react';
+import { ICSale } from '@/types';
+import {
+  canAdminAccept,
+  canAdminReject,
+  canAdminReassignWarehouse,
+} from '@/lib/icTransfer/orderStatus';
+import { AdminOrderStatusCard, AdminOrderWorkflowActions } from './AdminOrderWorkflowPanel';
+import { BranchOrderStatusCard, BranchOrderWorkflowActions } from './BranchOrderStatusCell';
+import { ByHandAdminNotice } from './ByHandAdminActions';
+import { isByHandSale, canAdminCompleteByHand, canAdminReopenByHand } from '@/lib/icTransfer/byHand';
+import { isBranchHandledSale } from '@/lib/icTransfer/fulfillmentHandler';
+import BranchHandledOrderActions, { BranchHandledOrderNotice } from './BranchHandledOrderActions';
+import BranchCustomerOrderReviewActions, {
+  BranchCustomerOrderReviewNotice,
+} from './BranchCustomerOrderReviewActions';
+import { canBranchReviewCustomerOrder } from '@/lib/icTransfer/customerOrderReview';
+import { WorkflowNotice } from './orderWorkflow';
+
+type Props = {
+  sale: ICSale;
+  variant: 'admin' | 'branch';
+  branchId?: string;
+  onUpdated?: () => void;
+  onResubmit?: (sale: ICSale) => void;
+};
+
+function hasAdminActions(sale: ICSale) {
+  return (
+    canAdminAccept(sale.orderStatus) ||
+    canAdminReject(sale.orderStatus) ||
+    canAdminReassignWarehouse(sale.orderStatus) ||
+    (isByHandSale(sale) && (canAdminCompleteByHand(sale) || canAdminReopenByHand(sale)))
+  );
+}
+
+/** Status card + workflow actions for sale detail modals. */
+export default function SaleOrderWorkflowSection({ sale, variant, branchId, onUpdated, onResubmit }: Props) {
+  const actionKey = `${sale.id}-${sale.orderStatus}-${sale.rejectionRemarks ?? ''}-${sale.fulfillmentHandler ?? 'hq_admin'}`;
+  const branchHandled = isBranchHandledSale(sale);
+  const needsBranchReview = variant === 'branch' && canBranchReviewCustomerOrder(sale);
+
+  return (
+    <div
+      className="rounded-lg border border-[var(--theme-border-subtle)] bg-slate-50/40 p-3 shadow-surface-xs dark:bg-[var(--theme-surface-muted)]"
+      onClick={e => e.stopPropagation()}
+    >
+      <p className="mb-3 text-[11px] font-bold uppercase tracking-wider text-slate-400">Order Workflow</p>
+
+      <div className="flex w-full flex-col gap-3">
+        {variant === 'admin' ? (
+          <AdminOrderStatusCard sale={sale} compact={false} />
+        ) : (
+          <BranchOrderStatusCard sale={sale} compact={false} />
+        )}
+
+        {variant === 'admin' ? (
+          branchHandled ? (
+            <WorkflowNotice variant="info" title="View only">
+              This order is managed by the branch. HQ admin cannot modify status, warehouse, or details.
+            </WorkflowNotice>
+          ) : hasAdminActions(sale) ? (
+            <>
+              {isByHandSale(sale) ? <ByHandAdminNotice sale={sale} /> : null}
+              <AdminOrderWorkflowActions
+                key={actionKey}
+                sale={sale}
+                onUpdated={onUpdated}
+                compact={false}
+              />
+            </>
+          ) : (
+            <p className="text-xs text-slate-500">No admin actions available for this order status.</p>
+          )
+        ) : branchHandled ? (
+          <>
+            <BranchHandledOrderNotice sale={sale} />
+            <BranchHandledOrderActions
+              key={actionKey}
+              sale={sale}
+              branchId={branchId}
+              onUpdated={onUpdated}
+              compact={false}
+            />
+            <BranchOrderWorkflowActions
+              sale={sale}
+              onResubmit={onResubmit}
+              compact={false}
+            />
+          </>
+        ) : needsBranchReview ? (
+          <>
+            <BranchCustomerOrderReviewNotice sale={sale} />
+            <BranchCustomerOrderReviewActions
+              key={actionKey}
+              sale={sale}
+              onUpdated={onUpdated}
+              compact={false}
+            />
+            <BranchOrderWorkflowActions
+              sale={sale}
+              onResubmit={onResubmit}
+              compact={false}
+            />
+          </>
+        ) : (
+          <BranchOrderWorkflowActions
+            key={actionKey}
+            sale={sale}
+            onResubmit={onResubmit}
+            compact={false}
+          />
+        )}
+      </div>
+    </div>
+  );
+}

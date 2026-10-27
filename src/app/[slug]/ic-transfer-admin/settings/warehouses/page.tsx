@@ -1,0 +1,6 @@
+import { redirect } from 'next/navigation';
+
+export default async function LegacyWarehouseSettingsPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  redirect(`/${slug}/ic-transfer-admin/warehouse`);
+}

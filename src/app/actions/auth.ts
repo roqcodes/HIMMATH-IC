@@ -1,0 +1,150 @@
+'use server';
+
+import { authenticateWithPassword, createSession, deleteSession, getSessionUser } from '@/lib/auth';
+import { User } from '@/types';
+import { loginSchema } from '@/lib/validations';
+import { query } from '@/lib/db';
+import { resolvePostLoginPath } from '@/lib/asic/postLogin.server';
+import { authSessionSlug } from '@/lib/icTransfer/warehouseSlug';
+
+export interface AuthActionResult<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
+
+/**
+ * Server Action to authenticate a user and establish a session.
+ * Enforces authorization: branch managers can only log in at their assigned branch slug,
+ * and admins can only log in at the root (superadmin) context.
+ */
+export async function loginAction(email: string, securityKey: string, branchSlug?: string): Promise<AuthActionResult<User>> {
+  try {
+    const validation = loginSchema.safeParse({ email, securityKey });
+    if (!validation.success) {
+      return { success: false, error: validation.error.issues.map((i) => i.message).join(', ') };
+    }
+
+    const user = await authenticateWithPassword(validation.data.email, validation.data.securityKey);
+    const sessionSlug = authSessionSlug(branchSlug);
+
+    // ── Authorization gate ──────────────────────────────────────────────
+    if (sessionSlug) {
+      const { isBranchPortalRole } = await import('@/lib/rbac');
+      if (!isBranchPortalRole(user.role)) {
+        return { success: false, error: 'Access denied. Only branch users can sign in through a branch portal.' };
+      }
+      const branchRes = await query(
+        `SELECT id FROM branches WHERE slug = $1 LIMIT 1`,
+        [sessionSlug],
+      );
+      if (branchRes.rows.length === 0) {
+        return { success: false, error: 'This branch portal does not exist.' };
+      }
+      if (branchRes.rows[0].id !== user.branchId) {
+        return { success: false, error: 'Access denied. You are not authorized to access this branch.' };
+      }
+    } else {
+      // HQ portal: admins, auditors, HQ staff, and HQ warehouse/delivery users (no branch)
+      const { isHqAdminStaff, isHqPortalCustomer, isHqPortalCollectionAgent } = await import('@/lib/icFunds/hqBranch');
+      const { isHqOpsUser } = await import('@/lib/icTransfer/warehouseSlug');
+      if (
+        user.role !== 'admin' &&
+        user.role !== 'auditor' &&
+        !isHqAdminStaff(user) &&
+        !isHqOpsUser(user) &&
+        !isHqPortalCustomer(user) &&
+        !isHqPortalCollectionAgent(user)
+      ) {
+        const slug = await branchSlugForUserGate(user.branchId);
+        return {
+          success: false,
+          error: slug
+            ? `Access denied. Sign in through your branch portal: /branch/${slug}`
+            : 'Access denied. Branch users should sign in through their branch portal URL.',
+        };
+      }
+    }
+
+    const enrichedUser = await createSession(user, sessionSlug);
+
+    if (user.role === 'customer' && user.id) {
+      const customerRes = await query(
+        `SELECT status FROM customers WHERE auth_user_id = $1 LIMIT 1`,
+        [user.id],
+      );
+      if (customerRes.rows.length === 0) {
+        await deleteSession(sessionSlug);
+        return { success: false, error: 'Customer account is not linked to a customer record.' };
+      }
+      if (String(customerRes.rows[0].status) === 'inactive') {
+        await deleteSession(sessionSlug);
+        return { success: false, error: 'Your customer account is inactive. Contact your branch.' };
+      }
+    }
+
+    if (user.role === 'collection_agent' && user.id) {
+      const agentRes = await query(
+        `SELECT a.status
+         FROM profiles p
+         JOIN ic_fund_accounts a ON a.id = p.collection_account_id
+         WHERE p.id = $1
+         LIMIT 1`,
+        [user.id],
+      );
+      if (agentRes.rows.length === 0) {
+        await deleteSession(sessionSlug);
+        return { success: false, error: 'Collection agent account is not linked.' };
+      }
+      if (String(agentRes.rows[0].status) !== 'active') {
+        await deleteSession(sessionSlug);
+        return { success: false, error: 'Your collection agent account is inactive.' };
+      }
+    }
+    
+    return { success: true, data: enrichedUser };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An error occurred during authentication.';
+    return { success: false, error: message };
+  }
+}
+
+/**
+ * Server Action to end a session.
+ */
+export async function logoutAction(branchSlug?: string): Promise<AuthActionResult<void>> {
+  try {
+    await deleteSession(authSessionSlug(branchSlug));
+    return { success: true };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An error occurred during logout.';
+    return { success: false, error: message };
+  }
+}
+
+/**
+ * Server Action to retrieve the current active user session.
+ */
+export async function getCurrentUserAction(branchSlug?: string): Promise<AuthActionResult<User | null>> {
+  try {
+    const user = await getSessionUser(authSessionSlug(branchSlug));
+    return { success: true, data: user };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An error occurred while fetching user session.';
+    return { success: false, error: message };
+  }
+}
+
+export async function resolvePostLoginPathAction(
+  role: string | undefined,
+  loginSlug?: string,
+  branchId?: string | null,
+): Promise<string> {
+  return resolvePostLoginPath(role, loginSlug, branchId);
+}
+
+async function branchSlugForUserGate(branchId?: string | null): Promise<string | null> {
+  if (!branchId) return null;
+  const res = await query(`SELECT slug FROM branches WHERE id = $1 LIMIT 1`, [branchId]);
+  return res.rows[0]?.slug ? String(res.rows[0].slug) : null;
+}
