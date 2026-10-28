@@ -10,7 +10,7 @@ export type WarehouseNavPage = {
 };
 
 export const WAREHOUSE_NAV: WarehouseNavPage[] = [
-  { id: 'settlement', label: 'Order Settlement', path: '' },
-  { id: 'delivery-agents', label: 'Delivery Agent Management', path: '/delivery-agents' },
-  { id: 'order-settlement', label: 'My Deliveries', path: '/order-settlement' },
+  { id: 'settlement', label: 'Order Fulfillment', path: '' },
+  { id: 'delivery-agents', label: 'Delivery Agents', path: '/delivery-agents' },
+  { id: 'order-settlement', label: 'Delivery Settlement', path: '/order-settlement' },
 ];

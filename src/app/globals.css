@@ -437,3 +437,40 @@
     color-scheme: dark;
   }
 }
+
+/* Admin sidebar motion — width, labels, accordions, flyouts */
+@layer utilities {
+  .admin-sidebar-shell {
+    transition-property: width;
+    transition-duration: 360ms;
+    transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .admin-sidebar-reveal {
+    transition-property: max-width, opacity, transform;
+    transition-duration: 280ms;
+    transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .admin-sidebar-accordion {
+    display: grid;
+    transition-property: grid-template-rows, opacity;
+    transition-duration: 320ms;
+    transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .admin-sidebar-flyout {
+    transition-property: opacity, transform;
+    transition-duration: 220ms;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .admin-sidebar-shell,
+    .admin-sidebar-reveal,
+    .admin-sidebar-accordion,
+    .admin-sidebar-flyout {
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

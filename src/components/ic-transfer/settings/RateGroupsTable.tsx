@@ -102,7 +102,7 @@ export default function RateGroupsTable({
 
     const validationError = validatePricingEditorForSave(value.flat, value.pricingConfig, {
       lockedConversionRate:
-        convertedRateOnly && group.conversionRate > 0 ? group.conversionRate : undefined,
+        convertedRateOnly && 1 > 0 ? 1 : undefined,
     });
     if (validationError) {
       showToast(validationError, 'error');
@@ -111,7 +111,7 @@ export default function RateGroupsTable({
 
     const seeded = seedFlatRateForSave(value.flat, value.pricingConfig, {
       lockedConversionRate:
-        convertedRateOnly && group.conversionRate > 0 ? group.conversionRate : undefined,
+        convertedRateOnly && 1 > 0 ? 1 : undefined,
       convertedRate: value.convertedRate,
     });
     if (!seeded) {
@@ -126,8 +126,8 @@ export default function RateGroupsTable({
 
     const prepared = ensurePricingConversions(
       pricingBase,
-      (convertedRateOnly && group.conversionRate > 0
-        ? group.conversionRate
+      (convertedRateOnly && 1 > 0
+        ? 1
         : seeded.conversionRate),
     );
     const normalized = normalizePricingConfig(prepared, seeded);
@@ -165,14 +165,14 @@ export default function RateGroupsTable({
         </thead>
         <tbody>
           {groups.map(group => {
-            const branchCount = group.branchIds?.length ?? 0;
+            const branchCount = 0;
             const customerCount = group.customerIds?.length ?? 0;
             const stale = !isRateGroupUpdatedToday(group.updatedAt);
             const cellBg = stale ? 'bg-transparent' : 'bg-white';
             const isExpanded = expandedId === group.id;
             const advanced = hasAdvancedPricing(group.pricingConfig);
             const colSpan = columns.length;
-            const converted = getCurrencyUnitRate(group.saleRate, group.conversionRate ?? 1);
+            const converted = getCurrencyUnitRate(group.saleRate, 1);
 
             const openView = () => onView(group);
 
@@ -233,7 +233,7 @@ export default function RateGroupsTable({
                         <p className="truncate text-sm font-bold text-slate-900">{group.name}</p>
                         {convertedRateOnly ? (
                           <p className="mt-0.5 truncate text-[11px] text-slate-400">
-                            {group.country} · {group.currency}
+                            {group.country} · {'AED'}
                           </p>
                         ) : null}
                       </div>
@@ -245,20 +245,19 @@ export default function RateGroupsTable({
                         {group.country}
                       </td>
                       <td className={`border-y border-black/5 px-3 py-3.5 text-sm font-semibold text-slate-800 sm:px-4 sm:py-4 ${cellBg}`}>
-                        {group.currency}
+                        {'AED'}
                       </td>
                       <td className={`border-y border-black/5 px-3 py-3.5 text-sm font-semibold tabular-nums text-emerald-700 sm:px-4 sm:py-4 ${cellBg}`}>
                         {group.saleRate.toLocaleString()}
                       </td>
                       <td className={`border-y border-black/5 px-3 py-3.5 text-sm font-semibold tabular-nums text-indigo-700 sm:px-4 sm:py-4 ${cellBg}`}>
-                        {(group.conversionRate ?? 1).toLocaleString()}
+                        {String(1)}
                       </td>
                     </>
                   ) : null}
                   <td className={`border-y border-black/5 px-3 py-3.5 text-sm font-bold tabular-nums text-slate-900 sm:px-4 sm:py-4 ${cellBg}`}>
                     <span className="inline-flex items-baseline gap-1">
                       {formatAmount(converted, 4)}
-                      <span className="text-[11px] font-medium text-slate-400">{group.currency}</span>
                     </span>
                     {advanced ? (
                       <span className="mt-0.5 block text-[10px] font-medium text-slate-400">
@@ -325,11 +324,11 @@ export default function RateGroupsTable({
                         </div>
                         <RateGroupPricingEditor
                           group={group}
-                          currency={group.currency}
+                          currency={'AED'}
                           convertedRateOnly={convertedRateOnly}
                           lockedConversionRate={
-                            convertedRateOnly && group.conversionRate > 0
-                              ? group.conversionRate
+                            convertedRateOnly && 1 > 0
+                              ? 1
                               : undefined
                           }
                           defaultExpanded={advanced}

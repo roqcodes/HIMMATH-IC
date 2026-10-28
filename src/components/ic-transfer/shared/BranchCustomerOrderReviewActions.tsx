@@ -59,12 +59,7 @@ export default function BranchCustomerOrderReviewActions({
     const res = await branchReviewAcceptICSaleAction(sale.id, handler, branchSlug);
     setLoading(false);
     if (res.success) {
-      showToast(
-        handler === 'branch'
-          ? 'Order accepted — your branch will handle fulfillment'
-          : 'Order accepted and sent to admin for fulfillment',
-        'success',
-      );
+      showToast('Order accepted and sent to admin for fulfillment', 'success');
       setAcceptOpen(false);
       await refetchData();
       onUpdated?.();
@@ -164,22 +159,6 @@ export default function BranchCustomerOrderReviewActions({
                 <span className="block text-sm font-semibold text-slate-900">Send to admin</span>
                 <span className="mt-0.5 block text-xs text-slate-500">
                   Order enters the HQ admin queue for warehouse assignment and delivery.
-                </span>
-              </span>
-            </label>
-            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-teal-300 has-[:checked]:border-teal-400 has-[:checked]:bg-teal-50/60">
-              <input
-                type="radio"
-                name="fulfillment-handler"
-                value="branch"
-                checked={handler === 'branch'}
-                onChange={() => setHandler('branch')}
-                className="mt-0.5"
-              />
-              <span>
-                <span className="block text-sm font-semibold text-slate-900">Handle at branch</span>
-                <span className="mt-0.5 block text-xs text-slate-500">
-                  Your branch assigns a warehouse and completes fulfillment locally.
                 </span>
               </span>
             </label>

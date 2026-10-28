@@ -9,7 +9,7 @@ export type ResolvedAsicScope = {
 };
 
 function resolveSectionId(sectionRaw: string | null, portal: AsicPortal): AsicSectionId {
-  if (sectionRaw === 'customers') return 'accounts';
+  if (sectionRaw === 'customers' || sectionRaw === 'accounts') return 'entities';
   if (sectionRaw && isAsicSection(sectionRaw)) return sectionRaw;
   return defaultSection(portal);
 }

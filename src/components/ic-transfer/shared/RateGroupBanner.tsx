@@ -2,7 +2,7 @@
 
 import React from 'react';
 import type { ICRateGroup } from '@/types';
-import { formatAmount, formatRateAmount, getCurrencyUnitRate } from '@/lib/icTransfer/rateCalculations';
+import { formatAmount } from '@/lib/icTransfer/rateCalculations';
 
 type Props = {
   group: ICRateGroup;
@@ -14,30 +14,19 @@ type Props = {
   hideAedRate?: boolean;
 };
 
-export default function RateGroupBanner({ group, displayName, ratesOnly = false, hideAedRate = false }: Props) {
-  const currencyUnitRate = getCurrencyUnitRate(group.saleRate, group.conversionRate || 1);
-  const groupCurrency = group.currency?.toUpperCase();
-  const showConversion = Boolean(groupCurrency && groupCurrency !== 'AED' && groupCurrency !== 'CURRENCY');
-
+export default function RateGroupBanner({
+  group,
+  displayName,
+  ratesOnly = false,
+  hideAedRate = false,
+}: Props) {
   if (ratesOnly) {
     return (
-      <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 text-xs">
         {!hideAedRate ? (
           <span>
-            <span className="font-semibold text-slate-400 uppercase">AED</span>{' '}
+            <span className="font-semibold uppercase text-slate-400">Rate</span>{' '}
             <span className="font-bold tabular-nums text-accent">{formatAmount(group.saleRate)}</span>
-          </span>
-        ) : null}
-        <span>
-          <span className="font-semibold text-slate-400 uppercase">{group.currency}</span>{' '}
-          <span className="font-bold tabular-nums text-indigo-600">{formatAmount(currencyUnitRate)}</span>
-        </span>
-        {showConversion ? (
-          <span>
-            <span className="font-semibold text-slate-400 uppercase">Conv</span>{' '}
-            <span className="font-bold tabular-nums text-slate-700">
-              {formatRateAmount(group.conversionRate || 1)}
-            </span>
           </span>
         ) : null}
       </div>
@@ -45,10 +34,10 @@ export default function RateGroupBanner({ group, displayName, ratesOnly = false,
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-xs">
-      <span className="font-semibold text-slate-500 uppercase tracking-wider">
+    <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2.5 text-xs sm:flex-row sm:items-center sm:justify-between">
+      <span className="font-semibold uppercase tracking-wider text-slate-500">
         {displayName ? (
-          <strong className="text-slate-700 normal-case">{displayName}</strong>
+          <strong className="normal-case text-slate-700">{displayName}</strong>
         ) : (
           <>
             Applicable Rate Group: <strong className="text-slate-700">{group.name}</strong>
@@ -58,22 +47,8 @@ export default function RateGroupBanner({ group, displayName, ratesOnly = false,
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         {!hideAedRate ? (
           <span>
-            <span className="font-semibold text-slate-400 uppercase">Sale Rate (AED):</span>{' '}
+            <span className="font-semibold uppercase text-slate-400">Sale Rate (AED):</span>{' '}
             <span className="font-bold text-accent">{formatAmount(group.saleRate)}</span>
-          </span>
-        ) : null}
-        <span>
-          <span className="font-semibold text-slate-400 uppercase">Rate ({group.currency}):</span>{' '}
-          <span className="font-bold text-indigo-600">{formatAmount(currencyUnitRate)}</span>
-        </span>
-        {showConversion ? (
-          <span>
-            <span className="font-semibold text-slate-400 uppercase">
-              Conversion (AED → {group.currency}):
-            </span>{' '}
-            <span className="font-bold tabular-nums text-slate-800">
-              {formatRateAmount(group.conversionRate || 1)}
-            </span>
           </span>
         ) : null}
       </div>

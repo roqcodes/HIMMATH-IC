@@ -38,24 +38,22 @@ import { resolveAccountDetailHref } from '@/lib/icFunds/accountNavigation';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import { BalanceWithPending } from '@/components/ic-funds/BalanceWithPending';
 import { fmtICAmount } from '@/lib/icFunds/format';
-import { AccountCurrencyBadge } from '@/components/ic-funds/AccountCurrencyBadge';
+import { HQ_IC_FUNDS_BRANCH_ID } from '@/lib/icFunds/hqBranch';
 import { useWriteAccess } from '@/context/RbacWriteContext';
 import { useApp } from '@/context/AppContext';
 import type { ICFundAccount } from '@/types';
 
-type SortField = 'name' | 'accountType' | 'currency' | 'phone' | 'email' | 'openingBalance' | 'balance' | 'status' | 'assignment';
+type SortField = 'name' | 'accountType' | 'phone' | 'email' | 'openingBalance' | 'balance' | 'status';
 type SortDirection = 'asc' | 'desc';
 
 export default function AccountsScreen({
   branchId,
   navSlug,
   hqMode = false,
-  branches = [],
 }: {
   branchId: string;
   navSlug?: string;
   hqMode?: boolean;
-  branches?: Array<{ id: string; name: string; slug: string }>;
 }) {
   const { showToast, currentSlug } = useApp();
   const { canWrite, buttonProps } = useWriteAccess();
@@ -69,10 +67,10 @@ export default function AccountsScreen({
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterType, setFilterType] = useState('');
-  const [filterAssignment, setFilterAssignment] = useState('');
-  const [filterBranch, setFilterBranch] = useState('');
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+
+  const ledgerBranchId = hqMode ? HQ_IC_FUNDS_BRANCH_ID : branchId;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -126,9 +124,6 @@ export default function AccountsScreen({
     showToast(wasEdit ? 'Account updated' : 'Account created', 'success');
   };
 
-  const assignmentLabel = (account: ICFundAccount) =>
-    account.isDirect ? 'Direct' : account.branchName || 'Branch';
-
   const openAccountDetail = (account: ICFundAccount) => {
     const slug = accountLinkSlug(account);
     if (!slug) return;
@@ -172,16 +167,6 @@ export default function AccountsScreen({
       result = result.filter(a => a.accountType === filterType);
     }
 
-    if (hqMode && filterAssignment === 'direct') {
-      result = result.filter(a => a.isDirect);
-    } else if (hqMode && filterAssignment === 'branch') {
-      result = result.filter(a => !a.isDirect);
-    }
-
-    if (hqMode && filterBranch) {
-      result = result.filter(a => a.branchId === filterBranch);
-    }
-
     result.sort((a, b) => {
       let valA: string | number = '';
       let valB: string | number = '';
@@ -192,18 +177,12 @@ export default function AccountsScreen({
       } else if (sortField === 'accountType') {
         valA = accountTypeLabel(a.accountType).toLowerCase();
         valB = accountTypeLabel(b.accountType).toLowerCase();
-      } else if (sortField === 'currency') {
-        valA = String(a.currency || 'AED').toUpperCase();
-        valB = String(b.currency || 'AED').toUpperCase();
-      } else if (sortField === 'assignment') {
-        valA = assignmentLabel(a).toLowerCase();
-        valB = assignmentLabel(b).toLowerCase();
       } else {
         valA = a[sortField] ?? '';
         valB = b[sortField] ?? '';
       }
 
-      if (sortField !== 'balance' && sortField !== 'openingBalance' && sortField !== 'accountType' && sortField !== 'assignment' && typeof valA === 'string' && typeof valB === 'string') {
+      if (sortField !== 'balance' && sortField !== 'openingBalance' && sortField !== 'accountType' && typeof valA === 'string' && typeof valB === 'string') {
         valA = valA.toLowerCase();
         valB = valB.toLowerCase();
       }
@@ -214,19 +193,14 @@ export default function AccountsScreen({
     });
 
     return result;
-  }, [accounts, searchTerm, filterStatus, filterType, filterAssignment, filterBranch, hqMode, sortField, sortDirection]);
+  }, [accounts, searchTerm, filterStatus, filterType, sortField, sortDirection]);
 
   const kpiMetrics = useMemo(() => computeAccountsKpis(accounts, hqMode), [accounts, hqMode]);
 
   return (
     <>
       <AsicPageHeader
-        title="Accounts"
-        subtitle={
-          hqMode
-            ? 'Direct customers stay on HQ. Branch customers are assigned to a branch.'
-            : 'Chart of accounts'
-        }
+        title="Entities"
         actions={
           <button
             type="button"
@@ -268,40 +242,6 @@ export default function AccountsScreen({
                   ))}
                 </select>
               </div>
-              {hqMode ? (
-                <div className="lg:col-span-2">
-                  <label className={icfLabel} htmlFor="icf-accounts-assignment">Kind</label>
-                  <select
-                    id="icf-accounts-assignment"
-                    className={icfInput}
-                    value={filterAssignment}
-                    onChange={e => {
-                      setFilterAssignment(e.target.value);
-                      if (e.target.value === 'direct') setFilterBranch('');
-                    }}
-                  >
-                    <option value="">All kinds</option>
-                    <option value="direct">Direct</option>
-                    <option value="branch">Branch</option>
-                  </select>
-                </div>
-              ) : null}
-              {hqMode && filterAssignment !== 'direct' ? (
-                <div className="lg:col-span-2">
-                  <label className={icfLabel} htmlFor="icf-accounts-branch">Branch</label>
-                  <select
-                    id="icf-accounts-branch"
-                    className={icfInput}
-                    value={filterBranch}
-                    onChange={e => setFilterBranch(e.target.value)}
-                  >
-                    <option value="">All branches</option>
-                    {branches.map(b => (
-                      <option key={b.id} value={b.id}>{b.name}</option>
-                    ))}
-                  </select>
-                </div>
-              ) : null}
               <div className="lg:col-span-2">
                 <label className={icfLabel} htmlFor="icf-accounts-status">Status</label>
                 <select id="icf-accounts-status" className={icfInput} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
@@ -324,16 +264,8 @@ export default function AccountsScreen({
                 <th className={`${icfTh} cursor-pointer select-none`} onClick={() => handleSort('name')}>
                   Name{sortMark('name')}
                 </th>
-                {hqMode ? (
-                  <th className={`${icfTh} cursor-pointer select-none`} onClick={() => handleSort('assignment')}>
-                    Assignment{sortMark('assignment')}
-                  </th>
-                ) : null}
                 <th className={`${icfTh} cursor-pointer select-none`} onClick={() => handleSort('accountType')}>
                   Type{sortMark('accountType')}
-                </th>
-                <th className={`${icfTh} cursor-pointer select-none`} onClick={() => handleSort('currency')}>
-                  Currency{sortMark('currency')}
                 </th>
                 <th className={`${icfTh} cursor-pointer select-none`} onClick={() => handleSort('phone')}>
                   Phone{sortMark('phone')}
@@ -358,10 +290,10 @@ export default function AccountsScreen({
             </thead>
             <tbody>
               {loading ? (
-                <ASICTableRowsSkeleton rows={8} cols={hqMode ? 10 : 9} />
+                <ASICTableRowsSkeleton rows={8} cols={8} />
               ) : filteredAndSorted.length === 0 ? (
                 <tr>
-                  <td colSpan={hqMode ? 10 : 9} className={`${icfTd} py-6 text-center text-slate-500`}>
+                  <td colSpan={8} className={`${icfTd} py-6 text-center text-slate-500`}>
                     {accounts.length === 0 ? 'No accounts yet.' : 'No rows match the filters.'}
                   </td>
                 </tr>
@@ -380,23 +312,7 @@ export default function AccountsScreen({
                         accounts={[account]}
                       />
                     </td>
-                    {hqMode ? (
-                      <td className={icfTd}>
-                        {account.isDirect ? (
-                          <span className="inline-flex rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-600">
-                            Direct
-                          </span>
-                        ) : (
-                          <span className="inline-flex rounded-md border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-indigo-700">
-                            {account.branchName || 'Branch'}
-                          </span>
-                        )}
-                      </td>
-                    ) : null}
                     <td className={`${icfTd} text-slate-500`}>{accountTypeLabel(account.accountType)}</td>
-                    <td className={icfTd}>
-                      <AccountCurrencyBadge accountType={account.accountType} currency={account.currency} compact />
-                    </td>
                     <td className={`${icfTd} text-slate-500`}>{account.phone || '—'}</td>
                     <td className={`${icfTd} max-w-[12rem] truncate text-slate-500`}>{account.email || '—'}</td>
                     <td className={`${icfTd} text-right font-mono tabular-nums`}>
@@ -455,11 +371,6 @@ export default function AccountsScreen({
                       {account.status}
                     </span>
                   </div>
-                  {hqMode ? (
-                    <MobileCardField label="Assignment">
-                      {account.isDirect ? 'Direct' : account.branchName || 'Branch'}
-                    </MobileCardField>
-                  ) : null}
                   <MobileCardField label="Type">{accountTypeLabel(account.accountType)}</MobileCardField>
                   <MobileCardField label="Phone">{account.phone || '—'}</MobileCardField>
                   <MobileCardField label="Balance">
@@ -484,13 +395,11 @@ export default function AccountsScreen({
 
       {isModalOpen ? (
         <ICFundAccountModal
-          branchId={branchId}
+          branchId={ledgerBranchId}
           open={isModalOpen}
           account={editingAccount}
           onClose={handleModalClose}
           onSave={handleSave}
-          hqMode={hqMode}
-          branches={branches}
         />
       ) : null}
     </>

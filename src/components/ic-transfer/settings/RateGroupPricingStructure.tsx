@@ -16,10 +16,12 @@ import {
 import { formatRateAmount, getCurrencyUnitRate } from '@/lib/icTransfer/rateCalculations';
 
 type Props = {
-  group: Pick<ICRateGroup, 'saleRate' | 'conversionRate' | 'currency' | 'pricingConfig'>;
+  group: Pick<ICRateGroup, 'saleRate' | 'pricingConfig'>;
   /** Branch portal: show local currency rates only. */
   convertedRateOnly?: boolean;
 };
+
+const DISPLAY_CURRENCY = 'AED';
 
 function localRate(saleRate: number, conversionRate: number): number {
   return getCurrencyUnitRate(saleRate, conversionRate > 0 ? conversionRate : 1);
@@ -269,7 +271,7 @@ export default function RateGroupPricingStructure({
         <FlatRatePanel
           saleRate={fallback.saleRate}
           conversionRate={fallback.conversionRate}
-          currency={group.currency}
+          currency={DISPLAY_CURRENCY}
           convertedRateOnly={convertedRateOnly}
           caption={`Same rate for Transfer, CDM, By Hand, and NRE`}
         />
@@ -280,7 +282,7 @@ export default function RateGroupPricingStructure({
           </p>
           <SlabLadder
             pricing={config.common}
-            currency={group.currency}
+            currency={DISPLAY_CURRENCY}
             convertedRateOnly={convertedRateOnly}
             fallback={fallback}
           />
@@ -296,7 +298,7 @@ export default function RateGroupPricingStructure({
           </p>
           <PerTypeGrid
             config={config}
-            currency={group.currency}
+            currency={DISPLAY_CURRENCY}
             convertedRateOnly={convertedRateOnly}
             fallback={fallback}
           />
@@ -305,7 +307,7 @@ export default function RateGroupPricingStructure({
         <FlatRatePanel
           saleRate={fallback.saleRate}
           conversionRate={fallback.conversionRate}
-          currency={group.currency}
+          currency={DISPLAY_CURRENCY}
           convertedRateOnly={convertedRateOnly}
         />
       )}

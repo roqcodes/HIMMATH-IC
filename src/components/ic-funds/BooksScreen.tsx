@@ -285,26 +285,28 @@ export default function BooksScreen({
   return (
     <div>
       {confirmDialog}
-      <div className={`${icfCard} mb-2 overflow-x-auto`}>
-        <nav className="flex min-w-max gap-0.5 p-1" aria-label="Report views">
-          {IC_FUNDS_REPORTS.map(item => {
-            const active = item.id === reportView;
-            return (
-              <Link
-                key={item.id}
-                href={icFundsReportPath(slug, item.id, portal)}
-                className={`shrink-0 rounded-md px-2.5 py-1.5 text-xs no-underline ${
-                  active
-                    ? 'bg-slate-900 font-medium text-white'
-                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                }`}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
-      </div>
+      {portal !== 'admin' ? (
+        <div className={`${icfCard} mb-2 overflow-x-auto`}>
+          <nav className="flex min-w-max gap-0.5 p-1" aria-label="Report views">
+            {IC_FUNDS_REPORTS.map(item => {
+              const active = item.id === reportView;
+              return (
+                <Link
+                  key={item.id}
+                  href={icFundsReportPath(slug, item.id, portal)}
+                  className={`shrink-0 rounded-md px-2.5 py-1.5 text-xs no-underline ${
+                    active
+                      ? 'bg-slate-900 font-medium text-white'
+                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+      ) : null}
 
       <div className={`${icfCard} min-w-0`}>
         <div className="border-b border-slate-200 px-3 pt-2">

@@ -3,7 +3,7 @@ import 'server-only';
 import type { QueryResult } from 'pg';
 import { query, withTransaction, sortedIds } from '@/lib/db';
 import { validateVoucherAccounts } from '@/lib/icFunds/voucherRules';
-import { validateVoucherCurrencyPolicy, roundLedgerAmount, IC_FUNDS_BASE_CURRENCY, normalizeAccountCurrency } from '@/lib/icFunds/currencyPolicy';
+import { validateVoucherCurrencyPolicy, roundLedgerAmount, IC_FUNDS_BASE_CURRENCY } from '@/lib/icFunds/currencyPolicy';
 import { ensureHqIcFundsBranch } from '@/lib/icFunds/ensureHqBranch';
 import { HQ_IC_FUNDS_BRANCH_ID } from '@/lib/icFunds/hqBranch';
 import {
@@ -16,23 +16,7 @@ import {
   type RemainingStockPool,
   type WarehouseInventoryEvent,
 } from '@/lib/icFunds/warehouseProfit';
-import { applyUnappliedWalletCredits } from '@/lib/icTransfer/walletCredits.server';
 import { logger } from '@/lib/logger';
-
-async function deleteAutoLedgerEntryByReference(
-  referenceType: string,
-  referenceId: string,
-): Promise<void> {
-  try {
-    await query(
-      `DELETE FROM fund_entity_ledger
-       WHERE reference_type = $1 AND reference_id = $2 AND reference_type != 'settlement'`,
-      [referenceType, referenceId],
-    );
-  } catch {
-    /* gold ledger table is optional on Himmath IC */
-  }
-}
 
 type DbClient = {
   query: (text: string, params?: unknown[]) => Promise<QueryResult>;
@@ -40,7 +24,7 @@ type DbClient = {
 
 const db: DbClient = { query };
 
-export type ICFundAccountSourceType = 'ic_supplier' | 'ic_warehouse' | 'ic_customer' | 'ic_collection_agent';
+export type ICFundAccountSourceType = 'ic_supplier' | 'ic_warehouse' | 'ic_customer';
 
 const SALE_GHOST_STATUSES = new Set([
   'accepted',
@@ -68,7 +52,7 @@ async function lockFundAccounts(
   const ids = sortedIds(accountIds);
   if (ids.length === 0) return [];
   const accounts = await client.query(
-    `SELECT id, account_type, status, currency FROM ic_fund_accounts
+    `SELECT id, account_type, status FROM ic_fund_accounts
      WHERE id = ANY($1::varchar[]) AND branch_id = $2
      ORDER BY id
      FOR UPDATE`,
@@ -145,17 +129,6 @@ export async function ensureLinkedAccount(
   const sourceId = params.sourceId.slice(0, 50);
   const displayName = accountDisplayName(params.sourceType, params.name);
 
-  let accountCurrency = IC_FUNDS_BASE_CURRENCY;
-  if (params.customerId) {
-    const curRes = await client.query(
-      `SELECT COALESCE(currency, 'AED') AS currency FROM customers WHERE id = $1 LIMIT 1`,
-      [params.customerId],
-    );
-    if (curRes.rows.length > 0) {
-      accountCurrency = normalizeAccountCurrency(curRes.rows[0].currency);
-    }
-  }
-
   const existing = await client.query(
     `SELECT id FROM ic_fund_accounts
      WHERE branch_id = $1 AND (
@@ -173,24 +146,22 @@ export async function ensureLinkedAccount(
        SET source_type = COALESCE(source_type, $1),
            source_id = COALESCE(source_id, $2),
            phone = COALESCE($3, phone),
-           customer_id = COALESCE($4, customer_id),
-           currency = $5
-       WHERE id = $6`,
-      [params.sourceType, sourceId, params.phone || null, params.customerId || null, accountCurrency, accountId],
+           customer_id = COALESCE($4, customer_id)
+       WHERE id = $5`,
+      [params.sourceType, sourceId, params.phone || null, params.customerId || null, accountId],
     );
     return accountId;
   }
 
   const id = `ICFA-${crypto.randomUUID().slice(0, 10).toUpperCase()}`;
   const insertSql = `INSERT INTO ic_fund_accounts (
-         id, branch_id, name, account_type, currency, opening_balance, notes,
+         id, branch_id, name, account_type, opening_balance, notes,
          source_type, source_id, phone, customer_id
-       ) VALUES ($1, $2, $3, 'personal', $4, 0, $5, $6, $7, $8, $9)`;
+       ) VALUES ($1, $2, $3, 'personal', 0, $4, $5, $6, $7, $8)`;
   const insertParams = [
     id,
     params.branchId,
     displayName,
-    accountCurrency,
     `Auto-synced from IC Transfer (${params.sourceType.replace('ic_', '')})`,
     params.sourceType,
     sourceId,
@@ -214,12 +185,11 @@ export async function ensureLinkedAccount(
     id,
     params.branchId,
     altName,
-    accountCurrency,
+    insertParams[3],
     insertParams[4],
-    params.sourceType,
-    sourceId,
-    params.phone || null,
-    params.customerId || null,
+    insertParams[5],
+    insertParams[6],
+    insertParams[7],
   ]);
   if (altInserted) return id;
 
@@ -831,7 +801,6 @@ export async function syncICPurchaseToICFunds(purchaseId: string): Promise<void>
 }
 
 export async function removeICPurchaseFromICFunds(purchaseId: string): Promise<void> {
-  await deleteAutoLedgerEntryByReference('ic_purchase', purchaseId);
   try {
     const branchId = await resolvePurchaseBranchId(db, purchaseId);
     await voidVoucherByReference(db, branchId, 'ic_purchase', purchaseId);
@@ -907,9 +876,6 @@ export async function syncICSaleToICFunds(saleId: string): Promise<void> {
 
       if (orderStatus === 'completed') {
         await postSaleMarginVouchers(client, sale, branchId);
-        if (sale.order_customer_id) {
-          await applyUnappliedWalletCredits(client, { customerId: String(sale.order_customer_id) });
-        }
       } else {
         await voidSaleMarginVouchers(client, branchId, saleId);
       }
@@ -920,9 +886,6 @@ export async function syncICSaleToICFunds(saleId: string): Promise<void> {
 }
 
 export async function removeICSaleFromICFunds(saleId: string): Promise<void> {
-  await deleteAutoLedgerEntryByReference('ic_sale', saleId);
-  await deleteAutoLedgerEntryByReference('ic_sale_cogs', saleId);
-  await deleteAutoLedgerEntryByReference('ic_sale_profit', saleId);
   try {
     const saleRes = await query(`SELECT * FROM ic_sales WHERE id = $1 LIMIT 1`, [saleId]);
     if (saleRes.rows.length === 0) return;
@@ -951,7 +914,7 @@ export async function postFxSettlementBatchPaymentInTx(
   if (amount <= 0) return null;
 
   const toRes = await client.query(
-    `SELECT account_type, UPPER(COALESCE(currency, 'AED')) AS currency
+    `SELECT account_type
      FROM ic_fund_accounts
      WHERE id = $1 AND branch_id = $2
      LIMIT 1`,
@@ -961,10 +924,6 @@ export async function postFxSettlementBatchPaymentInTx(
     throw new Error('Receive-into account not found');
   }
   const toType = String(toRes.rows[0].account_type);
-  const toCurrency = String(toRes.rows[0].currency);
-  if (toType === 'personal' && toCurrency !== IC_FUNDS_BASE_CURRENCY) {
-    throw new Error(`Remittance can only be received into AED personal accounts (${toCurrency} personal is not allowed)`);
-  }
 
   const notes =
     params.notes?.trim() ||
@@ -985,118 +944,12 @@ export async function postFxSettlementBatchPaymentInTx(
 }
 
 export async function syncSaleFxSettlementLedgerInTx(
-  client: DbClient,
-  settlementId: string,
+  _client: DbClient,
+  _settlementId: string,
 ): Promise<{ receiptAmount: number; profitAmount: number }> {
-  const settlementRes = await client.query(
-    `SELECT f.*,
-            s.customer_name, s.order_customer_name, s.order_customer_id, s.warehouse_id
-     FROM ic_sale_fx_settlements f
-     JOIN ic_sales s ON s.id = f.sale_id
-     WHERE f.id = $1
-     LIMIT 1`,
-    [settlementId],
-  );
-  if (settlementRes.rows.length === 0) return { receiptAmount: 0, profitAmount: 0 };
-  const settlement = settlementRes.rows[0];
-
-  const branchId = await resolveSaleBranchId(client, settlement);
-  const collectionAccountId = settlement.collection_account_id
-    ? String(settlement.collection_account_id)
-    : null;
-  if (!collectionAccountId) throw new Error('Missing collection account on settlement');
-
-  const customerName = String(
-    settlement.order_customer_name || settlement.customer_name || 'IC Customer',
-  ).trim();
-  const customerSourceId = settlement.order_customer_id
-    ? String(settlement.order_customer_id)
-    : `name:${customerName.toLowerCase()}`;
-
-  const customerAccountId = await ensureLinkedAccount(client, {
-    branchId,
-    sourceType: 'ic_customer',
-    sourceId: customerSourceId,
-    name: customerName,
-    customerId: settlement.order_customer_id ? String(settlement.order_customer_id) : null,
-  });
-  if (!customerAccountId) throw new Error('Could not resolve customer account for FX settlement');
-
-  const fxProfitAccountId = await ensureSystemAccount(
-    client,
-    branchId,
-    'IC FX Profit',
-    'profit',
-    'ic_fx_profit',
-  );
-
-  const voucherDate = isoDate(settlement.settled_at || settlement.created_at);
-  const settledAed = roundLedgerAmount(Number(settlement.settled_aed) || 0);
-  const bookedAed = roundLedgerAmount(Number(settlement.booked_aed) || 0);
-  const type2 = roundLedgerAmount(settledAed - bookedAed);
-  const saleRef = String(settlement.sale_id).slice(0, 8);
-  const receiptAmount = settledAed;
-  const profitVoucherAmount = Math.abs(type2);
-
-  const receiptVoucherId = await postVoucherInTx(client, {
-    branchId,
-    voucherType: 'receipt',
-    voucherDate,
-    debitAccountId: collectionAccountId,
-    creditAccountId: customerAccountId,
-    amount: receiptAmount,
-    notes: `FX collection ${saleRef} · ${Number(settlement.paid_foreign)} ${settlement.currency}`,
-    referenceType: 'ic_sale_fx_receipt',
-    referenceId: settlementId,
-  });
-
-  let profitVoucherId: string | null = null;
-  if (profitVoucherAmount >= 1e-10) {
-    if (type2 > 0) {
-      profitVoucherId = await postVoucherInTx(client, {
-        branchId,
-        voucherType: 'journal',
-        voucherDate,
-        debitAccountId: customerAccountId,
-        creditAccountId: fxProfitAccountId,
-        amount: profitVoucherAmount,
-        notes: `FX profit Type 2 ${saleRef}`,
-        referenceType: 'ic_sale_fx_profit',
-        referenceId: settlementId,
-      });
-    } else {
-      profitVoucherId = await postVoucherInTx(client, {
-        branchId,
-        voucherType: 'journal',
-        voucherDate,
-        debitAccountId: fxProfitAccountId,
-        creditAccountId: customerAccountId,
-        amount: profitVoucherAmount,
-        notes: `FX loss Type 2 ${saleRef}`,
-        referenceType: 'ic_sale_fx_profit',
-        referenceId: settlementId,
-      });
-    }
-  }
-
-  await client.query(
-    `UPDATE ic_sale_fx_settlements
-     SET receipt_voucher_id = $2, profit_voucher_id = $3
-     WHERE id = $1`,
-    [settlementId, receiptVoucherId, profitVoucherId],
-  );
-
-  return { receiptAmount, profitAmount: profitVoucherAmount };
+  return { receiptAmount: 0, profitAmount: 0 };
 }
 
-export async function syncSaleFxSettlementLedger(settlementId: string): Promise<void> {
-  try {
-    await ensureHqIcFundsBranch();
-    await withTransaction(async client => {
-      await syncSaleFxSettlementLedgerInTx(client, settlementId);
-    });
-  } catch (err) {
-    logger.error({ err, settlementId }, 'Failed to sync FX settlement ledger');
-    throw err;
-  }
+export async function syncSaleFxSettlementLedger(_settlementId: string): Promise<void> {
+  return;
 }

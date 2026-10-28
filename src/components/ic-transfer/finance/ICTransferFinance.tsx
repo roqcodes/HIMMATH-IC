@@ -13,11 +13,10 @@ export default function ICTransferFinance() {
   return (
     <PageShell>
       <PageHeader
-        title="IC Finance"
-        subtitle="IC Transfer money lives in IC Funds — a separate book from gold Funds."
+        title="Intercompany Finance"
         actions={
           <Link href={fundsHref} className={`${asicBtnPrimary} no-underline`}>
-            Open IC Funds
+            Open General Ledger
           </Link>
         }
       />

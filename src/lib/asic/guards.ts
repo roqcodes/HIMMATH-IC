@@ -19,7 +19,7 @@ export async function requirePortalUser(portal: AsicPortal, slug?: string) {
   if (!slug) redirect(home);
 
   if (portal === 'branch') {
-    if (user.role !== 'branch_manager' && user.role !== 'staff') redirect(home);
+    redirect('/admin/dashboard');
   } else if (portal === 'warehouse') {
     if (user.role === 'admin' || user.role === 'auditor') {
       redirect('/admin/warehouse');
@@ -35,11 +35,6 @@ export async function requirePortalUser(portal: AsicPortal, slug?: string) {
     }
   } else if (portal === 'customer') {
     if (user.role !== 'customer') redirect(home);
-  } else if (portal === 'collection') {
-    if (user.role !== 'collection_agent') redirect(home);
-    if (isHqOperationsPortalSlug(slug)) {
-      if (user.branchId && !isHqIcFundsBranchId(user.branchId)) redirect(home);
-    }
   }
 
   return user;

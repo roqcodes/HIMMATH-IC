@@ -6,7 +6,6 @@ import { query, runQueryBatch } from '@/lib/db';
 import { ensureDbSchema } from '@/lib/dbSchema';
 import { resolveBranchTimeZone } from '@/lib/businessTime';
 import { normalizeHiddenPages } from '@/lib/branchPages';
-import { sanitizeEnabledCurrencies } from '@/lib/currency';
 import { isBranchScopedUser, isCustomerRole } from '@/lib/rbac';
 import { PRODUCT_NAME } from '@/lib/brand';
 import {
@@ -19,7 +18,6 @@ import {
   mapICWarehouseTransactionRow,
 } from '@/lib/icTransferMappers';
 import { mapICTransferSettingsRow } from '@/lib/icTransfer/settings';
-import { attachPurchaseFxRates } from '@/lib/icTransfer/purchaseFxRatesDb';
 import { filterRateGroupsForCustomerPortal, stripAdminRatesFromSale } from '@/lib/icTransfer/customerPortalScope';
 import { logger } from '@/lib/logger';
 import type { Branch, User } from '@/types';
@@ -28,25 +26,19 @@ import { ensureHqIcFundsBranch } from '@/lib/icFunds/ensureHqBranch';
 const BRANCHES_SELECT = `
   SELECT id, slug, name, logo_url, address, city, country, trn, phone, email, website, location,
          manager_name, cash_balance, gold_balance, current_balance, opening_balance, opening_gold_balance,
-         closing_balance, daily_pl, status, timezone, hidden_pages, enabled_currencies, last_activity, created_at
+         closing_balance, daily_pl, status, timezone, hidden_pages, last_activity, created_at
   FROM branches
   WHERE deleted_at IS NULL`;
 
 const IC_RATE_GROUPS_SELECT = `
   SELECT g.*,
-    COALESCE(cust.customer_ids, ARRAY[]::varchar[]) AS customer_ids,
-    COALESCE(br.branch_ids, ARRAY[]::varchar[]) AS branch_ids
+    COALESCE(cust.customer_ids, ARRAY[]::varchar[]) AS customer_ids
   FROM ic_rate_groups g
   LEFT JOIN (
     SELECT group_id, array_agg(customer_id) AS customer_ids
     FROM ic_rate_group_customers
     GROUP BY group_id
-  ) cust ON cust.group_id = g.id
-  LEFT JOIN (
-    SELECT group_id, array_agg(branch_id) AS branch_ids
-    FROM ic_rate_group_branches
-    GROUP BY group_id
-  ) br ON br.group_id = g.id`;
+  ) cust ON cust.group_id = g.id`;
 
 const IC_SALES_SELECT = `
   SELECT s.*, a.name AS delivery_agent_name
@@ -103,7 +95,6 @@ function mapBranchRow(r: Record<string, unknown>): Branch {
     status: r.status === 'inactive' ? 'inactive' : 'active',
     timezone: resolveBranchTimeZone(r.timezone ? String(r.timezone) : null),
     hiddenPages: normalizeHiddenPages(Array.isArray(r.hidden_pages) ? r.hidden_pages.map(String) : []),
-    enabledCurrencies: sanitizeEnabledCurrencies(r.enabled_currencies),
     lastActivity: r.last_activity ? new Date(String(r.last_activity)).toISOString() : new Date().toISOString(),
     createdAt: r.created_at ? new Date(String(r.created_at)).toISOString() : new Date().toISOString(),
   };
@@ -207,7 +198,7 @@ export async function fetchAsicTransactionalDataAction(
       data: {
         globalBranches: branches,
         branches: finalBranches,
-        icPurchases: await attachPurchaseFxRates(icPurchasesRes.rows.map(r => mapICPurchaseRow(r))),
+        icPurchases: icPurchasesRes.rows.map(r => mapICPurchaseRow(r)),
         icSales,
         icWarehouseTransactions: icWarehouseTxRes.rows.map(r => mapICWarehouseTransactionRow(r)),
       },
@@ -275,7 +266,7 @@ export async function fetchAsicInitialDataAction(
         icWarehouses: icWarehousesRes.rows.map(r => mapICWarehouseRow(r)),
         icRateGroups,
         icTransferSettings: mapICTransferSettingsRow(icTransferSettingsRes.rows[0]),
-        icPurchases: await attachPurchaseFxRates(icPurchasesRes.rows.map(r => mapICPurchaseRow(r))),
+        icPurchases: icPurchasesRes.rows.map(r => mapICPurchaseRow(r)),
         icSales,
         icWarehouseTransactions: icWarehouseTxRes.rows.map(r => mapICWarehouseTransactionRow(r)),
       },

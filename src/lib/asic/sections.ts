@@ -13,22 +13,20 @@ export type AsicSectionId =
   | 'journal'
   | 'pl'
   | 'accounts'
+  | 'entities'
   | 'reports'
   | 'ic-finance'
   | 'rates'
   | 'agents'
-  | 'fx-settlements'
   | 'commission'
   | 'global-settings'
-  | 'branches'
   | 'users'
   | 'audit-log'
   | 'reconciliation'
   | 'delivery-agents'
   | 'settlement'
   | 'backup'
-  | 'account'
-  | 'wallet';
+  | 'account';
 
 export const STAFF_MANAGED_SECTIONS: AsicSectionId[] = [
   'orders',
@@ -41,8 +39,7 @@ export const STAFF_MANAGED_SECTIONS: AsicSectionId[] = [
   'contra',
   'journal',
   'pl',
-  'accounts',
+  'entities',
   'reports',
   'rates',
-  'fx-settlements',
 ];

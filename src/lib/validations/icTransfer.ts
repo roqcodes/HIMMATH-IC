@@ -56,9 +56,10 @@ export const updateWarehouseSchema = addWarehouseSchema.extend({
 export const addRateGroupSchema = z.object({
   name: nameSchema,
   country: countrySchema,
-  currency: currencySchema,
-  saleRate: z.number().nonnegative(),
-  conversionRate: z.number().positive(),
+  saleRate: z.number().nonnegative().optional().default(0),
+  /** Legacy callers — ignored after HQ AED-only refactor. */
+  currency: z.string().optional(),
+  conversionRate: z.number().optional(),
   createdByBranchId: z.string().min(1).optional(),
 });
 

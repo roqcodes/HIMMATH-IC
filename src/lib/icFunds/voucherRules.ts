@@ -5,7 +5,7 @@ import {
 
 export type VoucherPartyRole = 'debit' | 'credit';
 
-const BANK_ONLY: ReadonlySet<ICFundAccountType> = new Set(['bank', 'collection_agent']);
+const BANK_ONLY: ReadonlySet<ICFundAccountType> = new Set(['bank']);
 
 const PAYMENT_DEBIT: ReadonlySet<ICFundAccountType> = new Set([
   'personal',
@@ -22,7 +22,6 @@ const RECEIPT_CREDIT: ReadonlySet<ICFundAccountType> = new Set([
 
 const ANY: ReadonlySet<ICFundAccountType> = new Set([
   'bank',
-  'collection_agent',
   'personal',
   'income',
   'profit',

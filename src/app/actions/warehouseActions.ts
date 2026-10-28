@@ -493,12 +493,9 @@ export async function completeDeliveryWithUnits(
         throw new Error('Delivered units must be between 1 and ' + totalUnits);
       }
 
-      const conversionRate = order.conversion_rate != null ? Number(order.conversion_rate) : 1;
-      const orderCurrency = order.currency || 'AED';
-
       const unitRate = Number(order.unit_rate);
       const serviceCharge = Number(order.service_charge || 0);
-      const deliveredFinancials = scaleSaleFinancials(totalUnits, delivered, unitRate, serviceCharge, conversionRate);
+      const deliveredFinancials = scaleSaleFinancials(totalUnits, delivered, unitRate, serviceCharge);
       const remaining = totalUnits - delivered;
       const isFullDelivery = remaining <= 0.0001;
 
@@ -519,18 +516,16 @@ export async function completeDeliveryWithUnits(
       await client.query(
         `UPDATE ic_sales SET
           units = $1,
-          converted_amount = $2,
-          aed_amount = $3,
-          service_charge = $4,
+          aed_amount = $2,
+          service_charge = $3,
           collected_units = $1,
-          order_status = $5,
-          delivery_image_url = $6,
+          order_status = $4,
+          delivery_image_url = $5,
           status_updated_at = CURRENT_TIMESTAMP,
-          status_updated_by = $7
-         WHERE id = $8`,
+          status_updated_by = $6
+         WHERE id = $7`,
         [
           deliveredFinancials.units,
-          deliveredFinancials.convertedAmount,
           deliveredFinancials.aedAmount,
           deliveredFinancials.serviceCharge,
           finalOrderStatus,
@@ -543,22 +538,22 @@ export async function completeDeliveryWithUnits(
       let remainderSaleId: string | null = null;
       const agentId = order.delivery_agent_id as string | null;
       if (!isFullDelivery) {
-        const remainderFinancials = scaleSaleFinancials(totalUnits, remaining, unitRate, serviceCharge, conversionRate);
+        const remainderFinancials = scaleSaleFinancials(totalUnits, remaining, unitRate, serviceCharge);
         const remainderStatus = agentId ? 'wh_processing' : 'accepted';
         const insertRes = await client.query(
           `INSERT INTO ic_sales (
             customer_name, order_customer_name, order_customer_id,
             sub_customer_id, sub_customer_name,
             entered_by, entered_by_name, entered_by_user_id,
-            warehouse_id, transaction_type, units, unit_rate, converted_amount, aed_amount,
+            warehouse_id, transaction_type, units, unit_rate, aed_amount,
             address, location, district, image_url, service_charge, priority,
             delivery_agent_id, order_status, payment_status, derived_from_sale_id, collected_units,
-            bank, conversion_rate, currency, fulfillment_handler, admin_unit_rate, admin_conversion_rate,
+            bank, fulfillment_handler,
             status_updated_at, status_updated_by
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-            $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25,
-            $26, $27, $28, $29, $30, $31, CURRENT_TIMESTAMP, $32
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+            $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
+            $25, $26, CURRENT_TIMESTAMP, $27
           )
           RETURNING id`,
           [
@@ -574,7 +569,6 @@ export async function completeDeliveryWithUnits(
             order.transaction_type,
             remainderFinancials.units,
             unitRate,
-            remainderFinancials.convertedAmount,
             remainderFinancials.aedAmount,
             order.address,
             order.location || null,
@@ -588,11 +582,7 @@ export async function completeDeliveryWithUnits(
             parsed.orderId,
             0,
             order.bank || null,
-            conversionRate,
-            orderCurrency,
-            order.fulfillment_handler || 'hq_admin',
-            order.admin_unit_rate ?? null,
-            order.admin_conversion_rate ?? null,
+            'hq_admin',
             parsed.updatedBy || 'delivery_agent',
           ],
         );

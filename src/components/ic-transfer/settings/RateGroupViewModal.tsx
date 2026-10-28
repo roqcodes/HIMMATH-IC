@@ -7,7 +7,7 @@ import { asicBtnPrimary } from '@/components/asic/ui';
 import type { ICRateGroup } from '@/types';
 import type { Branch } from '@/types';
 import { formatRateGroupUpdatedAt, isRateGroupUpdatedToday } from '@/lib/icTransfer/rateGroupUtils';
-import { getCurrencyUnitRate, formatAmount } from '@/lib/icTransfer/rateCalculations';
+import { formatAmount } from '@/lib/icTransfer/rateCalculations';
 import RateGroupPricingStructure from './RateGroupPricingStructure';
 
 type CustomerOption = { id: string; name: string };
@@ -19,7 +19,6 @@ type Props = {
   onClose: () => void;
   onEdit: (group: ICRateGroup) => void;
   hideAedRate?: boolean;
-  /** Hide branches section (branch portal). */
   hideBranches?: boolean;
 };
 
@@ -52,21 +51,16 @@ function ChipList({ items, emptyLabel }: { items: string[]; emptyLabel: string }
 
 export default function RateGroupViewModal({
   group,
-  branches,
   customers,
   onClose,
   onEdit,
   hideAedRate = false,
-  hideBranches = false,
 }: Props) {
   if (!group) return null;
 
-  const branchNames = (group.branchIds ?? [])
-    .map(id => branches.find(b => b.id === id)?.name || id);
   const customerNames = (group.customerIds ?? [])
     .map(id => customers.find(c => c.id === id)?.name || id);
   const stale = !isRateGroupUpdatedToday(group.updatedAt);
-  const converted = getCurrencyUnitRate(group.saleRate, group.conversionRate ?? 1);
 
   return (
     <Modal
@@ -87,16 +81,11 @@ export default function RateGroupViewModal({
     >
       <div className="space-y-6">
         <div className="rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-4">
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
             <DetailRow label="Country" value={group.country} />
-            <DetailRow label="Currency" value={group.currency} />
             <DetailRow
-              label={`Base rate (${group.currency})`}
-              value={
-                <span className="tabular-nums font-semibold">
-                  {formatAmount(converted, 4)}
-                </span>
-              }
+              label="Sale rate (AED)"
+              value={<span className="tabular-nums font-semibold">{formatAmount(group.saleRate)}</span>}
             />
             <DetailRow
               label="Last updated"
@@ -112,37 +101,9 @@ export default function RateGroupViewModal({
               }
             />
           </div>
-          {!hideAedRate ? (
-            <div className="mt-4 grid grid-cols-2 gap-4 border-t border-slate-200/80 pt-4 sm:grid-cols-2">
-              <DetailRow
-                label="Sale rate (AED)"
-                value={<span className="tabular-nums">{group.saleRate.toLocaleString()}</span>}
-              />
-              <DetailRow
-                label={`Conversion (AED → ${group.currency})`}
-                value={
-                  <span className="tabular-nums">
-                    {(group.conversionRate ?? 1).toLocaleString()}
-                  </span>
-                }
-              />
-            </div>
-          ) : null}
         </div>
 
-        <RateGroupPricingStructure
-          group={group}
-          convertedRateOnly={hideAedRate}
-        />
-
-        {!hideBranches ? (
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-              Branches
-            </p>
-            <ChipList items={branchNames} emptyLabel="No branches assigned" />
-          </div>
-        ) : null}
+        <RateGroupPricingStructure group={group} convertedRateOnly={hideAedRate} />
 
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">

@@ -1,15 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import Modal from '@/components/ui/Modal';
 import PasswordInput from '@/components/ui/PasswordInput';
-import SearchableSelect from '@/components/ui/SearchableSelect';
 import AsicFormField from '@/components/asic/AsicFormField';
 import { asicBtnOutline, asicBtnPrimary, asicFormGrid, asicInput } from '@/components/asic/ui';
 import { btnPrimary, btnSecondary } from '@/lib/ui';
 import { saveCustomer, resetCustomerPasswordAction } from '@/app/actions/customerActions';
 import { PasswordRequirements, ResetPasswordModal } from '@/components/users/UserModals';
 import { validatePassword } from '@/lib/passwordValidation';
-import { WORLD_CURRENCIES } from '@/lib/worldCurrencies';
-
 interface CustomerModalProps {
   slug: string;
   open: boolean;
@@ -21,7 +18,6 @@ interface CustomerModalProps {
     balance?: string | number;
     status?: string;
     cognitoUserId?: string | null;
-    currency?: string;
   } | null;
   onClose: () => void;
   onSave: () => void;
@@ -35,7 +31,6 @@ export default function CustomerModal({ slug, open, customer, onClose, onSave }:
     password: '',
     balance: '0',
     status: 'active',
-    currency: 'AED',
   });
   const [isSaving, setIsSaving] = useState(false);
   const [showResetPassword, setShowResetPassword] = useState(false);
@@ -50,7 +45,6 @@ export default function CustomerModal({ slug, open, customer, onClose, onSave }:
         password: '',
         balance: String(customer.balance ?? '0'),
         status: customer.status || 'active',
-        currency: (customer as Record<string, unknown>).currency as string || 'AED',
       });
     } else {
       setFormData({
@@ -60,7 +54,6 @@ export default function CustomerModal({ slug, open, customer, onClose, onSave }:
         password: '',
         balance: '0',
         status: 'active',
-        currency: 'AED',
       });
     }
   }, [customer, open]);
@@ -69,8 +62,6 @@ export default function CustomerModal({ slug, open, customer, onClose, onSave }:
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
-
-  const currencyOptions = WORLD_CURRENCIES.map(c => ({ value: c.code, label: `${c.code} - ${c.name}` }));
 
   const handleSave = async () => {
     if (!formData.name.trim()) {
@@ -94,7 +85,6 @@ export default function CustomerModal({ slug, open, customer, onClose, onSave }:
       password: isNew ? formData.password : undefined,
       balance: formData.balance,
       status: formData.status,
-      currency: formData.currency,
     });
     setIsSaving(false);
 
@@ -216,15 +206,6 @@ export default function CustomerModal({ slug, open, customer, onClose, onSave }:
             onChange={handleChange}
             className={asicInput}
             placeholder="0.00"
-          />
-        </AsicFormField>
-
-        <AsicFormField label="Default currency" colSpan={4} hint="Base currency for this customer.">
-          <SearchableSelect
-            options={currencyOptions}
-            value={formData.currency}
-            onChange={value => setFormData(prev => ({ ...prev, currency: value }))}
-            placeholder="Select currency..."
           />
         </AsicFormField>
 

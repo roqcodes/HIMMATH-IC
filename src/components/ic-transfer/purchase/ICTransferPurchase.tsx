@@ -131,12 +131,7 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
   return (
     <PageShell>
       <PageHeader
-        title="Purchase"
-        subtitle={
-          isBranchScoped
-            ? 'Record stock purchases into your branch warehouses'
-            : 'Track purchase orders across suppliers'
-        }
+        title="Purchases"
         actions={<AddButton label="Add Purchase" onClick={() => setModalOpen(true)} />}
       />
 

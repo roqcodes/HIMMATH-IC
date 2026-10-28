@@ -2,6 +2,15 @@ import type { User, UserRole } from '@/types';
 import type { AsicPortal } from '@/lib/asic/routing';
 import { RESERVED_BRANCH_SLUGS } from '@/lib/asic/routing';
 import { canReadSection, type AsicSectionId } from '@/lib/asic/pages';
+import { sectionLabel } from '@/lib/staffSectionPermissions';
+import {
+  IC_FUNDS_REPORTS,
+  icFundsReportPath,
+  isICFundsReportId,
+  type ICFundsReportId,
+} from '@/lib/icFunds/nav';
+
+const L = (id: AsicSectionId) => sectionLabel(id);
 
 export type AsicNavGroupId = 'operations' | 'master' | 'finance' | 'settings' | 'management';
 
@@ -11,48 +20,75 @@ export type AsicNavItem = {
   group: AsicNavGroupId;
 };
 
-export type AsicAdminTopMenuGroup = {
-  id: string;
-  items: { id: AsicSectionId; label: string }[];
-};
+export type AsicAdminNavLink = { id: AsicSectionId; label: string };
 
-/** Admin top menu — grouped sections separated by dividers in the toolbar. */
-export const ADMIN_TOP_MENU_GROUPS: AsicAdminTopMenuGroup[] = [
+export type AsicAdminReportNavLink = { reportView: ICFundsReportId; label: string };
+
+export type AsicAdminSidebarGroupItem = AsicAdminNavLink | AsicAdminReportNavLink;
+
+export type AsicAdminSidebarEntry =
+  | { type: 'link'; id: AsicSectionId; label: string }
+  | { type: 'group'; id: string; label: string; items: AsicAdminSidebarGroupItem[] };
+
+export function isAdminReportNavLink(item: AsicAdminSidebarGroupItem): item is AsicAdminReportNavLink {
+  return 'reportView' in item;
+}
+
+export function adminSidebarGroupItemId(item: AsicAdminSidebarGroupItem): string {
+  return isAdminReportNavLink(item) ? `reports:${item.reportView}` : item.id;
+}
+
+export function adminSidebarGroupItemHref(
+  item: AsicAdminSidebarGroupItem,
+  slug?: string,
+): string {
+  if (isAdminReportNavLink(item)) return icFundsReportPath('', item.reportView, 'admin');
+  return sectionHref('admin', item.id, slug);
+}
+
+export function adminMobileNavActiveId(section: AsicSectionId, reportView: string | null): string {
+  if (section === 'reports') {
+    const view = isICFundsReportId(reportView) ? reportView : 'all-vouchers';
+    return `reports:${view}`;
+  }
+  return section;
+}
+
+export type AsicAdminMobileNavItem = { id: string; label: string; href: string };
+
+/** Admin sidebar — primary navigation (replaces former top toolbar menu). */
+export const ADMIN_SIDEBAR_NAV: AsicAdminSidebarEntry[] = [
+  { type: 'link', id: 'dashboard', label: L('dashboard') },
+  { type: 'link', id: 'warehouse', label: L('warehouse') },
+  { type: 'link', id: 'purchases', label: L('purchases') },
+  { type: 'link', id: 'sales', label: L('sales') },
+  { type: 'link', id: 'rates', label: L('rates') },
   {
-    id: 'operations',
+    type: 'group',
+    id: 'accounting',
+    label: 'Accounting',
     items: [
-      { id: 'dashboard', label: 'Dashboard' },
-      { id: 'purchases', label: 'Purchase' },
-      { id: 'sales', label: 'Sales' },
-      { id: 'warehouse', label: 'Warehouse' },
-      { id: 'suppliers', label: 'Suppliers' },
+      { id: 'entities', label: L('entities') },
+      { id: 'payments', label: L('payments') },
+      { id: 'receipts', label: L('receipts') },
+      { id: 'contra', label: L('contra') },
+      { id: 'journal', label: L('journal') },
     ],
   },
   {
-    id: 'finance',
-    items: [
-      { id: 'payments', label: 'Payments' },
-      { id: 'receipts', label: 'Receipts' },
-      { id: 'contra', label: 'Contra' },
-      { id: 'journal', label: 'Journal' },
-      { id: 'pl', label: 'P&L' },
-      { id: 'rates', label: 'Rates' },
-      { id: 'fx-settlements', label: 'FX' },
-    ],
+    type: 'group',
+    id: 'reports',
+    label: L('reports'),
+    items: IC_FUNDS_REPORTS.map(r => ({ reportView: r.id, label: r.label })),
   },
   {
-    id: 'administration',
+    type: 'group',
+    id: 'settings',
+    label: 'Settings',
     items: [
-      { id: 'branches', label: 'Branches' },
-      { id: 'accounts', label: 'Accounts' },
-      { id: 'users', label: 'Users' },
-    ],
-  },
-  {
-    id: 'reporting',
-    items: [
-      { id: 'reports', label: 'Reports' },
-      { id: 'backup', label: 'Backup' },
+      { id: 'suppliers', label: L('suppliers') },
+      { id: 'users', label: L('users') },
+      { id: 'backup', label: L('backup') },
     ],
   },
 ];
@@ -67,90 +103,65 @@ export const ASIC_NAV_GROUPS: { id: AsicNavGroupId; label: string }[] = [
 
 /** All admin sections (including hidden-from-menu routes). */
 export const ADMIN_NAV: readonly AsicNavItem[] = [
-  { id: 'dashboard', label: 'Dashboard', group: 'operations' },
-  { id: 'sales', label: 'Sales', group: 'operations' },
-  { id: 'purchases', label: 'Purchase', group: 'operations' },
-  { id: 'warehouse', label: 'Warehouse', group: 'operations' },
-  { id: 'payments', label: 'Payments', group: 'finance' },
-  { id: 'receipts', label: 'Receipts', group: 'finance' },
-  { id: 'contra', label: 'Contra', group: 'finance' },
-  { id: 'journal', label: 'Journal', group: 'finance' },
-  { id: 'pl', label: 'P&L', group: 'finance' },
-  { id: 'reports', label: 'Reports', group: 'finance' },
-  { id: 'ic-finance', label: 'IC Finance', group: 'finance' },
-  { id: 'rates', label: 'Rates', group: 'settings' },
-  { id: 'global-settings', label: 'Global', group: 'settings' },
-  { id: 'branches', label: 'Branches', group: 'management' },
-  { id: 'accounts', label: 'Accounts', group: 'management' },
-  { id: 'users', label: 'Users', group: 'management' },
-  { id: 'audit-log', label: 'Audit log', group: 'management' },
-  { id: 'reconciliation', label: 'Reconcile', group: 'management' },
-  { id: 'backup', label: 'Backup', group: 'management' },
-  { id: 'account', label: 'Account', group: 'management' },
+  { id: 'dashboard', label: L('dashboard'), group: 'operations' },
+  { id: 'sales', label: L('sales'), group: 'operations' },
+  { id: 'purchases', label: L('purchases'), group: 'operations' },
+  { id: 'warehouse', label: L('warehouse'), group: 'operations' },
+  { id: 'payments', label: L('payments'), group: 'finance' },
+  { id: 'receipts', label: L('receipts'), group: 'finance' },
+  { id: 'contra', label: L('contra'), group: 'finance' },
+  { id: 'journal', label: L('journal'), group: 'finance' },
+  { id: 'pl', label: L('pl'), group: 'finance' },
+  { id: 'entities', label: L('entities'), group: 'finance' },
+  { id: 'accounts', label: L('accounts'), group: 'finance' },
+  { id: 'reports', label: L('reports'), group: 'finance' },
+  { id: 'ic-finance', label: L('ic-finance'), group: 'finance' },
+  { id: 'rates', label: L('rates'), group: 'settings' },
+  { id: 'global-settings', label: L('global-settings'), group: 'settings' },
+  { id: 'users', label: L('users'), group: 'management' },
+  { id: 'audit-log', label: L('audit-log'), group: 'management' },
+  { id: 'reconciliation', label: L('reconciliation'), group: 'management' },
+  { id: 'backup', label: L('backup'), group: 'management' },
+  { id: 'account', label: L('account'), group: 'management' },
   // Hidden from menu — routes remain valid for bookmarks / legacy URLs
-  { id: 'customers', label: 'Customers', group: 'master' },
-  { id: 'regions', label: 'Regions', group: 'master' },
-  { id: 'suppliers', label: 'Suppliers', group: 'master' },
-  { id: 'fx-settlements', label: 'FX', group: 'finance' },
-  { id: 'agents', label: 'Agents', group: 'settings' },
-  { id: 'commission', label: 'Commission', group: 'settings' },
+  { id: 'customers', label: L('customers'), group: 'master' },
+  { id: 'regions', label: L('regions'), group: 'master' },
+  { id: 'suppliers', label: L('suppliers'), group: 'master' },
+  { id: 'agents', label: L('agents'), group: 'settings' },
+  { id: 'commission', label: L('commission'), group: 'settings' },
 ];
 
-export const BRANCH_NAV: readonly AsicNavItem[] = [
-  { id: 'orders', label: 'Orders', group: 'operations' },
-  { id: 'sales', label: 'Sales', group: 'operations' },
-  { id: 'purchases', label: 'Purchase', group: 'operations' },
-  { id: 'warehouse', label: 'Warehouse', group: 'operations' },
-  { id: 'payments', label: 'Payments', group: 'finance' },
-  { id: 'receipts', label: 'Receipts', group: 'finance' },
-  { id: 'contra', label: 'Contra', group: 'finance' },
-  { id: 'journal', label: 'Journal', group: 'finance' },
-  { id: 'pl', label: 'P&L', group: 'finance' },
-  { id: 'accounts', label: 'Accounts', group: 'finance' },
-  { id: 'reports', label: 'Reports', group: 'finance' },
-  { id: 'fx-settlements', label: 'FX', group: 'finance' },
-  { id: 'rates', label: 'Rates', group: 'settings' },
-  { id: 'users', label: 'Staff', group: 'settings' },
-  { id: 'account', label: 'Account', group: 'settings' },
-  // Hidden from menu — /customers redirects to accounts
-  { id: 'customers', label: 'Customers', group: 'master' },
-];
+export const BRANCH_NAV: readonly AsicNavItem[] = [];
 
 export const WAREHOUSE_NAV: readonly AsicNavItem[] = [
-  { id: 'orders', label: 'Orders', group: 'operations' },
-  { id: 'delivery-agents', label: 'Delivery', group: 'operations' },
-  { id: 'account', label: 'Account', group: 'settings' },
+  { id: 'orders', label: L('orders'), group: 'operations' },
+  { id: 'delivery-agents', label: L('delivery-agents'), group: 'operations' },
+  { id: 'account', label: L('account'), group: 'settings' },
 ];
 
 export const DELIVERY_NAV: readonly AsicNavItem[] = [
-  { id: 'settlement', label: 'Settlement', group: 'operations' },
-  { id: 'account', label: 'Account', group: 'settings' },
+  { id: 'settlement', label: L('settlement'), group: 'operations' },
+  { id: 'account', label: L('account'), group: 'settings' },
 ];
 
 export const CUSTOMER_NAV: readonly AsicNavItem[] = [
-  { id: 'orders', label: 'Orders', group: 'operations' },
-  { id: 'wallet', label: 'Wallet', group: 'operations' },
+  { id: 'orders', label: L('orders'), group: 'operations' },
 ];
 
-export const COLLECTION_NAV: readonly AsicNavItem[] = [
-  { id: 'fx-settlements', label: 'Remittance', group: 'operations' },
-  { id: 'account', label: 'Account', group: 'settings' },
-];
+export const COLLECTION_NAV: readonly AsicNavItem[] = [];
 
 export function navForPortal(portal: AsicPortal): readonly AsicNavItem[] {
   switch (portal) {
     case 'admin':
-      return ADMIN_NAV;
     case 'branch':
-      return BRANCH_NAV;
+    case 'collection':
+      return ADMIN_NAV;
     case 'warehouse':
       return WAREHOUSE_NAV;
     case 'delivery':
       return DELIVERY_NAV;
     case 'customer':
       return CUSTOMER_NAV;
-    case 'collection':
-      return COLLECTION_NAV;
   }
 }
 
@@ -164,19 +175,87 @@ export function getVisibleNav(
   user: Pick<User, 'role' | 'permissions'> | null,
 ): AsicNavItem[] {
   return navForPortal(portal).filter(
-    item => item.id !== 'customers' && item.id !== 'account' && canReadSection(user, item.id, portal),
+    item =>
+      item.id !== 'customers' &&
+      item.id !== 'accounts' &&
+      item.id !== 'account' &&
+      canReadSection(user, item.id, portal),
   );
 }
 
-export function getVisibleAdminTopMenu(
+function canShowAdminNavSection(
   user: Pick<User, 'role' | 'permissions'> | null,
-): AsicAdminTopMenuGroup[] {
-  return ADMIN_TOP_MENU_GROUPS.map(group => ({
-    ...group,
-    items: group.items.filter(
-      item => item.id !== 'customers' && item.id !== 'account' && canReadSection(user, item.id, 'admin'),
-    ),
-  })).filter(group => group.items.length > 0);
+  sectionId: AsicSectionId,
+): boolean {
+  return (
+    sectionId !== 'customers' &&
+    sectionId !== 'account' &&
+    canReadSection(user, sectionId, 'admin')
+  );
+}
+
+export function getVisibleAdminSidebarNav(
+  user: Pick<User, 'role' | 'permissions'> | null,
+): AsicAdminSidebarEntry[] {
+  const visible: AsicAdminSidebarEntry[] = [];
+
+  for (const entry of ADMIN_SIDEBAR_NAV) {
+    if (entry.type === 'link') {
+      if (canShowAdminNavSection(user, entry.id)) visible.push(entry);
+      continue;
+    }
+
+    if (entry.id === 'reports') {
+      if (canShowAdminNavSection(user, 'reports')) visible.push(entry);
+      continue;
+    }
+
+    const items = entry.items.filter(
+      item => !isAdminReportNavLink(item) && canShowAdminNavSection(user, item.id),
+    );
+    if (items.length > 0) visible.push({ ...entry, items });
+  }
+
+  return visible;
+}
+
+/** Flat groups for mobile drawer navigation. */
+export function getVisibleAdminMobileNavGroups(
+  user: Pick<User, 'role' | 'permissions'> | null,
+  slug?: string,
+): { id: string; label?: string; items: AsicAdminMobileNavItem[] }[] {
+  const groups: { id: string; label?: string; items: AsicAdminMobileNavItem[] }[] = [];
+  let flat: AsicAdminMobileNavItem[] = [];
+
+  const flushFlat = () => {
+    if (flat.length === 0) return;
+    groups.push({ id: `flat-${groups.length}`, items: flat });
+    flat = [];
+  };
+
+  for (const entry of getVisibleAdminSidebarNav(user)) {
+    if (entry.type === 'link') {
+      flat.push({
+        id: entry.id,
+        label: entry.label,
+        href: sectionHref('admin', entry.id, slug),
+      });
+      continue;
+    }
+    flushFlat();
+    groups.push({
+      id: entry.id,
+      label: entry.label,
+      items: entry.items.map(item => ({
+        id: adminSidebarGroupItemId(item),
+        label: item.label,
+        href: adminSidebarGroupItemHref(item, slug),
+      })),
+    });
+  }
+  flushFlat();
+
+  return groups;
 }
 
 export function groupNav(items: AsicNavItem[]): { group: AsicNavGroupId; label: string; items: AsicNavItem[] }[] {
@@ -197,16 +276,14 @@ export function defaultSection(portal: AsicPortal): AsicSectionId {
   switch (portal) {
     case 'admin':
       return 'dashboard';
-    case 'branch':
-      return 'orders';
     case 'warehouse':
       return 'orders';
     case 'delivery':
       return 'settlement';
     case 'customer':
       return 'orders';
-    case 'collection':
-      return 'fx-settlements';
+    default:
+      return 'dashboard';
   }
 }
 
@@ -223,10 +300,8 @@ export function isAsicSection(value: string): value is AsicSectionId {
 }
 
 export function portalLabel(portal: AsicPortal, role?: UserRole | string): string {
-  if (portal === 'admin') return role === 'auditor' ? 'Auditor' : 'Admin';
-  if (portal === 'branch') return 'Branch';
-  if (portal === 'warehouse') return 'Warehouse';
-  if (portal === 'delivery') return 'Delivery';
-  if (portal === 'collection') return 'Collection';
-  return 'Customer';
+  if (portal === 'admin') return role === 'auditor' ? 'Auditor Portal' : 'Administration';
+  if (portal === 'warehouse') return 'Warehouse Operations';
+  if (portal === 'delivery') return 'Delivery Operations';
+  return 'Customer Portal';
 }

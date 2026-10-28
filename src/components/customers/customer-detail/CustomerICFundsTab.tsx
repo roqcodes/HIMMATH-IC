@@ -12,10 +12,8 @@ import {
   buildCustomerStatementCsv,
   buildCustomerStatementView,
   downloadCustomerStatementCsv,
-  formatStatementAmount,
   printCustomerStatementPdf,
   statementCsvFilename,
-  type CustomerStatementCurrencyMode,
 } from '@/lib/icFunds/customerStatementView';
 import { IC_FUNDS_BASE_CURRENCY } from '@/lib/icFunds/currencyPolicy';
 import { fmtICAmount, fmtICDate } from '@/lib/icFunds/format';
@@ -35,22 +33,12 @@ interface Props {
   branchName?: string;
 }
 
-function AmountCell({
-  n,
-  currency,
-  danger,
-}: {
-  n: number;
-  currency: string;
-  danger?: boolean;
-}) {
-  const formatted =
-    currency === IC_FUNDS_BASE_CURRENCY ? fmtICAmount(n) : formatStatementAmount(n, currency);
+function AmountCell({ n, danger }: { n: number; danger?: boolean }) {
   return (
     <td
       className={`${asicTd} text-right font-mono tabular-nums ${danger || n < 0 ? 'text-red-600 dark:text-red-400' : ''}`}
     >
-      {n === 0 ? '—' : formatted}
+      {n === 0 ? '—' : fmtICAmount(n)}
     </td>
   );
 }
@@ -81,46 +69,6 @@ function SummaryMetric({
   );
 }
 
-function CurrencySegment({
-  active,
-  onChange,
-  customerCurrency,
-  canShowCustomerCurrency,
-}: {
-  active: CustomerStatementCurrencyMode;
-  onChange: (mode: CustomerStatementCurrencyMode) => void;
-  customerCurrency: string;
-  canShowCustomerCurrency: boolean;
-}) {
-  const segmentClass = (selected: boolean) =>
-    `rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
-      selected
-        ? 'bg-slate-900 text-white shadow-sm dark:bg-[var(--theme-surface-raised)]'
-        : 'text-slate-600 hover:text-slate-900 dark:text-[var(--theme-text-secondary)] dark:hover:text-[var(--theme-text)]'
-    }`;
-
-  return (
-    <div
-      className="inline-flex items-center gap-0.5 rounded-lg border border-[var(--theme-border-field)] bg-white p-0.5 dark:border-[var(--theme-border)] dark:bg-[var(--theme-surface)]"
-      role="group"
-      aria-label="Statement currency"
-    >
-      <button type="button" className={segmentClass(active === 'aed')} onClick={() => onChange('aed')}>
-        AED
-      </button>
-      {canShowCustomerCurrency ? (
-        <button
-          type="button"
-          className={segmentClass(active === 'customer')}
-          onClick={() => onChange('customer')}
-        >
-          {customerCurrency}
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
 export default function CustomerICFundsTab({
   slug,
   branchId,
@@ -133,16 +81,10 @@ export default function CustomerICFundsTab({
     opening: number;
     lines: ICFundStatementLine[];
     closing: number;
-    defaultFxRate: number;
-    customerCurrency: string;
   } | null>(null);
   const [loading, setLoading] = useState(!icFundAccountProp);
   const [error, setError] = useState<string | null>(null);
-  const [currencyMode, setCurrencyMode] = useState<CustomerStatementCurrencyMode>('aed');
   const { showToast } = useApp();
-
-  const customerCurrency = (customer.currency || IC_FUNDS_BASE_CURRENCY).toUpperCase();
-  const canShowCustomerCurrency = customerCurrency !== IC_FUNDS_BASE_CURRENCY;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -162,7 +104,6 @@ export default function CustomerICFundsTab({
       branchId,
       accountId: fundAccount.id,
       customerId: customer.id,
-      customerCurrency: customer.currency,
     });
     if (!result.success) {
       setError(result.error);
@@ -174,11 +115,9 @@ export default function CustomerICFundsTab({
       opening: result.data.opening,
       lines: result.data.lines,
       closing: result.data.closing,
-      defaultFxRate: result.data.defaultFxRate,
-      customerCurrency: result.data.customerCurrency,
     });
     setLoading(false);
-  }, [branchId, customer.id, customer.currency, icFundAccountProp]);
+  }, [branchId, customer.id, icFundAccountProp]);
 
   useEffect(() => {
     void load();
@@ -190,29 +129,26 @@ export default function CustomerICFundsTab({
 
   const statementView = useMemo(() => {
     if (!statement) return null;
-    const mode = canShowCustomerCurrency && currencyMode === 'customer' ? 'customer' : 'aed';
     return buildCustomerStatementView(statement.lines, {
-      customerCurrency: statement.customerCurrency,
-      mode,
-      defaultFxRate: statement.defaultFxRate,
+      customerCurrency: IC_FUNDS_BASE_CURRENCY,
+      mode: 'aed',
+      defaultFxRate: 1,
       openingAed: statement.opening,
       closingAed: statement.closing,
     });
-  }, [statement, currencyMode, canShowCustomerCurrency]);
+  }, [statement]);
 
   const exportView = useMemo(() => {
     if (!statement) return null;
-    const exportMode: CustomerStatementCurrencyMode =
-      canShowCustomerCurrency ? 'customer' : 'aed';
     return buildCustomerStatementView(statement.lines, {
-      customerCurrency: statement.customerCurrency,
-      mode: exportMode,
-      defaultFxRate: statement.defaultFxRate,
+      customerCurrency: IC_FUNDS_BASE_CURRENCY,
+      mode: 'aed',
+      defaultFxRate: 1,
       openingAed: statement.opening,
       closingAed: statement.closing,
       forCustomerExport: true,
     });
-  }, [statement, canShowCustomerCurrency]);
+  }, [statement]);
 
   const handleExportCsv = () => {
     if (!exportView) return;
@@ -240,7 +176,6 @@ export default function CustomerICFundsTab({
     );
   }
 
-  const displayCurrency = statementView?.currency ?? IC_FUNDS_BASE_CURRENCY;
   const lines = statementView?.lines ?? [];
   const totalDr = lines.reduce((s, l) => s + (l.status === 'pending' ? 0 : l.debit), 0);
   const totalCr = lines.reduce((s, l) => s + (l.status === 'pending' ? 0 : l.credit), 0);
@@ -256,11 +191,7 @@ export default function CustomerICFundsTab({
       ? `${fmtICAmount(account.pendingBalance)} pending`
       : ledgerHint;
   const statementClosing =
-    statementView != null
-      ? displayCurrency === IC_FUNDS_BASE_CURRENCY
-        ? fmtICAmount(statementView.closing)
-        : formatStatementAmount(statementView.closing, displayCurrency)
-      : '—';
+    statementView != null ? fmtICAmount(statementView.closing) : '—';
 
   return (
     <div className="space-y-3">
@@ -273,9 +204,9 @@ export default function CustomerICFundsTab({
           />
           <SummaryMetric label="Opening" value={fmtICAmount(account.openingBalance)} />
           <SummaryMetric
-            label={`Statement (${displayCurrency})`}
+            label="Statement"
             value={statementClosing}
-            hint={currencyMode === 'customer' ? 'Sale-time rates' : 'Company ledger'}
+            hint="Company ledger"
           />
           <SummaryMetric
             label="Account"
@@ -284,24 +215,7 @@ export default function CustomerICFundsTab({
           />
         </div>
 
-        <div className="flex flex-col gap-2 border-t border-[var(--theme-border-subtle)] bg-[var(--theme-surface-raised)] px-3 py-2.5 dark:bg-[var(--theme-surface-muted)] sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="text-[11px] font-medium text-slate-500 dark:text-[var(--theme-text-secondary)]">
-              View as
-            </span>
-            <CurrencySegment
-              active={currencyMode}
-              onChange={setCurrencyMode}
-              customerCurrency={customerCurrency}
-              canShowCustomerCurrency={canShowCustomerCurrency}
-            />
-            {currencyMode === 'customer' ? (
-              <span className="hidden text-[11px] text-slate-400 dark:text-[var(--theme-text-muted)] lg:inline">
-                Foreign amounts from each sale
-              </span>
-            ) : null}
-          </div>
-
+        <div className="flex flex-col gap-2 border-t border-[var(--theme-border-subtle)] bg-[var(--theme-surface-raised)] px-3 py-2.5 dark:bg-[var(--theme-surface-muted)] sm:flex-row sm:items-center sm:justify-end">
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
@@ -347,10 +261,10 @@ export default function CustomerICFundsTab({
                 <th className={asicTh}>#</th>
                 <th className={asicTh}>Type</th>
                 <th className={asicTh}>Particulars</th>
-                <th className={`${asicTh} text-right`}>Debit ({displayCurrency})</th>
-                <th className={`${asicTh} text-right`}>Credit ({displayCurrency})</th>
-                <th className={`${asicTh} text-right`}>Balance ({displayCurrency})</th>
-                {currencyMode === 'aed' ? <th className={asicTh}>User</th> : null}
+                <th className={`${asicTh} text-right`}>Debit</th>
+                <th className={`${asicTh} text-right`}>Credit</th>
+                <th className={`${asicTh} text-right`}>Balance</th>
+                <th className={asicTh}>User</th>
                 <th className={asicTh}>Remark</th>
               </tr>
             </thead>
@@ -380,23 +294,19 @@ export default function CustomerICFundsTab({
                   <td className={`${asicTd} font-medium`}>
                     <StatementParticularsCell slug={slug} line={line} />
                   </td>
-                  <AmountCell n={line.debit} currency={displayCurrency} />
-                  <AmountCell n={line.credit} currency={displayCurrency} danger />
+                  <AmountCell n={line.debit} />
+                  <AmountCell n={line.credit} danger />
                   <td className={`${asicTd} text-right font-mono tabular-nums`}>
-                    {displayCurrency === IC_FUNDS_BASE_CURRENCY
-                      ? fmtICAmount(line.balance)
-                      : formatStatementAmount(line.balance, displayCurrency)}
+                    {fmtICAmount(line.balance)}
                   </td>
-                  {currencyMode === 'aed' ? (
-                    <td className={asicTd}>
-                      <VoucherUserCell
-                        voucher={{
-                          createdByName: line.userName,
-                          createdAt: line.userAt ?? '',
-                        }}
-                      />
-                    </td>
-                  ) : null}
+                  <td className={asicTd}>
+                    <VoucherUserCell
+                      voucher={{
+                        createdByName: line.userName,
+                        createdAt: line.userAt ?? '',
+                      }}
+                    />
+                  </td>
                   <td className={`${asicTd} max-w-[12rem] truncate text-slate-500`}>
                     {line.notes || '—'}
                   </td>
@@ -407,23 +317,15 @@ export default function CustomerICFundsTab({
               <tr className="border-t border-[var(--theme-border)] bg-slate-50/80 font-medium dark:bg-[var(--theme-surface-muted)]">
                 <td className={asicTd} colSpan={4}>Totals</td>
                 <td className={`${asicTd} text-right font-mono tabular-nums`}>
-                  {displayCurrency === IC_FUNDS_BASE_CURRENCY
-                    ? fmtICAmount(totalDr)
-                    : formatStatementAmount(totalDr, displayCurrency)}
+                  {fmtICAmount(totalDr)}
                 </td>
                 <td className={`${asicTd} text-right font-mono tabular-nums text-red-600 dark:text-red-400`}>
-                  {displayCurrency === IC_FUNDS_BASE_CURRENCY
-                    ? fmtICAmount(totalCr)
-                    : formatStatementAmount(totalCr, displayCurrency)}
+                  {fmtICAmount(totalCr)}
                 </td>
                 <td className={`${asicTd} text-right font-mono tabular-nums`}>
-                  {statementView
-                    ? displayCurrency === IC_FUNDS_BASE_CURRENCY
-                      ? fmtICAmount(statementView.closing)
-                      : formatStatementAmount(statementView.closing, displayCurrency)
-                    : '—'}
+                  {statementView ? fmtICAmount(statementView.closing) : '—'}
                 </td>
-                <td className={asicTd} colSpan={currencyMode === 'aed' ? 2 : 1} />
+                <td className={asicTd} colSpan={2} />
               </tr>
             </tfoot>
           </table>

@@ -34,7 +34,7 @@ export default function StaffAccountSettings({ branchSlug }: Props) {
 
   return (
     <>
-      <AsicPageHeader title="My account" subtitle="Profile and security settings" />
+      <AsicPageHeader title="User Profile" />
       <div className={asicCard}>
         <div className="p-4">
           <div className={asicFormGrid}>

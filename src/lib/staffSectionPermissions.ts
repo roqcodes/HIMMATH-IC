@@ -5,36 +5,34 @@ import type { PageAccessLevel, PagePermissionMap } from '@/types';
 
 /** ASIC section labels for branch staff permission UI. */
 export const STAFF_SECTION_LABELS: Record<AsicSectionId, string> = {
-  orders: 'Orders',
+  orders: 'Sales Orders',
   sales: 'Sales',
-  purchases: 'Purchase',
-  warehouse: 'Warehouse',
+  purchases: 'Purchases',
+  warehouse: 'Warehouses',
   suppliers: 'Suppliers',
   payments: 'Payments',
   receipts: 'Receipts',
   contra: 'Contra',
   journal: 'Journal',
-  pl: 'P&L',
-  accounts: 'Accounts',
-  reports: 'Reports',
+  pl: 'Profit & Loss',
+  accounts: 'Entities',
+  entities: 'Entities',
+  reports: 'Financial Reports',
   rates: 'Rates',
   dashboard: 'Dashboard',
   customers: 'Customers',
   regions: 'Regions',
-  'ic-finance': 'IC Finance',
-  agents: 'Agents',
-  commission: 'Commission',
-  'global-settings': 'Global settings',
-  branches: 'Branches',
+  'ic-finance': 'Intercompany Finance',
+  agents: 'Sales Agents',
+  commission: 'Commission Rates',
+  'global-settings': 'Company Settings',
   users: 'Users',
-  'audit-log': 'Audit log',
-  reconciliation: 'Reconcile',
-  'delivery-agents': 'Delivery agents',
-  'fx-settlements': 'FX',
-  settlement: 'Settlement',
-  backup: 'Backup',
-  account: 'My account',
-  wallet: 'Wallet',
+  'audit-log': 'Audit Trail',
+  reconciliation: 'Reconciliation',
+  'delivery-agents': 'Delivery Agents',
+  settlement: 'Order Settlement',
+  backup: 'Backup & Restore',
+  account: 'User Profile',
 };
 
 /** Branch staff sections shown in the access editor (matches ASIC branch portal). */
@@ -52,7 +50,7 @@ export const ADMIN_STAFF_PERMISSION_SECTIONS: AsicSectionId[] = [
   'contra',
   'journal',
   'pl',
-  'accounts',
+  'entities',
   'reports',
   'rates',
   'ic-finance',
@@ -62,11 +60,9 @@ export const ADMIN_STAFF_PERMISSION_SECTIONS: AsicSectionId[] = [
   'commission',
   'reconciliation',
   'audit-log',
-  'branches',
   'users',
   'backup',
   'global-settings',
-  'fx-settlements',
 ];
 
 export type StaffPermissionPortal = 'admin' | 'branch';
@@ -94,12 +90,12 @@ const ADMIN_STAFF_PERMISSION_GROUPS: StaffPermissionGroup[] = [
   {
     id: 'finance',
     label: 'Finance & funds',
-    sections: ['payments', 'receipts', 'contra', 'journal', 'pl', 'accounts', 'ic-finance', 'fx-settlements'],
+    sections: ['payments', 'receipts', 'contra', 'journal', 'pl', 'entities', 'ic-finance'],
   },
   {
     id: 'master',
     label: 'Master data',
-    sections: ['regions', 'suppliers', 'agents', 'commission', 'rates', 'branches'],
+    sections: ['regions', 'suppliers', 'agents', 'commission', 'rates'],
   },
   { id: 'administration', label: 'Administration', sections: ['users', 'global-settings', 'backup'] },
   { id: 'reports', label: 'Reports & audit', sections: ['reports', 'reconciliation', 'audit-log'] },
@@ -111,7 +107,7 @@ const BRANCH_STAFF_PERMISSION_GROUPS: StaffPermissionGroup[] = [
   {
     id: 'finance',
     label: 'Finance & funds',
-    sections: ['payments', 'receipts', 'contra', 'journal', 'pl', 'accounts', 'reports', 'fx-settlements'],
+    sections: ['payments', 'receipts', 'contra', 'journal', 'pl', 'entities', 'reports'],
   },
   { id: 'settings', label: 'Settings', sections: ['rates'] },
 ];
@@ -132,9 +128,9 @@ const SECTION_TO_LEGACY_KEYS: Partial<Record<AsicSectionId, BranchPageId[]>> = {
   journal: ['ic-funds'],
   pl: ['ic-funds'],
   accounts: ['ic-funds'],
+  entities: ['ic-funds'],
   reports: ['ic-funds'],
   rates: ['settings'],
-  'fx-settlements': ['ic-funds'],
 };
 
 const LEGACY_TO_SECTION: Partial<Record<BranchPageId, AsicSectionId>> = {
@@ -154,6 +150,17 @@ export function readSectionAccess(
   permissions: PagePermissionMap | undefined,
   section: AsicSectionId,
 ): PageAccessLevel {
+  if (section === 'entities' || section === 'accounts') {
+    const merged =
+      permissions?.entities ??
+      permissions?.accounts ??
+      readSectionAccessFromLegacy(permissions, 'entities');
+    if (merged !== 'none' || permissions?.entities || permissions?.accounts) {
+      return merged;
+    }
+    return readSectionAccessFromLegacy(permissions, 'accounts');
+  }
+
   const direct = permissions?.[section];
   if (direct === 'read' || direct === 'write' || direct === 'none') return direct;
   return readSectionAccessFromLegacy(permissions, section);
@@ -223,6 +230,7 @@ export function sectionMapToStoredPermissions(
     if (level === 'read' || level === 'write' || level === 'none') {
       if (portal === 'admin') {
         result[section] = level;
+        if (section === 'entities') result.accounts = level;
       } else {
         result = writeSectionAccessToLegacy(result, section, level);
       }

@@ -47,7 +47,7 @@ export default function GlobalSettingsScreen() {
 
   return (
     <div>
-      <AsicPageHeader title="Global settings" subtitle="Platform-wide IC Transfer controls." />
+      <AsicPageHeader title="Company Settings" />
       <div className={`${asicCard} max-w-xl p-4 text-sm`}>
         {error ? <p className="mb-2 text-red-600">{error}</p> : null}
         <label className="mb-3 flex items-center justify-between gap-4">

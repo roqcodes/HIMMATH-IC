@@ -41,10 +41,12 @@ type Props = {
   onSave: (payload: RateGroupMembersPayload) => void | Promise<void>;
 };
 
-function findBranchGroup(groups: ICRateGroup[], branchId: string, excludeGroupId?: string) {
-  return groups.find(
-    g => g.id !== excludeGroupId && g.branchIds?.includes(branchId),
-  );
+function findBranchGroup(
+  _groups: ICRateGroup[],
+  _branchId: string,
+  _excludeGroupId?: string,
+): ICRateGroup | undefined {
+  return undefined;
 }
 
 function findCustomerGroup(groups: ICRateGroup[], customerId: string, excludeGroupId?: string) {
@@ -81,7 +83,7 @@ export default function RateGroupManageUsersModal({
     () =>
       groups.map(g => ({
         value: g.id,
-        label: `${g.name} · ${g.currency}`,
+        label: `${g.name} · AED`,
       })),
     [groups],
   );
@@ -115,7 +117,7 @@ export default function RateGroupManageUsersModal({
       setAssignedCustomerIds([]);
       return;
     }
-    const branchIds = [...(selectedGroup.branchIds ?? [])];
+    const branchIds: string[] = [];
     const customerIds = [...(selectedGroup.customerIds ?? [])];
     // Pull in a member queued from the overview's "Assign" action.
     const pending = pendingAssignRef.current;
@@ -126,7 +128,7 @@ export default function RateGroupManageUsersModal({
     }
     setAssignedBranchIds(branchIds);
     setAssignedCustomerIds(customerIds);
-    setGroupQuery(`${selectedGroup.name} · ${selectedGroup.currency}`);
+    setGroupQuery(`${selectedGroup.name} · AED`);
   }, [selectedGroup]);
 
   const leftItems = useMemo(() => {
@@ -255,7 +257,7 @@ export default function RateGroupManageUsersModal({
     const match = groups.find(g => g.id === groupId);
     if (!match) return;
     setSelectedGroupId(match.id);
-    setGroupQuery(`${match.name} · ${match.currency}`);
+    setGroupQuery(`${match.name} · AED`);
   };
 
   const requestAssign = (item: OverviewItem) => {
@@ -310,7 +312,7 @@ export default function RateGroupManageUsersModal({
               setGroupQuery(v);
               if (selectedGroupId) {
                 const match = groups.find(g => g.id === selectedGroupId);
-                if (match && v !== `${match.name} · ${match.currency}`) {
+                if (match && v !== `${match.name} · AED`) {
                   setSelectedGroupId('');
                 }
               }
@@ -404,7 +406,7 @@ function AssignGroupPicker({
     return groups.filter(
       g =>
         g.name.toLowerCase().includes(q) ||
-        g.currency.toLowerCase().includes(q) ||
+        'AED'.toLowerCase().includes(q) ||
         g.country.toLowerCase().includes(q),
     );
   }, [groups, search]);
@@ -449,7 +451,7 @@ function AssignGroupPicker({
             <div className="py-8 text-center text-xs text-slate-400">No rate groups found</div>
           ) : (
             filtered.map(g => {
-              const members = (g.branchIds?.length ?? 0) + (g.customerIds?.length ?? 0);
+              const members = g.customerIds?.length ?? 0;
               return (
                 <button
                   key={g.id}
@@ -460,7 +462,7 @@ function AssignGroupPicker({
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold text-slate-800">{g.name}</div>
                     <div className="truncate text-[11px] text-slate-500">
-                      {g.currency}
+                      {'AED'}
                       {g.country ? ` · ${g.country}` : ''} · {members} member{members === 1 ? '' : 's'}
                     </div>
                   </div>

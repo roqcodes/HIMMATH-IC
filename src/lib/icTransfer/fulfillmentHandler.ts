@@ -1,12 +1,12 @@
 import type { ICSale } from '@/types';
 import { normalizeOrderStatus } from './orderStatus';
 
-export type FulfillmentHandler = 'hq_admin' | 'branch';
+export type FulfillmentHandler = 'hq_admin';
 
 export function isBranchHandledSale(
-  sale: Pick<ICSale, 'fulfillmentHandler'> | null | undefined,
+  _sale: Pick<ICSale, 'fulfillmentHandler'> | null | undefined,
 ): boolean {
-  return sale?.fulfillmentHandler === 'branch';
+  return false;
 }
 
 export function isHqAdminHandledSale(
@@ -45,6 +45,6 @@ export function canBranchEditHandledOrder(sale: ICSale): boolean {
 export const SQL_EXCLUDE_BRANCH_HANDLED_FROM_HQ_WAREHOUSE =
   `fulfillment_handler IS DISTINCT FROM 'branch'`;
 
-export function getFulfillmentHandlerLabel(handler?: FulfillmentHandler | null): string {
-  return handler === 'branch' ? 'Branch' : 'Admin';
+export function getFulfillmentHandlerLabel(_handler?: FulfillmentHandler | null): string {
+  return 'Admin';
 }

@@ -6,7 +6,6 @@ import type { ICFundAccount } from '@/types';
 import type { ICFundAccountType } from '@/lib/icFunds/constants';
 import { accountTypeLabel } from '@/lib/icFunds/constants';
 import { fmtLedgerAed } from '@/lib/icFunds/format';
-import { AccountCurrencyBadge } from '@/components/ic-funds/AccountCurrencyBadge';
 import { icfInput, icfLabel } from '@/components/ic-funds/ui';
 
 function matchAccount(account: ICFundAccount, query: string): boolean {
@@ -216,13 +215,6 @@ export default function AccountPicker({
                           </span>
                           <span className="ml-1.5 text-[11px] text-slate-400">
                             {accountTypeLabel(account.accountType)}
-                          </span>
-                          <span className="ml-1.5">
-                            <AccountCurrencyBadge
-                              accountType={account.accountType}
-                              currency={account.currency}
-                              compact
-                            />
                           </span>
                         </span>
                         <span className="shrink-0 font-mono text-[11px] tabular-nums text-slate-500">

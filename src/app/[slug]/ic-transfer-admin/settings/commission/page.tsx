@@ -3,8 +3,7 @@ import ICTransferSettingsUsersPage from '@/components/ic-transfer/settings/ICTra
 export default function CommissionManagementPage() {
   return (
     <ICTransferSettingsUsersPage
-      title="Commission Management"
-      subtitle="Configure commission rates for agents"
+      title="Commission Rates"
       addButtonLabel="Add Agent"
       modalTitle="Add User"
       showCommission

@@ -88,9 +88,25 @@ export function normalizeAsicPath(pathname: string): string {
     return suffix ? `/admin/warehouse${suffix}` : '/admin/warehouse';
   }
 
+  if (clean === '/branch' || clean.startsWith('/branch/')) {
+    const rest = clean.slice('/branch'.length).replace(/^\//, '');
+    if (!rest) return '/admin/dashboard';
+    const parts = rest.split('/').filter(Boolean);
+    const slug = parts[0];
+    const section = parts[1] ?? 'orders';
+    if (section === 'orders' || section === 'sales') {
+      return slug === 'hq' ? '/admin/dashboard' : `/admin/${section === 'orders' ? 'dashboard' : section}`;
+    }
+    return `/admin/${parts.slice(1).join('/') || 'dashboard'}`.replace(/^\/admin\/$/, '/admin/dashboard');
+  }
+
+  if (clean === '/collection' || clean.startsWith('/collection/')) {
+    return '/admin/dashboard';
+  }
+
   const legacyCustomers = clean.match(/^\/([^/]+)\/customers\/?$/);
   if (legacyCustomers && !RESERVED_BRANCH_SLUGS.has(legacyCustomers[1])) {
-    return `/branch/${legacyCustomers[1]}/accounts`;
+    return `/admin/entities`;
   }
 
   return clean;
@@ -144,29 +160,26 @@ export function portalHome(portal: AsicPortal, slug?: string): string {
   switch (portal) {
     case 'admin':
       return '/admin/dashboard';
-    case 'branch':
-      return `/branch/${slug}/orders`;
     case 'warehouse':
-      return `/warehouse/${slug}/orders`;
+      return `/warehouse/${slug ?? HQ_OPERATIONS_PORTAL_SLUG}/orders`;
     case 'delivery':
-      return `/delivery/${slug}/settlement`;
+      return `/delivery/${slug ?? HQ_OPERATIONS_PORTAL_SLUG}/settlement`;
     case 'customer':
-      return `/customer/${slug}/orders`;
-    case 'collection':
-      return `/collection/${slug}/fx-settlements`;
+      return `/customer/${slug ?? HQ_IC_FUNDS_BRANCH_SLUG}/orders`;
+    default:
+      return '/admin/dashboard';
   }
 }
 
 export function loginPath(branchSlug?: string, portal?: AsicPortal): string {
-  // Warehouse, delivery, and customer portals share the branch login entry (PWA-friendly).
-  if (portal === 'warehouse' || portal === 'delivery' || portal === 'customer' || portal === 'collection') {
-    if (branchSlug && !isHqOperationsPortalSlug(branchSlug)) {
-      return `/branch/${branchSlug}`;
+  if (portal === 'warehouse' || portal === 'delivery' || portal === 'customer') {
+    if (branchSlug && !isHqOperationsPortalSlug(branchSlug) && branchSlug !== HQ_IC_FUNDS_BRANCH_SLUG) {
+      return `/customer/${branchSlug}`;
     }
     return '/admin';
   }
   if (!branchSlug || RESERVED_BRANCH_SLUGS.has(branchSlug)) return '/admin';
-  return `/branch/${branchSlug}`;
+  return '/admin';
 }
 
 /** Branch staff login landing — redirects to orders when authenticated. */
@@ -188,6 +201,7 @@ export function postLoginPathForRole(role: string | undefined, branchSlug?: stri
   if (!role) return '/admin';
   if (role === 'admin') return '/admin/dashboard';
   if (role === 'auditor') return '/admin/audit-log';
+  if (role === 'staff' || role === 'branch_manager') return '/admin/dashboard';
 
   const slug =
     branchSlug && !RESERVED_BRANCH_SLUGS.has(branchSlug) && !isHqOperationsPortalSlug(branchSlug)
@@ -197,21 +211,13 @@ export function postLoginPathForRole(role: string | undefined, branchSlug?: stri
   if (role.startsWith('delivery')) {
     return portalHome('delivery', slug ?? HQ_OPERATIONS_PORTAL_SLUG);
   }
-  if (role === 'collection_agent') {
-    return portalHome('collection', slug ?? HQ_IC_FUNDS_BRANCH_SLUG);
-  }
   if (role.startsWith('warehouse_')) {
     return portalHome('warehouse', slug ?? HQ_OPERATIONS_PORTAL_SLUG);
   }
-  if (!slug) {
-    if (role === 'customer' && isHqOperationsPortalSlug(branchSlug)) {
-      return portalHome('customer', HQ_IC_FUNDS_BRANCH_SLUG);
-    }
-    return '/admin/dashboard';
+  if (role === 'customer') {
+    return portalHome('customer', slug ?? HQ_IC_FUNDS_BRANCH_SLUG);
   }
-  if (role === 'customer') return portalHome('customer', slug);
-  if (role === 'collection_agent') return portalHome('collection', slug);
-  return portalHome('branch', slug);
+  return '/admin/dashboard';
 }
 
 /** @deprecated Prefer resolvePostLoginPath on the server or postLoginPathForRole client-side. */
@@ -234,4 +240,9 @@ export function isAsicPortalPath(pathname: string): boolean {
 
 export function isHqAdminPath(pathname: string): boolean {
   return parseAsicPath(pathname).portal === 'admin-root';
+}
+
+export function isAdminAsicPath(pathname: string): boolean {
+  const portal = parseAsicPath(pathname).portal;
+  return portal === 'admin' || portal === 'admin-root';
 }

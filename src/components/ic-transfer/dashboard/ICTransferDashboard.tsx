@@ -19,7 +19,7 @@ function TrendChart({ data }: { data: { label: string; purchases: number; sales:
 
   return (
     <ChartCard 
-      title="Volume Trends (AED)"
+      title="Volume Trends"
       legend={
         <div className="flex gap-4 text-xs font-semibold">
            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-sm bg-accent"></span>Purchases</span>
@@ -263,10 +263,7 @@ export default function ICTransferDashboard() {
 
   return (
     <PageShell>
-      <AsicPageHeader
-        title="Dashboard"
-        subtitle="Analytics and financial tracking for IC transfers"
-      />
+      <AsicPageHeader title="Dashboard" />
 
       <ICTransferDateFilterBar
         dateFilter={dateFilter}

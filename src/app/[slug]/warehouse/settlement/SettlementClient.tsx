@@ -309,7 +309,7 @@ export default function SettlementClient({ branchSlug }: { branchSlug: string })
   );
 
   return (
-    <WarehousePortalShell title="Warehouse orders" subtitle="Accept orders, assign agents, and track delivery progress">
+    <WarehousePortalShell title="Order Fulfillment">
 
 
       <DateFilterBar

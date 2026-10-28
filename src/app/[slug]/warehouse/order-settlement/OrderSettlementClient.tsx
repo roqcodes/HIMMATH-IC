@@ -154,7 +154,7 @@ export default function OrderSettlementClient({ branchSlug }: { branchSlug: stri
   ];
 
   return (
-    <WarehousePortalShell title="Settlement" subtitle="Delivery agent — assigned orders and settlement">
+    <WarehousePortalShell title="Delivery Settlement">
 
       {/* Date Filter */}
       <DateFilterBar

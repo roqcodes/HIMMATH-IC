@@ -8,7 +8,7 @@ export default async function LegacyBranchCustomersPage({
 }) {
   const { slug } = await params;
   if (RESERVED_BRANCH_SLUGS.has(slug)) {
-    redirect('/admin/accounts');
+    redirect('/admin/entities');
   }
-  redirect(`/branch/${slug}/accounts`);
+  redirect('/admin/entities');
 }

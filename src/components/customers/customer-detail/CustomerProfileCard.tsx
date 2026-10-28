@@ -35,7 +35,6 @@ type Props = {
 };
 
 export default function CustomerProfileCard({ customer, branchName }: Props) {
-  const currency = (customer.currency || 'AED').toUpperCase();
   const statusKind = customer.status === 'active' ? 'active' : 'inactive';
 
   return (
@@ -57,7 +56,6 @@ export default function CustomerProfileCard({ customer, branchName }: Props) {
         />
         <DetailRow label="Phone" value={customer.phone} />
         <DetailRow label="Email" value={customer.email} />
-        <DetailRow label="Currency" value={currency} mono />
         {branchName ? <DetailRow label="Branch" value={branchName} /> : null}
         <DetailRow label="Customer ID" value={customer.id} mono />
         {customer.createdAt ? (

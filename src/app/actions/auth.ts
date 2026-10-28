@@ -46,15 +46,14 @@ export async function loginAction(email: string, securityKey: string, branchSlug
       }
     } else {
       // HQ portal: admins, auditors, HQ staff, and HQ warehouse/delivery users (no branch)
-      const { isHqAdminStaff, isHqPortalCustomer, isHqPortalCollectionAgent } = await import('@/lib/icFunds/hqBranch');
+      const { isHqAdminStaff, isHqPortalCustomer } = await import('@/lib/icFunds/hqBranch');
       const { isHqOpsUser } = await import('@/lib/icTransfer/warehouseSlug');
       if (
         user.role !== 'admin' &&
         user.role !== 'auditor' &&
         !isHqAdminStaff(user) &&
         !isHqOpsUser(user) &&
-        !isHqPortalCustomer(user) &&
-        !isHqPortalCollectionAgent(user)
+        !isHqPortalCustomer(user)
       ) {
         const slug = await branchSlugForUserGate(user.branchId);
         return {
@@ -83,25 +82,6 @@ export async function loginAction(email: string, securityKey: string, branchSlug
       }
     }
 
-    if (user.role === 'collection_agent' && user.id) {
-      const agentRes = await query(
-        `SELECT a.status
-         FROM profiles p
-         JOIN ic_fund_accounts a ON a.id = p.collection_account_id
-         WHERE p.id = $1
-         LIMIT 1`,
-        [user.id],
-      );
-      if (agentRes.rows.length === 0) {
-        await deleteSession(sessionSlug);
-        return { success: false, error: 'Collection agent account is not linked.' };
-      }
-      if (String(agentRes.rows[0].status) !== 'active') {
-        await deleteSession(sessionSlug);
-        return { success: false, error: 'Your collection agent account is inactive.' };
-      }
-    }
-    
     return { success: true, data: enrichedUser };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'An error occurred during authentication.';

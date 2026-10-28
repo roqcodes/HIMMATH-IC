@@ -5,6 +5,8 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchReconciliationAction } from '@/modules/admin/actions';
 import { asicCard, asicTable, asicTd, asicTh, asicTheadRow, asicTr } from '@/components/asic/ui';
 import { ASICTableSkeleton } from '@/components/asic/ASICTableSkeleton';
+import AsicPageHeader from '@/components/asic/AsicPageHeader';
+import { sectionLabel } from '@/lib/staffSectionPermissions';
 
 export default function ReconciliationScreen() {
   const query = useQuery({
@@ -22,7 +24,9 @@ export default function ReconciliationScreen() {
   if (query.error) return <p className="text-sm text-red-600">{(query.error as Error).message}</p>;
 
   return (
-    <div className={asicCard}>
+    <div>
+      <AsicPageHeader title={sectionLabel('reconciliation')} />
+      <div className={asicCard}>
       <div className="max-h-[calc(100dvh-11rem)] overflow-auto">
         <table className={`${asicTable} min-w-[640px]`}>
           <thead className="sticky top-0">
@@ -44,6 +48,7 @@ export default function ReconciliationScreen() {
             ))}
           </tbody>
         </table>
+      </div>
       </div>
     </div>
   );

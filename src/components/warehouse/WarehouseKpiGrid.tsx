@@ -76,7 +76,7 @@ export default function WarehouseKpiGrid({
 
   const showPrimaryPanel = metrics.currentStock !== null;
 
-  const primaryTitle = isDelivery ? 'Workload' : 'Inventory';
+  const primaryTitle = isDelivery ? 'Workload' : 'Warehouses';
   const primaryUnitLabel = isDelivery ? 'units assigned' : 'units on hand';
   const reservedLabel = isDelivery ? 'To deliver' : 'Reserved';
   const availableLabel = isDelivery ? 'Delivered' : 'Available';

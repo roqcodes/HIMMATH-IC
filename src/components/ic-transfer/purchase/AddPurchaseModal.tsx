@@ -57,8 +57,6 @@ export default function AddPurchaseModal({ open, onClose, initialData, branchId,
         customerId: selectedSupplierId,
       });
 
-  const groupConversionRate = applicableGroup?.conversionRate || 1;
-  const groupCurrency = applicableGroup?.currency || 'Currency';
   const groupSaleRate = applicableGroup?.saleRate || 0;
 
   const selectedPurchases = icPurchases.filter(p => p.supplierId === supplierId && p.warehouseId === warehouseId);
@@ -80,7 +78,7 @@ export default function AddPurchaseModal({ open, onClose, initialData, branchId,
 
   const unitNum = parseFloat(units) || 0;
   const rateNum = parseFloat(rate) || groupSaleRate;
-  const amounts = computeICSaleAmounts(unitNum, rateNum, groupConversionRate);
+  const amounts = computeICSaleAmounts(unitNum, rateNum);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,12 +92,7 @@ export default function AddPurchaseModal({ open, onClose, initialData, branchId,
       unitRate: rateNum,
       units: unitNum,
       notes,
-      convertedTotal: amounts.currencyTotal,
-      aedTotal: amounts.aedBaseTotal,
-      conversionRate: groupConversionRate,
-      currency: applicableGroup?.currency && applicableGroup.currency.toUpperCase() !== 'CURRENCY'
-        ? applicableGroup.currency
-        : undefined,
+      aedTotal: amounts.aedNetTotal,
     };
 
     if (initialData) {
@@ -196,11 +189,9 @@ export default function AddPurchaseModal({ open, onClose, initialData, branchId,
         </div>
 
         <ICSaleAmountCards
+          units={unitNum}
           inrTotal={amounts.inrTotal}
-          currencyTotal={amounts.currencyTotal}
-          currencyCode={groupCurrency}
-          aedBaseTotal={amounts.aedBaseTotal}
-          showCurrency={!!applicableGroup}
+          aedNetTotal={amounts.aedNetTotal}
         />
       </form>
     </Modal>

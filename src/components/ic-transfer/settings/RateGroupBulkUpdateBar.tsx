@@ -77,24 +77,17 @@ export default function RateGroupBulkUpdateBar({
     [selectedGroupIds, groups],
   );
 
-  const currenciesInSelection = useMemo(() => {
-    const set = new Set(selectedGroups.map(g => g.currency.toUpperCase()));
-    return [...set];
-  }, [selectedGroups]);
-
-  const mixedCurrencies = currenciesInSelection.length > 1;
+  const currenciesInSelection = ['AED'];
+  const mixedCurrencies = false;
 
   const referenceGroup = useMemo(() => {
     if (selectedGroups.length > 0) return selectedGroups[0];
     return groups[0];
   }, [selectedGroups, groups]);
 
-  const currency = referenceGroup?.currency ?? 'Currency';
+  const currency = 'AED';
 
-  const lockedConversion =
-    convertedRateOnly && referenceGroup?.conversionRate && referenceGroup.conversionRate > 0
-      ? referenceGroup.conversionRate
-      : undefined;
+  const lockedConversion = convertedRateOnly ? 1 : undefined;
 
   const filteredGroups = useMemo(() => {
     const q = groupSearch.trim().toLowerCase();
@@ -103,8 +96,7 @@ export default function RateGroupBulkUpdateBar({
     return list.filter(
       g =>
         g.name.toLowerCase().includes(q) ||
-        g.country.toLowerCase().includes(q) ||
-        g.currency.toLowerCase().includes(q),
+        g.country.toLowerCase().includes(q),
     );
   }, [groups, groupSearch]);
 
@@ -394,9 +386,9 @@ export default function RateGroupBulkUpdateBar({
                               {group.name}
                             </span>
                             <span className="block truncate text-[10px] text-slate-400">
-                              {group.country} · {group.currency}
+                              {group.country} · {'AED'}
                               {group.saleRate > 0
-                                ? ` · ${formatRateAmount(getCurrencyUnitRate(group.saleRate, group.conversionRate ?? 1))}`
+                                ? ` · ${formatRateAmount(getCurrencyUnitRate(group.saleRate, 1))}`
                                 : ''}
                             </span>
                           </span>

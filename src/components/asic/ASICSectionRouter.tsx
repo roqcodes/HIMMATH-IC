@@ -17,26 +17,17 @@ const ICTransferRegions = dynamic(() => import('@/components/ic-transfer/regions
 const ICTransferSuppliersPage = dynamic(
   () => import('@/components/ic-transfer/settings/ICTransferSuppliersPage'),
 );
-const FxSettlementsPage = dynamic(
-  () => import('@/components/ic-transfer/collection/FxSettlementsPage'),
-);
-const CollectionAgentFxPage = dynamic(
-  () => import('@/components/collection-agent/CollectionAgentFxPage'),
-);
-const CustomerWalletPage = dynamic(() => import('@/components/customer/CustomerWalletPage'));
 const ICTransferRatesPage = dynamic(() => import('@/components/ic-transfer/settings/ICTransferRatesPage'));
 const ICTransferSettingsUsersPage = dynamic(
   () => import('@/components/ic-transfer/settings/ICTransferSettingsUsersPage'),
 );
 const ICTransferFinance = dynamic(() => import('@/components/ic-transfer/finance/ICTransferFinance'));
 const CustomersPage = dynamic(() => import('@/components/customers/CustomersPage'));
-const BranchesScreen = dynamic(() => import('@/modules/admin/screens/BranchesScreen'));
 const GlobalSettingsScreen = dynamic(() => import('@/modules/admin/screens/GlobalSettingsScreen'));
 const AuditLogScreen = dynamic(() => import('@/modules/admin/screens/AuditLogScreen'));
 const ReconciliationScreen = dynamic(() => import('@/modules/admin/screens/ReconciliationScreen'));
 const BackupScreen = dynamic(() => import('@/modules/admin/screens/BackupScreen'));
 const UsersManagementGate = dynamic(() => import('@/modules/admin/screens/UsersManagementGate'));
-const BranchUsersManagementGate = dynamic(() => import('@/modules/branch/BranchUsersManagementGate'));
 const StaffAccountSettings = dynamic(() => import('@/components/users/StaffAccountSettings'));
 const WarehouseOrdersGate = dynamic(() => import('@/modules/warehouse/WarehouseOrdersGate'));
 const WarehouseDeliveryGate = dynamic(() => import('@/modules/warehouse/WarehouseDeliveryGate'));
@@ -49,6 +40,7 @@ const FUND_SECTIONS: Partial<Record<AsicSectionId, ICFundsSectionId>> = {
   journal: 'journal',
   pl: 'pl',
   accounts: 'accounts',
+  entities: 'accounts',
   reports: 'reports',
 };
 
@@ -61,19 +53,12 @@ export default function ASICSectionRouter({
   section: AsicSectionId;
   slug?: string;
 }) {
-  const purchaseMode = portal === 'admin' ? 'admin' : 'branch';
   const fundSection = FUND_SECTIONS[section];
 
   let body: React.ReactNode;
 
   if (fundSection) {
-    body = (
-      <ICFundsApp
-        section={fundSection}
-        portal={portal}
-        branchSlug={portal === 'branch' ? slug : undefined}
-      />
-    );
+    body = <ICFundsApp section={fundSection} portal={portal} branchSlug={undefined} />;
   } else {
     switch (section) {
       case 'dashboard':
@@ -87,14 +72,11 @@ export default function ASICSectionRouter({
             <ICTransferBranch />
           );
         break;
-      case 'wallet':
-        body = portal === 'customer' ? <CustomerWalletPage /> : <p className="text-sm text-slate-500">Unknown section.</p>;
-        break;
       case 'sales':
         body = <ICTransferSales />;
         break;
       case 'purchases':
-        body = <ICTransferPurchase portalMode={purchaseMode} />;
+        body = <ICTransferPurchase portalMode="admin" />;
         break;
       case 'warehouse':
         body = <ICTransferWarehouse />;
@@ -108,22 +90,13 @@ export default function ASICSectionRouter({
       case 'suppliers':
         body = <ICTransferSuppliersPage />;
         break;
-      case 'fx-settlements':
-        body =
-          portal === 'collection' ? (
-            <CollectionAgentFxPage />
-          ) : (
-            <FxSettlementsPage />
-          );
-        break;
       case 'rates':
         body = <ICTransferRatesPage />;
         break;
       case 'agents':
         body = (
           <ICTransferSettingsUsersPage
-            title="Agents"
-            subtitle="Manage agent accounts and access"
+            title="Sales Agents"
             modalTitle="Add User"
             showRate
           />
@@ -132,8 +105,7 @@ export default function ASICSectionRouter({
       case 'commission':
         body = (
           <ICTransferSettingsUsersPage
-            title="Commission"
-            subtitle="Configure commission rates for agents"
+            title="Commission Rates"
             addButtonLabel="Add Agent"
             modalTitle="Add User"
             showCommission
@@ -144,16 +116,8 @@ export default function ASICSectionRouter({
       case 'ic-finance':
         body = <ICTransferFinance />;
         break;
-      case 'branches':
-        body = <BranchesScreen />;
-        break;
       case 'users':
-        body =
-          portal === 'branch' ? (
-            <BranchUsersManagementGate slug={slug} />
-          ) : (
-            <UsersManagementGate />
-          );
+        body = <UsersManagementGate />;
         break;
       case 'global-settings':
         body = <GlobalSettingsScreen />;

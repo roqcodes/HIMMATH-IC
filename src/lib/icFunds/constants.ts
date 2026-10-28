@@ -1,6 +1,5 @@
 export const IC_FUND_ACCOUNT_TYPES = [
   'bank',
-  'collection_agent',
   'personal',
   'income',
   'profit',
@@ -24,11 +23,6 @@ export const IC_FUND_ACCOUNT_TYPE_OPTIONS: ReadonlyArray<{
   hint: string;
 }> = [
   { value: 'bank', label: 'Bank', hint: 'Cash, collection tills, fund wallets' },
-  {
-    value: 'collection_agent',
-    label: 'Collection agent',
-    hint: 'Foreign currency remitters (e.g. Ajeer) — used in FX settlements',
-  },
   { value: 'personal', label: 'Personal', hint: '' },
   { value: 'income', label: 'Income', hint: 'Revenue credited on receipts' },
   { value: 'profit', label: 'Profit', hint: 'Parked profit / equity, not income' },

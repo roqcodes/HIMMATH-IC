@@ -28,18 +28,18 @@ export const IC_FUNDS_NAV: readonly ICFundsNavItem[] = [
   { id: 'receipts', label: 'Receipts' },
   { id: 'contra', label: 'Contra' },
   { id: 'journal', label: 'Journal' },
-  { id: 'accounts', label: 'Accounts' },
-  { id: 'reports', label: 'Reports' },
+  { id: 'accounts', label: 'Entities' },
+  { id: 'reports', label: 'Financial Reports' },
 ];
 
 export const IC_FUNDS_REPORTS: ReadonlyArray<{ id: ICFundsReportId; label: string }> = [
-  { id: 'all-vouchers', label: 'All entries' },
+  { id: 'all-vouchers', label: 'All Vouchers' },
   { id: 'cash-bank', label: 'Cash & Bank' },
-  { id: 'statement', label: 'Statement detailed' },
-  { id: 'd-expenses', label: 'D-Expenses' },
+  { id: 'statement', label: 'Account Statement' },
+  { id: 'd-expenses', label: 'Direct Expenses' },
   { id: 'receivables', label: 'Receivables & Payables' },
-  { id: 'profit-loss', label: 'Profit-Loss' },
-  { id: 'warehouse-pl', label: 'Warehouse P&L' },
+  { id: 'profit-loss', label: 'Profit & Loss' },
+  { id: 'warehouse-pl', label: 'Warehouse Profit & Loss' },
   { id: 'balance-sheet', label: 'Balance Sheet' },
   { id: 'trial-balance', label: 'Trial Balance' },
 ];
@@ -68,19 +68,17 @@ export function legacyReportPathToView(section: string): ICFundsReportId | null 
 }
 
 export function icFundsPath(
-  slug: string,
+  _slug: string,
   section: ICFundsSectionId,
-  portal: 'admin' | 'branch' = 'branch',
+  portal: 'admin' | 'branch' = 'admin',
 ): string {
-  if (portal === 'admin') return `/admin/${section}`;
-  return `/branch/${slug}/${section}`;
+  return `/admin/${section}`;
 }
 
 export function icFundsReportPath(
-  slug: string,
+  _slug: string,
   view: ICFundsReportId,
-  portal: 'admin' | 'branch' = 'branch',
+  _portal: 'admin' | 'branch' = 'admin',
 ): string {
-  if (portal === 'admin') return `/admin/reports?view=${view}`;
-  return `/branch/${slug}/reports?view=${view}`;
+  return `/admin/reports?view=${view}`;
 }

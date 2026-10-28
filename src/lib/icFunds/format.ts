@@ -1,19 +1,19 @@
 import { IC_FUNDS_BASE_CURRENCY } from '@/lib/icFunds/currencyPolicy';
-import { formatFxAmount } from '@/lib/icTransfer/saleFxProfit';
+import { formatAmount } from '@/lib/icTransfer/rateCalculations';
 
 export function fmtICAmount(n: number): string {
-  return formatFxAmount(n);
+  return formatAmount(n);
 }
 
-/** Explicit AED suffix for ledger / reporting screens. */
+/** Ledger amounts (AED-only app — no currency suffix in UI). */
 export function fmtLedgerAed(n: number): string {
-  return `${fmtICAmount(n)} ${IC_FUNDS_BASE_CURRENCY}`;
+  return fmtICAmount(n);
 }
 
 /** Foreign amount with ISO currency code (wallet / FX layer). */
 export function fmtForeignAmount(n: number, currency: string): string {
   const code = String(currency || IC_FUNDS_BASE_CURRENCY).trim().toUpperCase();
-  return `${formatFxAmount(n)} ${code}`;
+  return `${formatAmount(n)} ${code}`;
 }
 
 export function fmtICDate(iso: string): string {

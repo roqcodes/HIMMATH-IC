@@ -286,14 +286,7 @@ export default function UsersManagement({
   return (
     <>
       <AsicPageHeader
-        title={isBranchManager ? 'Staff users' : 'Users'}
-        subtitle={
-          isBranchManager
-            ? 'Create staff accounts and control page-level access for your branch.'
-            : isSuperAdmin
-              ? 'Create HQ admin, auditor, or staff with custom panel access.'
-              : 'Manage platform users, roles, and branch assignments.'
-        }
+        title={isBranchManager ? 'Users' : 'User Management'}
         actions={
           <button type="button" className={asicBtnPrimary} onClick={() => setShowCreate(true)}>
             {isBranchManager ? 'Add staff' : 'Create user'}

@@ -77,7 +77,7 @@ export function BranchOrderStatusCard({
 
 function normalizeRejectedRemarks(sale: ICSale): boolean {
   const status = sale.orderStatus;
-  return status === 'branch_rejected' || status === 'admin_rejected';
+  return status === 'admin_rejected';
 }
 
 /** Branch resubmit / delete / cancel / view actions for the Actions column. */

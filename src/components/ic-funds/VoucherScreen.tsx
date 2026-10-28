@@ -222,8 +222,8 @@ export default function VoucherScreen({
   const currencyBlockReason =
     debitAccount && creditAccount
       ? validateVoucherCurrencyPolicy(
-          { account_type: debitAccount.accountType, currency: debitAccount.currency },
-          { account_type: creditAccount.accountType, currency: creditAccount.currency },
+          { account_type: debitAccount.accountType, currency: 'AED' },
+          { account_type: creditAccount.accountType, currency: 'AED' },
         )
       : null;
 
@@ -355,7 +355,7 @@ export default function VoucherScreen({
                   <th className={icfTh}>{voucherType === 'contra' ? 'From bank' : 'Account'}</th>
                 </>
               )}
-              <th className={`${icfTh} text-right`}>Amount (AED)</th>
+              <th className={`${icfTh} text-right`}>Amount</th>
               <th className={icfTh}>User</th>
               <th className={icfTh}>Notes</th>
               <th className={icfTh} />

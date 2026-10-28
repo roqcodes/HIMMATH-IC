@@ -75,7 +75,6 @@ export default function SalesHeader({
   return (
     <AsicPageHeader
       title="Sales"
-      subtitle="Customer sale orders and settlement status"
       actions={
         <>
           {canManageGlobalSettings && canWrite ? (

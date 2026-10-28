@@ -69,7 +69,7 @@ export default function RateGroupPricingEditor({
       : undefined;
   const baseFlat = useMemo(
     () => (group ? getFlatRateFromGroup(group) : { saleRate: 0, conversionRate: effectiveLockedConversion ?? 1 }),
-    [group?.id, group?.saleRate, group?.conversionRate, effectiveLockedConversion],
+    [group?.id, group?.saleRate, effectiveLockedConversion],
   );
   const lastEmitKeyRef = useRef<string | null>(null);
 

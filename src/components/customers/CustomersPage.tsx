@@ -3,10 +3,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, usePathname, useRouter } from 'next/navigation';
 import { getAllCustomers, getCustomersBySlug, deleteCustomer } from '@/app/actions/customerActions';
-import { useApp } from '@/context/AppContext';
 import { parseAsicPath, RESERVED_BRANCH_SLUGS } from '@/lib/asic/routing';
 import { HQ_IC_FUNDS_BRANCH_SLUG } from '@/lib/icFunds/hqBranch';
-import { formatMoneyLabel, formatMoneyValue } from '@/lib/format';
+import { formatMoneyValue } from '@/lib/format';
 import AsicPageHeader from '@/components/asic/AsicPageHeader';
 import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
 import { ASICTableSkeleton } from '@/components/asic/ASICTableSkeleton';
@@ -27,7 +26,6 @@ type CustomerRow = {
   status: string;
   created_at?: string;
   hasOrders?: boolean;
-  currency?: string;
 };
 
 const CUSTOMER_DELETE_BLOCKED_TOOLTIP =
@@ -49,9 +47,8 @@ export default function CustomersPage() {
         ? paramSlug
         : undefined;
   const writeSlug = branchSlug ?? (isHqAdmin ? HQ_IC_FUNDS_BRANCH_SLUG : '');
-  const { activeCurrency } = useApp();
   const { canWrite, writeBlockedReason, buttonProps: wp } = useWriteAccess();
-  const fmtBalance = (value: string | number) => formatMoneyLabel(Number(value || 0), activeCurrency);
+  const fmtBalance = (value: string | number) => formatMoneyValue(Number(value || 0));
 
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -209,7 +206,6 @@ export default function CustomersPage() {
       <div className="animate-[fade-in-up_0.55s_cubic-bezier(0.16,1,0.3,1)_both]">
         <AsicPageHeader
           title="Customers"
-          subtitle="Manage customer records, contact details, and balances"
           actions={
             <button
               onClick={() => canWrite && setIsModalOpen(true)}
@@ -241,7 +237,7 @@ export default function CustomersPage() {
             },
             {
               label: 'Total balance',
-              value: formatMoneyValue(Number(totalBalance || 0), activeCurrency),
+              value: formatMoneyValue(Number(totalBalance || 0)),
               hint: 'Combined ledger',
               tone: 'amber',
             },
@@ -308,9 +304,6 @@ export default function CustomersPage() {
                           Balance <SortIcon field="balance" />
                         </div>
                       </th>
-                      <th className={`${asicTh} text-center`}>
-                        Currency
-                      </th>
                       <th className={getThClass('center')} onClick={() => handleSort('status')}>
                         <div className="flex items-center justify-center gap-1">
                           Status <SortIcon field="status" />
@@ -340,11 +333,6 @@ export default function CustomersPage() {
                         </td>
                         <td className={`${asicTd} text-right font-mono font-medium`}>
                           {fmtBalance(customer.balance)}
-                        </td>
-                        <td className={`${asicTd} text-center`}>
-                          <span className="inline-flex items-center rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-600">
-                            {customer.currency || 'AED'}
-                          </span>
                         </td>
                         <td className={`${asicTd} text-center`}>
                           <span className={`inline-flex rounded-md border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${getStatusColor(customer.status)}`}>
@@ -414,10 +402,6 @@ export default function CustomersPage() {
                         <div>
                           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Email</span>
                           <p className="truncate text-sm text-slate-700">{customer.email || '—'}</p>
-                        </div>
-                        <div>
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Currency</span>
-                          <p className="text-sm font-bold text-slate-900">{customer.currency || 'AED'}</p>
                         </div>
                         <div className="col-span-2">
                           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Balance</span>

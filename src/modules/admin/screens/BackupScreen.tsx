@@ -196,10 +196,7 @@ export default function BackupScreen() {
 
   return (
     <div className="space-y-3">
-      <AsicPageHeader
-        title="Backup"
-        subtitle="Manual JSON backups of live data. Local downloads a file; database stores a copy in history. Date range filters sales, purchases, vouchers, warehouse movements, and audit rows. Master data is always included in full when selected."
-      />
+      <AsicPageHeader title="Backup & Restore" />
 
       <DateFilterBar
         dateFilter={dateFilter}

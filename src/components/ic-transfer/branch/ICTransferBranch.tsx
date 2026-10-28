@@ -22,10 +22,7 @@ import ViewSaleModal from '../sales/ViewSaleModal';
 import { ICSale } from '@/types';
 import { portalMobileCardFooterClass } from '@/lib/icTransfer/layoutConstants';
 import { BranchOrderStatusCell, BranchOrderWorkflowActions } from '../shared/BranchOrderStatusCell';
-import BranchHandledOrderActions from '../shared/BranchHandledOrderActions';
-import BranchCustomerOrderReviewActions from '../shared/BranchCustomerOrderReviewActions';
 import { getBranchOrderStatus } from '@/lib/icTransfer/orderStatus';
-import { isBranchHandledSale } from '@/lib/icTransfer/fulfillmentHandler';
 import { getDeliveredUnits } from '@/lib/icTransfer/saleUnits';
 import { ConfirmModal } from '@/components/warehouse/shared';
 import { customerOwnsSale, getBranchPortalOrderCustomerName, saleBelongsToBranchPortal, saleMatchesDateFilter } from '@/lib/icTransfer/branchOrderOwnership';
@@ -33,8 +30,6 @@ import { resolveDateFilterRange } from '@/lib/dateFilterRange';
 import { canEditOrder } from '@/lib/icTransfer/customerOrderReview';
 import { getCustomerPortalSubCustomerName, getCustomerPortalDisplayName } from '@/lib/icTransfer/customerPortalScope';
 import { getBranchPortalDisplayName } from '@/lib/icTransfer/branchPortalScope';
-import { getAdminAssignedBranchRateGroup } from '@/lib/icTransfer/branchRateScope';
-import { formatBranchProfit, resolveSaleBranchProfit } from '@/lib/icTransfer/branchSaleProfit';
 
 const icCompactTd = (align: 'left' | 'center' | 'right') => `p-3 text-sm whitespace-nowrap text-${align}`;
 
@@ -44,12 +39,8 @@ const ORDER_COLUMNS_CUSTOMER = [
   'Date', 'ID', 'Sub Customer', 'Address', 'Units', 'Total AED', 'Status', 'Actions',
 ] as const;
 
-const ORDER_COLUMNS_BASE = [
+const ORDER_COLUMNS_STAFF = [
   'Date', 'ID', 'Customer', 'Address', 'Units', 'Total AED', 'Status', 'Actions',
-] as const;
-
-const ORDER_COLUMNS_WITH_PROFIT = [
-  'Date', 'ID', 'Customer', 'Address', 'Units', 'Total AED', 'Profit', 'Status', 'Actions',
 ] as const;
 
 type SortField = 'date' | 'customer' | 'units' | 'totalaed';
@@ -64,7 +55,6 @@ export default function ICTransferBranch() {
   const {
     icSales,
     icWarehouses,
-    icRateGroups,
     currentSlug,
     branches,
     branchDeleteICSale,
@@ -104,18 +94,8 @@ export default function ICTransferBranch() {
     ? getCustomerPortalDisplayName(user?.name, currentBranch)
     : branchPortalDisplay;
   const currentBranchId = currentBranch?.id ?? user?.branchId;
-  const isBranchManager = user?.role === 'branch_manager';
-  const showBranchProfit = isBranchManager;
 
-  const adminAssignedRate = useMemo(
-    () => (currentBranchId ? getAdminAssignedBranchRateGroup(icRateGroups, currentBranchId) : undefined),
-    [icRateGroups, currentBranchId],
-  );
-  const profitCurrency = adminAssignedRate?.currency ?? 'AED';
-
-  const orderColumns = isCustomer
-    ? ORDER_COLUMNS_CUSTOMER
-    : (showBranchProfit ? ORDER_COLUMNS_WITH_PROFIT : ORDER_COLUMNS_BASE);
+  const orderColumns = isCustomer ? ORDER_COLUMNS_CUSTOMER : ORDER_COLUMNS_STAFF;
 
   const getOrderCustomer = (s: ICSale) =>
     isCustomer ? getCustomerPortalSubCustomerName(s) : getBranchPortalOrderCustomerName(s, branchName);
@@ -259,16 +239,12 @@ export default function ICTransferBranch() {
     setViewModalOpen(true);
   };
 
-  const getSaleProfit = (sale: ICSale) =>
-    resolveSaleBranchProfit(sale, icRateGroups, currentBranchId);
-
   // Compute stats for current branch orders
   const stats = React.useMemo(() => {
     const totalOrders = branchSales.length;
     const totalUnits = branchSales.reduce((acc, s) => acc + s.units, 0);
     const totalValue = branchSales.reduce((acc, s) => acc + (s.aedAmount || 0), 0);
     const avgRate = totalUnits > 0 ? totalValue / totalUnits : 0;
-    const totalProfit = branchSales.reduce((acc, s) => acc + (getSaleProfit(s)?.profit ?? 0), 0);
 
     const pendingOrders = branchSales.filter(s => {
       const status = getBranchOrderStatus(s);
@@ -286,24 +262,17 @@ export default function ICTransferBranch() {
       totalUnits,
       totalValue,
       avgRate,
-      totalProfit,
       pendingOrders,
       partialOrders,
       fulfilledOrders,
       totalPartialUnitsDelivered
     };
-  }, [branchSales, icRateGroups, currentBranchId]);
+  }, [branchSales]);
 
   return (
     <PageShell>
       <PageHeader
         title={pageDisplay.title}
-        subtitle={
-          pageDisplay.subtitle ??
-          (isCustomer
-            ? 'Submit and track your transfer orders'
-            : 'Submit and track transfer orders from your branch')
-        }
         actions={
           <div className="flex items-center gap-3">
             {isCustomer && (
@@ -353,9 +322,7 @@ export default function ICTransferBranch() {
           {
             label: 'Total units',
             value: stats.totalUnits.toLocaleString(),
-            hint: showBranchProfit
-              ? `Profit ${formatBranchProfit(stats.totalProfit, profitCurrency)}`
-              : `Avg ${fmt(stats.avgRate)}`,
+            hint: `Avg ${fmt(stats.avgRate)}`,
           },
           {
             label: 'Active',
@@ -455,30 +422,8 @@ export default function ICTransferBranch() {
                   <span>Units: <strong className="text-slate-700">{s.units.toLocaleString()}</strong></span>
                   <span>Total: <strong className="text-slate-700">{(s.aedAmount || 0).toLocaleString()} AED</strong></span>
                 </div>
-                {showBranchProfit && (() => {
-                  const profitResult = getSaleProfit(s);
-                  if (!profitResult) return null;
-                  return (
-                    <div className="flex items-center justify-between rounded-xl bg-emerald-50/60 px-2.5 py-2 text-xs">
-                      <span className="text-slate-500">Branch profit</span>
-                      <strong className={profitResult.profit >= 0 ? 'text-emerald-700' : 'text-red-600'}>
-                        {formatBranchProfit(profitResult.profit, profitResult.currency)}
-                      </strong>
-                    </div>
-                  );
-                })()}
                 <div className="text-xs text-slate-500 truncate">{s.address || 'No address'}</div>
                 <div onClick={e => e.stopPropagation()}>
-                  {isBranchManager && (
-                    <div className="mb-2">
-                      <BranchCustomerOrderReviewActions sale={s} compact />
-                    </div>
-                  )}
-                  {isBranchHandledSale(s) && isBranchManager && (
-                    <div className="mb-2">
-                      <BranchHandledOrderActions sale={s} branchId={currentBranchId} compact />
-                    </div>
-                  )}
                   <BranchOrderWorkflowActions
                     sale={s}
                     inline
@@ -506,33 +451,10 @@ export default function ICTransferBranch() {
             <td className={icCompactTd('left')}>{s.address || '—'}</td>
             <td className={icCompactTd('right')}>{s.units.toLocaleString()}</td>
             <td className={icCompactTd('right')}><span className="font-bold text-slate-900">{(s.aedAmount || 0).toLocaleString()}</span></td>
-            {showBranchProfit && (
-              <td className={icCompactTd('right')}>
-                {(() => {
-                  const profitResult = getSaleProfit(s);
-                  if (!profitResult) return <span className="text-slate-400">—</span>;
-                  return (
-                    <span className={`font-semibold ${profitResult.profit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
-                      {formatBranchProfit(profitResult.profit, profitResult.currency)}
-                    </span>
-                  );
-                })()}
-              </td>
-            )}
             <td className={icCompactTd('center')} onClick={e => e.stopPropagation()}>
               <BranchOrderStatusCell sale={s} />
             </td>
             <td className={icCompactTd('center')} onClick={e => e.stopPropagation()}>
-              {isBranchManager && (
-                <div className="mb-1.5">
-                  <BranchCustomerOrderReviewActions sale={s} compact />
-                </div>
-              )}
-              {isBranchHandledSale(s) && isBranchManager && (
-                <div className="mb-1.5">
-                  <BranchHandledOrderActions sale={s} branchId={currentBranchId} compact />
-                </div>
-              )}
               <BranchOrderWorkflowActions
                 sale={s}
                 inline

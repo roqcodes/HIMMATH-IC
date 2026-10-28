@@ -1,7 +1,6 @@
-import type { Branch } from '@/types';
 import { isBranchPageEnabled } from '@/lib/branchPages';
 
-export type GlobalSearchCategory = 'pages' | 'branches';
+export type GlobalSearchCategory = 'pages';
 
 export type GlobalSearchResult = {
   id: string;
@@ -22,7 +21,6 @@ export type GlobalSearchSection = {
 
 export const SEARCH_CATEGORY_LABELS: Record<GlobalSearchCategory, string> = {
   pages: 'Pages',
-  branches: 'Branches',
 };
 
 export const SEARCH_PAGE_ITEMS: {
@@ -40,7 +38,6 @@ export const SEARCH_PAGE_ITEMS: {
   { id: 'accounts', label: 'Accounts', path: '/accounts', keywords: ['accounts', 'customers', 'client', 'ledger', 'balance'] },
   { id: 'settings', label: 'Settings', path: '/settings', keywords: ['settings', 'profile', 'branch'] },
   { id: 'warehouse', label: 'Warehouse', path: '/warehouse', keywords: ['warehouse', 'stock', 'delivery'] },
-  { id: 'branches', label: 'Branches', path: '/branches', keywords: ['branches', 'locations'], superadminOnly: true },
   { id: 'users', label: 'Users & Roles', path: '/users', keywords: ['users', 'roles', 'admin'], superadminOnly: true },
 ];
 
@@ -68,7 +65,6 @@ export function buildContextSearchResults(input: {
   isBranchUser: boolean;
   branchId?: string | null;
   hiddenPages?: string[];
-  branches: Branch[];
 }): GlobalSearchSection[] {
   const q = normalizeSearchQuery(input.query);
   if (!q) return [];
@@ -91,24 +87,6 @@ export function buildContextSearchResults(input: {
   }
   if (pageResults.length > 0) {
     sections.push({ category: 'pages', label: SEARCH_CATEGORY_LABELS.pages, results: pageResults });
-  }
-
-  if (input.isSuperadmin) {
-    const branchResults: GlobalSearchResult[] = [];
-    for (const branch of input.branches) {
-      if (!matchesSearch(q, branch.name, branch.slug, branch.location, branch.managerName)) continue;
-      branchResults.push({
-        id: `branch-${branch.id}`,
-        category: 'branches',
-        title: branch.name,
-        subtitle: branch.location,
-        href: `/admin/branches/${branch.slug}`,
-      });
-      if (branchResults.length >= MAX_PER_CATEGORY) break;
-    }
-    if (branchResults.length > 0) {
-      sections.push({ category: 'branches', label: SEARCH_CATEGORY_LABELS.branches, results: branchResults });
-    }
   }
 
   return sections;

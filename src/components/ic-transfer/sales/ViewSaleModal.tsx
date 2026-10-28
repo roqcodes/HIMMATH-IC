@@ -9,16 +9,15 @@ import { useApp } from '@/context/AppContext';
 import { ConfirmModal } from '@/components/warehouse/shared';
 import SalePriorityControl from '../shared/SalePriorityControl';
 import SaleOrderWorkflowSection from '../shared/SaleOrderWorkflowSection';
-import SaleFxSettlementPanel from '../collection/SaleFxSettlementPanel';
 import ProofImageActions from '../shared/ProofImageActions';
 import CopyOrderDetailsButton from '../shared/CopyOrderDetailsButton';
 import { canBranchDeleteOrder, canCustomerSeeDeliveryProof } from '@/lib/icTransfer/orderStatus';
 import { canEditOrder, canDeleteOrder, canRequestOrderCancellation } from '@/lib/icTransfer/customerOrderReview';
 import { getDeliveredUnits, getRemainingUnits, getSaleInrAmount } from '@/lib/icTransfer/saleUnits';
-import { formatRateAmount, getCurrencyUnitRate } from '@/lib/icTransfer/rateCalculations';
+import { formatAmount } from '@/lib/icTransfer/rateCalculations';
 import { isBranchScopedUser, isCustomerRole } from '@/lib/rbac';
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
-import { dbGetCustomerCurrencyAction, dbGetCustomerPhoneAction } from '@/app/actions/icTransferActions';
+import { dbGetCustomerPhoneAction } from '@/app/actions/icTransferActions';
 import {
   getAdminSaleCustomerName,
   getSaleEndCustomerId,
@@ -46,7 +45,6 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
   const [deleteLoading, setDeleteLoading] = useState(false);
 
   const liveSale = sale ? (icSales.find(s => s.id === sale.id) ?? sale) : null;
-  const [currency, setCurrency] = useState(liveSale?.currency || 'Currency');
   const [customerPhone, setCustomerPhone] = useState<string | null>(null);
   const [phoneChecked, setPhoneChecked] = useState(false);
 
@@ -62,18 +60,6 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
   const endCustomerId = liveSale ? getSaleEndCustomerId(liveSale, branchName) : undefined;
   const endCustomerName = liveSale ? getSaleEndCustomerName(liveSale, branchName, branches) : '';
   const orderImageLabel = liveSale ? getSaleOrderImageLabel(liveSale, branchName) : 'Original Order Image';
-
-  React.useEffect(() => {
-    if (liveSale?.currency) {
-      setCurrency(liveSale.currency);
-    } else if (open && (endCustomerId || endCustomerName)) {
-      dbGetCustomerCurrencyAction({ customerId: endCustomerId, customerName: endCustomerName }).then(res => {
-        if (res.success && res.data) {
-          setCurrency(res.data);
-        }
-      });
-    }
-  }, [open, endCustomerId, endCustomerName, liveSale?.currency]);
 
   React.useEffect(() => {
     if (!open) {
@@ -110,12 +96,6 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
   const formatAED = (val: any) => {
     return Number(val || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' AED';
   };
-
-  const customerUnitRate = liveSale
-    ? getCurrencyUnitRate(liveSale.unitRate, liveSale.conversionRate || 1)
-    : 0;
-  const saleCurrencyCode = (liveSale?.currency || currency || 'Currency').toUpperCase();
-  const isForeignSale = saleCurrencyCode !== 'AED' && saleCurrencyCode !== 'CURRENCY';
 
   const deliveredUnits = getDeliveredUnits(liveSale.units, liveSale.collectedUnits, liveSale.orderStatus);
   const remainingUnits = getRemainingUnits(liveSale.units, liveSale.collectedUnits, liveSale.orderStatus);
@@ -213,56 +193,23 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
             {/* Calculations Box */}
             <div className="space-y-3">
               {/* Row 1: Units + AED rate */}
-              <div
-                className={`grid gap-4 rounded-lg border border-slate-100 p-4 bg-slate-50/55 ${
-                  isCustomerViewer ? 'grid-cols-1' : 'grid-cols-2'
-                }`}
-              >
+              <div className="grid grid-cols-2 gap-4 rounded-lg border border-slate-100 bg-slate-50/55 p-4">
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Units</p>
-                  <p className="text-sm font-bold text-slate-900 mt-0.5">{Number(liveSale.units).toLocaleString()}</p>
+                  <p className="mt-0.5 text-sm font-bold text-slate-900">{Number(liveSale.units).toLocaleString()}</p>
                 </div>
                 {!isCustomerViewer ? (
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Unit Rate (AED)</p>
-                    <p className="text-sm font-bold text-slate-900 mt-0.5">{liveSale.unitRate.toLocaleString()}</p>
+                    <p className="mt-0.5 text-sm font-bold text-slate-900">{formatAmount(liveSale.unitRate)}</p>
                   </div>
-                ) : (
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Unit Rate ({currency})</p>
-                    <p className="text-sm font-bold text-slate-900 mt-0.5">
-                      {customerUnitRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </p>
-                  </div>
-                )}
+                ) : null}
               </div>
 
-              {!isCustomerViewer && isForeignSale ? (
-                <div className="grid grid-cols-2 gap-4 rounded-lg border border-slate-100 p-4 bg-slate-50/55">
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                      Conversion (AED → {saleCurrencyCode})
-                    </p>
-                    <p className="text-sm font-bold text-slate-900 mt-0.5 tabular-nums">
-                      {formatRateAmount(liveSale.conversionRate || 1)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                      Unit Rate ({saleCurrencyCode})
-                    </p>
-                    <p className="text-sm font-bold text-slate-900 mt-0.5 tabular-nums">
-                      {formatRateAmount(customerUnitRate)}
-                    </p>
-                  </div>
-                </div>
-              ) : null}
-
-              {/* Row 2: Total INR, Total Currency, Total AED */}
-              <div className={`grid gap-4 rounded-lg border border-slate-100 p-4 bg-slate-50/55 ${isCustomerViewer ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1 sm:grid-cols-3'}`}>
+              <div className={`grid gap-4 rounded-lg border border-slate-100 bg-slate-50/55 p-4 ${isCustomerViewer ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1 sm:grid-cols-3'}`}>
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total INR</p>
-                  <p className="text-sm font-bold text-slate-900 mt-0.5">
+                  <p className="mt-0.5 text-sm font-bold text-slate-900">
                     {getSaleInrAmount(Number(liveSale.units)).toLocaleString()} INR
                   </p>
                   <InrAmountInWords
@@ -270,18 +217,10 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
                     className="mt-0.5 text-[11px] font-medium leading-snug text-slate-500"
                   />
                 </div>
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total {currency}</p>
-                  <p className="text-sm font-bold text-indigo-700 mt-0.5">
-                    {liveSale.convertedAmount != null 
-                      ? `${Number(liveSale.convertedAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`
-                      : '—'}
-                  </p>
-                </div>
                 {!isCustomerViewer ? (
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total AED</p>
-                    <p className="text-sm font-bold text-accent mt-0.5">{formatAED(liveSale.aedAmount)}</p>
+                    <p className="mt-0.5 text-sm font-bold text-accent">{formatAED(liveSale.aedAmount)}</p>
                   </div>
                 ) : null}
               </div>
@@ -374,7 +313,6 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
               </div>
             )}
 
-            <SaleFxSettlementPanel sale={liveSale} />
           </div>
 
           {/* Right Column: Image Previews */}

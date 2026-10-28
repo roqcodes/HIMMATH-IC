@@ -11,7 +11,7 @@ export default async function AdminSectionPage({
 }) {
   await requirePortalUser('admin');
   const { section } = await params;
-  if (section === 'customers') redirect('/admin/accounts');
+  if (section === 'customers' || section === 'accounts') redirect('/admin/entities');
   if (!isAsicSection(section)) redirect('/admin/dashboard');
   return <ASICApp portal="admin" section={section as AsicSectionId} />;
 }

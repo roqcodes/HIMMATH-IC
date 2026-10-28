@@ -3,8 +3,7 @@ import ICTransferSettingsUsersPage from '@/components/ic-transfer/settings/ICTra
 export default function AgentManagementPage() {
   return (
     <ICTransferSettingsUsersPage
-      title="Add User"
-      subtitle="Manage agent accounts and access"
+      title="Sales Agents"
       modalTitle="Add User"
       showRate
     />

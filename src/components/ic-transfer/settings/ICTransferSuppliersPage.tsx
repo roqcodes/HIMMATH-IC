@@ -79,11 +79,6 @@ export default function ICTransferSuppliersPage({ portalMode = 'admin', branchId
   return (
     <ICTransferSettingsUsersPage
       title="Suppliers"
-      subtitle={
-        isBranchPortal
-          ? 'Manage suppliers exclusive to your branch'
-          : 'Manage HQ supplier settings and rates'
-      }
       data={scopedSuppliers}
       onEditItem={openEdit}
       onDeleteItem={handleDeleteSupplier}

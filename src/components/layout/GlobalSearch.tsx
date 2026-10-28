@@ -29,15 +29,6 @@ const CATEGORY_STYLES: Record<
       </svg>
     ),
   },
-  branches: {
-    accent: 'text-violet-600',
-    bg: 'bg-violet-50 ring-violet-600/15',
-    icon: (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-        <path d="M3 21h18M5 21V7l7-4 7 4v14" />
-      </svg>
-    ),
-  },
 };
 
 function resultBadgeClass(tone: GlobalSearchResult['badgeTone']): string {
@@ -91,7 +82,6 @@ export default function GlobalSearch({ query, open, onClose, onQueryChange }: Pr
       isBranchUser: !!isBranchUser,
       branchId,
       hiddenPages,
-      branches,
     });
   }, [
     query,
@@ -101,7 +91,6 @@ export default function GlobalSearch({ query, open, onClose, onQueryChange }: Pr
     isBranchUser,
     branchId,
     hiddenPages,
-    branches,
   ]);
 
   const sections = useMemo(

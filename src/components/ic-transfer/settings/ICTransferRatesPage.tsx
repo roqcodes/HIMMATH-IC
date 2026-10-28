@@ -12,12 +12,10 @@ import {
   type ICTransferPortalMode,
 } from '@/lib/icTransfer/branchPortalScope';
 import {
-  getAdminAssignedBranchRateGroup,
   getBranchManageableRateGroups,
   filterRateGroupsForAdminPortal,
 } from '@/lib/icTransfer/branchRateScope';
 import { hasAdvancedPricing, remapPricingConfigToConversion } from '@/lib/icTransfer/ratePricing';
-import BranchAdminAssignedRateCard from './BranchAdminAssignedRateCard';
 import RateGroupsTable from './RateGroupsTable';
 import RateGroupBulkUpdateBar from './RateGroupBulkUpdateBar';
 import RateGroupFormModal, { type RateGroupFormValues } from './RateGroupFormModal';
@@ -26,25 +24,6 @@ import RateGroupViewModal from './RateGroupViewModal';
 import ToggleSwitch from '@/components/ui/ToggleSwitch';
 import { canManageICTransferGlobalSettings } from '@/lib/icTransfer/settings';
 import type { ICRateGroup, ICRateGroupPricingConfig } from '@/types';
-
-const WORLD_CURRENCIES = [
-  'AED', 'AFN', 'ALL', 'AMD', 'ANG', 'AOA', 'ARS', 'AUD', 'AWG', 'AZN',
-  'BAM', 'BBD', 'BDT', 'BGN', 'BHD', 'BIF', 'BMD', 'BND', 'BOB', 'BRL',
-  'BSD', 'BTN', 'BWP', 'BYN', 'BZD', 'CAD', 'CDF', 'CHF', 'CLP', 'CNY',
-  'COP', 'CRC', 'CUP', 'CVE', 'CZK', 'DJF', 'DKK', 'DOP', 'DZD', 'EGP',
-  'ERN', 'ETB', 'EUR', 'FJD', 'FKP', 'GBP', 'GEL', 'GHS', 'GIP', 'GMD',
-  'GNF', 'GTQ', 'GYD', 'HKD', 'HNL', 'HRK', 'HTG', 'HUF', 'IDR', 'ILS',
-  'INR', 'IQD', 'IRR', 'ISK', 'JMD', 'JOD', 'JPY', 'KES', 'KGS', 'KHR',
-  'KMF', 'KPW', 'KRW', 'KWD', 'KYD', 'KZT', 'LAK', 'LBP', 'LKR', 'LRD',
-  'LSL', 'LYD', 'MAD', 'MDL', 'MGA', 'MKD', 'MMK', 'MNT', 'MOP', 'MRU',
-  'MUR', 'MVR', 'MWK', 'MXN', 'MYR', 'MZN', 'NAD', 'NGN', 'NIO', 'NOK',
-  'NPR', 'NZD', 'OMR', 'PAB', 'PEN', 'PGK', 'PHP', 'PKR', 'PLN', 'PYG',
-  'QAR', 'RON', 'RSD', 'RUB', 'RWF', 'SAR', 'SBD', 'SCR', 'SDG', 'SEK',
-  'SGD', 'SHP', 'SLL', 'SOS', 'SRD', 'SSP', 'STN', 'SVC', 'SYP', 'SZL',
-  'THB', 'TJS', 'TMT', 'TND', 'TOP', 'TRY', 'TTD', 'TWD', 'TZS', 'UAH',
-  'UGX', 'USD', 'UYU', 'UZS', 'VES', 'VND', 'VUV', 'WST', 'XAF', 'XCD',
-  'XOF', 'XPF', 'YER', 'ZAR', 'ZMW', 'ZWL',
-];
 
 type Props = {
   portalMode?: ICTransferPortalMode;
@@ -103,11 +82,6 @@ export default function ICTransferRatesPage({ portalMode = 'admin', branchId }: 
     [branchCustomers],
   );
 
-  const adminAssignedBranchRate = useMemo(() => {
-    if (!isBranchPortal || !branchId) return undefined;
-    return getAdminAssignedBranchRateGroup(icRateGroups, branchId);
-  }, [icRateGroups, isBranchPortal, branchId]);
-
   const branchCustomerRateGroups = useMemo(() => {
     if (isBranchPortal && branchId) {
       return getBranchManageableRateGroups(icRateGroups, branchId, branchCustomerIdSet);
@@ -119,12 +93,10 @@ export default function ICTransferRatesPage({ portalMode = 'admin', branchId }: 
 
   const rateKpi = useMemo(() => {
     const customers = new Set(scopedRateGroups.flatMap(g => g.customerIds ?? []));
-    const branches = new Set(scopedRateGroups.flatMap(g => g.branchIds ?? []));
     const stale = scopedRateGroups.filter(g => !isRateGroupUpdatedToday(g.updatedAt)).length;
     return {
       groups: scopedRateGroups.length,
       customers: customers.size,
-      branches: branches.size,
       stale,
     };
   }, [scopedRateGroups]);
@@ -134,8 +106,7 @@ export default function ICTransferRatesPage({ portalMode = 'admin', branchId }: 
     const base = q
       ? scopedRateGroups.filter(group =>
           group.name.toLowerCase().includes(q) ||
-          group.country.toLowerCase().includes(q) ||
-          group.currency.toLowerCase().includes(q),
+          group.country.toLowerCase().includes(q),
         )
       : scopedRateGroups;
     return sortRateGroupsForTable(base);
@@ -172,7 +143,7 @@ export default function ICTransferRatesPage({ portalMode = 'admin', branchId }: 
         const results = await Promise.all(
           allowedIds.map(async id => {
             const group = scopedRateGroups.find(g => g.id === id);
-            const conv = group?.conversionRate && group.conversionRate > 0 ? group.conversionRate : 1;
+            const conv = 1;
             const derivedSale = conv > 0 ? targetConverted / conv : saleRate;
             // Rebase any advanced per-type / slab rates onto this group's conversion.
             const remappedConfig = remapPricingConfigToConversion(pricingConfig, conv);
@@ -211,10 +182,7 @@ export default function ICTransferRatesPage({ portalMode = 'admin', branchId }: 
     setSavingPricingGroupId(groupId);
     const group = scopedRateGroups.find(g => g.id === groupId);
     let finalSale = saleRate;
-    const finalConv =
-      isBranchPortal && group?.conversionRate && group.conversionRate > 0
-        ? group.conversionRate
-        : conversionRate;
+    const finalConv = conversionRate > 0 ? conversionRate : 1;
 
     if (isBranchPortal && group) {
       const convertedRate = saleRate * conversionRate;
@@ -253,22 +221,9 @@ export default function ICTransferRatesPage({ portalMode = 'admin', branchId }: 
   };
 
   const handleSave = async (values: RateGroupFormValues) => {
-    const { name, country, currency } = values;
+    const { name, country } = values;
 
-    if (!name || !country || !currency) return;
-
-    if (!WORLD_CURRENCIES.includes(currency.toUpperCase())) {
-      showToast('Please select a valid currency from the list.', 'error');
-      return;
-    }
-
-    if (isBranchPortal && adminAssignedBranchRate) {
-      const expected = adminAssignedBranchRate.currency.toUpperCase();
-      if (currency.toUpperCase() !== expected) {
-        showToast(`Customer rate groups must use ${expected} (admin-assigned branch currency).`, 'error');
-        return;
-      }
-    }
+    if (!name || !country) return;
 
     setIsSaving(true);
     let success = false;
@@ -278,15 +233,15 @@ export default function ICTransferRatesPage({ portalMode = 'admin', branchId }: 
         editingGroup.id,
         name,
         country,
-        currency.toUpperCase(),
+        'AED',
         editingGroup.saleRate,
-        editingGroup.conversionRate ?? 1,
+        1,
       );
     } else {
       const newGroupId = await addICRateGroup(
         name,
         country,
-        currency.toUpperCase(),
+        'AED',
         0,
         1,
         isBranchPortal ? branchId : undefined,
@@ -309,7 +264,7 @@ export default function ICTransferRatesPage({ portalMode = 'admin', branchId }: 
 
     if (isBranchPortal && branchId) {
       const group = icRateGroups.find(g => g.id === groupId);
-      finalBranchIds = group?.branchIds ?? [];
+      finalBranchIds = [];
       finalCustomerIds = mergeBranchPortalCustomerAssignments(
         group?.customerIds,
         branchCustomerIdSet,
@@ -338,12 +293,7 @@ export default function ICTransferRatesPage({ portalMode = 'admin', branchId }: 
   return (
     <PageShell>
       <PageHeader
-        title="Rate Groups"
-        subtitle={
-          isBranchPortal
-            ? 'Your admin-assigned branch rate and customer-specific groups you manage'
-            : 'Manage dynamic rate groups for customers and branches'
-        }
+        title="Rates"
         actions={
           <div className="grid w-full max-w-full grid-cols-2 gap-2 sm:max-w-sm [&>button]:min-w-0 [&>button]:w-full">
             <AddButton
@@ -364,9 +314,6 @@ export default function ICTransferRatesPage({ portalMode = 'admin', branchId }: 
         metrics={[
           { label: 'Rate groups', value: rateKpi.groups.toLocaleString(), hint: isBranchPortal ? 'Your groups' : 'All groups' },
           { label: 'Customers', value: rateKpi.customers.toLocaleString(), hint: 'Assigned', tone: 'indigo' },
-          ...(isBranchPortal
-            ? []
-            : [{ label: 'Branches', value: rateKpi.branches.toLocaleString(), hint: 'Assigned' }]),
           {
             label: 'Stale today',
             value: rateKpi.stale.toLocaleString(),
@@ -374,14 +321,8 @@ export default function ICTransferRatesPage({ portalMode = 'admin', branchId }: 
             tone: rateKpi.stale > 0 ? 'amber' as const : 'emerald' as const,
           },
         ]}
-        columns={isBranchPortal ? 3 : 4}
+        columns={3}
       />
-
-      {isBranchPortal && adminAssignedBranchRate && (
-        <div className="mb-5">
-          <BranchAdminAssignedRateCard group={adminAssignedBranchRate} />
-        </div>
-      )}
 
       {canManageGlobalSettings ? (
         <SectionCard className="mb-5">
@@ -439,11 +380,6 @@ export default function ICTransferRatesPage({ portalMode = 'admin', branchId }: 
         mode={formMode}
         initialGroup={editingGroup}
         isSaving={isSaving}
-        lockedCurrency={
-          isBranchPortal && adminAssignedBranchRate
-            ? adminAssignedBranchRate.currency
-            : undefined
-        }
         onClose={() => {
           setFormOpen(false);
           setEditingGroup(null);

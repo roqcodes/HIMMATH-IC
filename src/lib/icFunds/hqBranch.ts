@@ -18,13 +18,9 @@ export function isHqAdminStaff(user: Pick<User, 'role' | 'branchId'> | null | un
   return user?.role === 'staff' && isHqIcFundsBranchId(user.branchId);
 }
 
-/** HQ direct customers — sign in at root admin login, not a branch portal URL. */
+/** HQ customers — sign in at admin login (HQ ledger). */
 export function isHqPortalCustomer(user: Pick<User, 'role' | 'branchId'> | null | undefined): boolean {
   return user?.role === 'customer' && isHqIcFundsBranchId(user.branchId);
-}
-
-export function isHqPortalCollectionAgent(user: Pick<User, 'role' | 'branchId'> | null | undefined): boolean {
-  return user?.role === 'collection_agent' && isHqIcFundsBranchId(user.branchId);
 }
 
 export function buildHqIcFundsBranch(): Branch {
@@ -45,7 +41,6 @@ export function buildHqIcFundsBranch(): Branch {
     status: 'active',
     timezone: 'Asia/Dubai',
     hiddenPages: [],
-    enabledCurrencies: ['AED'],
     lastActivity: now,
     createdAt: now,
   };

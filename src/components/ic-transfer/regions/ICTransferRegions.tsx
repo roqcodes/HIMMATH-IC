@@ -75,7 +75,7 @@ export default function ICTransferRegions() {
 
   return (
     <PageShell>
-      <PageHeader title="Regions" subtitle="Manage regions for suppliers and warehouses" />
+      <PageHeader title="Regions" />
 
       <AsicKpiStrip
         metrics={[

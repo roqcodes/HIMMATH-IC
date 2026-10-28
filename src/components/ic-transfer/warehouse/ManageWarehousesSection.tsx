@@ -28,7 +28,6 @@ type Props = {
   branchId?: string;
   warehouses: ICWarehouse[];
   registerOpenAdd?: (openAdd: (() => void) | null) => void;
-  addButton?: React.ReactNode;
 };
 
 export default function ManageWarehousesSection({
@@ -36,7 +35,6 @@ export default function ManageWarehousesSection({
   branchId,
   warehouses,
   registerOpenAdd,
-  addButton,
 }: Props) {
   const { icRegions, addICWarehouse, updateICWarehouse, deleteICWarehouse } = useApp();
   const router = useRouter();
@@ -129,7 +127,7 @@ export default function ManageWarehousesSection({
   };
 
   const openUsers = (warehouseId: string) => {
-    const href = getICTransferWarehouseDetailHref(workspace.slug, workspace.mode, warehouseId);
+    const href = getICTransferWarehouseDetailHref(workspace.slug ?? '', warehouseId, workspace.mode);
     router.push(href);
   };
 
@@ -147,7 +145,7 @@ export default function ManageWarehousesSection({
       />
 
       <div className="mb-3">
-        <SalesTableShell title="Warehouses" toolbarEnd={addButton}>
+        <SalesTableShell title="Warehouses">
           <table className={`${salesTableClass} min-w-[880px]`}>
             <thead>
               <tr className={salesTableTheadRowClass}>
@@ -165,7 +163,7 @@ export default function ManageWarehousesSection({
                 </tr>
               ) : (
                 sortedWarehouses.map(warehouse => {
-                  const href = getICTransferWarehouseDetailHref(workspace.slug, workspace.mode, warehouse.id);
+                  const href = getICTransferWarehouseDetailHref(workspace.slug ?? '', warehouse.id, workspace.mode);
                   return (
                     <tr
                       key={warehouse.id}

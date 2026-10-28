@@ -4,7 +4,7 @@
 
 import type { ICSaleTransactionType } from '@/lib/icTransfer/transactionTypes';
 
-export type UserRole = 'admin' | 'auditor' | 'branch_manager' | 'staff' | 'delivery' | 'customer' | 'collection_agent' | 'investor';
+export type UserRole = 'admin' | 'auditor' | 'staff' | 'delivery' | 'customer' | 'investor' | 'branch_manager' | 'collection_agent';
 
 /** Per-page access for branch staff (none = hidden, read = view-only, write = full). */
 export type PageAccessLevel = 'none' | 'read' | 'write';
@@ -29,8 +29,6 @@ export interface User {
   dealPermissions?: DealPermissionMap;
   /** Linked customers record — present for customer-role users after sign-in. */
   customerId?: string;
-  /** Linked collection agent ledger account — present for collection_agent role users. */
-  collectionAccountId?: string;
   /** Linked investors record — present for investor-role users after sign-in. */
   investorId?: string;
 }
@@ -63,8 +61,6 @@ export interface Branch {
   timezone: string;
   /** Page IDs hidden from this branch's portal (superadmin-controlled). */
   hiddenPages?: string[];
-  /** Up to 3 display currencies for this branch (stored in AED base). */
-  enabledCurrencies?: import('@/lib/currency').CurrencyCode[];
 }
 
 export type TransactionType = string;
@@ -143,8 +139,6 @@ export interface Customer {
   createdAt?: string;
   /** Supabase Auth user id when this customer has portal login credentials. */
   cognitoUserId?: string;
-  /** ISO 4217 currency code for this customer (default AED). */
-  currency?: string;
   /** Net fund-ledger position in USDT (positive = receivable, negative = payable). */
   netUsdt?: number;
 }
@@ -688,13 +682,8 @@ export interface ICRateGroup {
   id: string;
   name: string;
   country: string;
-  currency: string;
   saleRate: number;
-  conversionRate: number;
   customerIds?: string[];
-  branchIds?: string[];
-  /** Set when a branch manager creates the group from the branch portal. */
-  createdByBranchId?: string;
   pricingConfig?: ICRateGroupPricingConfig;
   createdAt?: string;
   updatedAt?: string;
@@ -723,8 +712,6 @@ export interface ICPurchase {
 }
 
 export type ICOrderStatus =
-  | 'pending_branch_review'
-  | 'branch_rejected'
   | 'pending'
   | 'accepted'
   | 'admin_rejected'
@@ -751,11 +738,6 @@ export interface ICSale {
   transactionType?: ICSaleTransactionType;
   units: number;
   unitRate: number;
-  /** HQ admin AED sale rate captured at order time (for branch profit). */
-  adminUnitRate?: number;
-  /** HQ admin conversion rate captured at order time (for branch profit). */
-  adminConversionRate?: number;
-  convertedAmount?: number;
   aedAmount?: number;
   enteredBy?: string;
   enteredByName?: string;
@@ -771,41 +753,14 @@ export interface ICSale {
   imageUrl?: string;
   serviceCharge?: number;
   bank?: string;
-  conversionRate?: number;
-  currency?: string;
   deliveryAgentId?: string;
   deliveryAgentName?: string;
-  /** Collection agent account for FX settlement grouping. */
-  collectionAccountId?: string;
-  collectionAccountName?: string;
   collectedUnits?: number;
   derivedFromSaleId?: string;
   priority?: 'High' | 'Normal' | 'Low';
-  /** Who fulfills the order: HQ admin (default) or branch manager. */
-  fulfillmentHandler?: 'hq_admin' | 'branch';
+  fulfillmentHandler?: 'hq_admin';
   deliveryImageUrl?: string;
   createdAt?: string;
-}
-
-export interface ICSaleFxSettlement {
-  id: string;
-  saleId: string;
-  collectionAccountId?: string;
-  collectionAccountName?: string;
-  currency: string;
-  paidForeign: number;
-  settlementRate: number;
-  saleConversionRate: number;
-  settledAed: number;
-  bookedAed: number;
-  type2ProfitAed: number;
-  batchId?: string;
-  settledAt?: string;
-  notes?: string;
-  enteredBy?: string;
-  enteredByName?: string;
-  createdAt?: string;
-  customerName?: string;
 }
 
 export interface ICWarehouseTransaction {
@@ -820,7 +775,6 @@ export interface ICWarehouseTransaction {
 
 export type ICFundAccountType =
   | 'bank'
-  | 'collection_agent'
   | 'personal'
   | 'income'
   | 'profit'
@@ -835,10 +789,8 @@ export interface ICFundAccount {
   branchId: string;
   branchName?: string;
   branchSlug?: string;
-  isDirect?: boolean;
   name: string;
   accountType: ICFundAccountType;
-  currency?: string;
   status: ICFundAccountStatus;
   openingBalance: number;
   notes: string;

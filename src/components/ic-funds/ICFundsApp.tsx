@@ -101,7 +101,7 @@ export default function ICFundsApp({
   if (isHq && !branchId) {
     return (
       <div className="max-w-md space-y-3">
-        <AsicPageHeader title="Accounts" subtitle="Select which ledger to work in." />
+        <AsicPageHeader title="Entities" />
         <label className={icfLabel} htmlFor="ic-funds-branch">
           Ledger
         </label>
@@ -147,17 +147,7 @@ export default function ICFundsApp({
   return (
     <div>
       {section !== 'accounts' ? (
-        <AsicPageHeader
-          title={sectionLabel(section)}
-          subtitle={
-            section === 'reports'
-              ? 'Financial books and statements'
-              : section === 'pl'
-                ? 'Profit and loss accounts with ledger entries'
-                : 'Voucher entry and history'
-          }
-          meta={ledgerPicker}
-        />
+        <AsicPageHeader title={sectionLabel(section)} meta={ledgerPicker} />
       ) : null}
       {voucherType ? (
         <VoucherScreen
@@ -171,7 +161,6 @@ export default function ICFundsApp({
           branchId={branchId!}
           navSlug={fundSlug}
           hqMode={isHq}
-          branches={operationalLedgers}
         />
       ) : section === 'pl' ? (
         <PLScreen branchId={branchId!} slug={fundSlug} portal={fundsPortal} />

@@ -5,6 +5,8 @@ import { useQuery } from '@tanstack/react-query';
 import { listAuditLogAction } from '@/modules/admin/actions';
 import { asicCard, asicInput, asicTable, asicTd, asicTh, asicTheadRow, asicTr } from '@/components/asic/ui';
 import { ASICTableSkeleton } from '@/components/asic/ASICTableSkeleton';
+import AsicPageHeader from '@/components/asic/AsicPageHeader';
+import { sectionLabel } from '@/lib/staffSectionPermissions';
 
 export default function AuditLogScreen() {
   const [offset, setOffset] = useState(0);
@@ -27,6 +29,7 @@ export default function AuditLogScreen() {
 
   return (
     <div>
+      <AsicPageHeader title={sectionLabel('audit-log')} />
       <div className={`${asicCard} hidden md:block`}>
         <div className="max-h-[calc(100dvh-12rem)] overflow-auto">
           <table className={`${asicTable} min-w-[800px]`}>

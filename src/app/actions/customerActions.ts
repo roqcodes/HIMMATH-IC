@@ -32,10 +32,6 @@ function mapCustomerRow(r: Record<string, unknown>) {
     status: String(r.status ?? 'active'),
     createdAt: r.created_at ? new Date(String(r.created_at)).toISOString() : undefined,
     cognitoUserId: r.auth_user_id ? String(r.auth_user_id) : undefined,
-    currency:
-      r.currency != null && String(r.currency).trim() !== ''
-        ? String(r.currency).trim().toUpperCase()
-        : undefined,
     hasOrders: Boolean(r.has_orders),
     netUsdt: r.net_usdt != null ? parseFloat(String(r.net_usdt)) : 0,
   };
@@ -155,7 +151,6 @@ export async function saveCustomer(
     password?: string;
     balance?: number | string;
     status?: string;
-    currency?: string;
   },
 ) {
   try {
@@ -195,28 +190,7 @@ export async function saveCustomer(
     const id = data.id || `cust_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const balance = data.balance !== undefined && data.balance !== '' ? Number(data.balance) : 0;
     const status = data.status || 'active';
-    const nextCurrency = (data.currency?.toUpperCase() || 'AED').trim();
     let cognitoUserId = existingCognitoUserId;
-
-    if (nextCurrency) {
-      const groupRes = await query(
-        `SELECT g.name, UPPER(COALESCE(g.currency, 'AED')) AS currency
-         FROM ic_rate_group_customers c
-         JOIN ic_rate_groups g ON g.id = c.group_id
-         WHERE c.customer_id = $1
-         LIMIT 1`,
-        [id],
-      );
-      if (groupRes.rows.length > 0) {
-        const groupCurrency = String(groupRes.rows[0].currency);
-        if (nextCurrency !== groupCurrency) {
-          return {
-            success: false,
-            error: `Customer currency must match rate group ${groupRes.rows[0].name} (${groupCurrency})`,
-          };
-        }
-      }
-    }
 
     if (isNew) {
       const cognitoRes = await createCustomerCognitoUser({
@@ -235,16 +209,15 @@ export async function saveCustomer(
 
     await query(
       `
-      INSERT INTO customers (id, branch_id, name, phone, email, balance, status, auth_user_id, currency)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      INSERT INTO customers (id, branch_id, name, phone, email, balance, status, auth_user_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         phone = EXCLUDED.phone,
         email = EXCLUDED.email,
         balance = EXCLUDED.balance,
         status = EXCLUDED.status,
-        auth_user_id = COALESCE(EXCLUDED.auth_user_id, customers.auth_user_id),
-        currency = EXCLUDED.currency
+        auth_user_id = COALESCE(EXCLUDED.auth_user_id, customers.auth_user_id)
     `,
       [
         id,
@@ -255,7 +228,6 @@ export async function saveCustomer(
         balance,
         status,
         cognitoUserId,
-        nextCurrency || 'AED',
       ],
     );
 

@@ -2,13 +2,13 @@ import 'server-only';
 
 import { query } from '@/lib/db';
 import { logger } from '@/lib/logger';
-import { normalizeAccountCurrency } from '@/lib/icFunds/currencyPolicy';
+import { HQ_IC_FUNDS_BRANCH_ID } from '@/lib/icFunds/hqBranch';
 
-/** Ensure every branch customer has a matching personal IC Funds account. */
+/** Ensure every customer has a personal IC Funds account on the HQ ledger. */
 export async function syncCustomerFundAccount(customerId: string): Promise<void> {
   try {
     const res = await query(
-      `SELECT id, branch_id, name, phone, email, status, COALESCE(currency, 'AED') AS currency
+      `SELECT id, name, phone, email, status
        FROM customers
        WHERE id = $1
        LIMIT 1`,
@@ -17,15 +17,12 @@ export async function syncCustomerFundAccount(customerId: string): Promise<void>
     if (res.rows.length === 0) return;
 
     const row = res.rows[0];
-    const branchId = row.branch_id ? String(row.branch_id) : null;
-    if (!branchId) return;
-
     const name = String(row.name || '').trim();
     if (!name) return;
 
     const phone = row.phone ? String(row.phone) : null;
     const status = row.status === 'inactive' ? 'inactive' : 'active';
-    const currency = normalizeAccountCurrency(row.currency);
+    const branchId = HQ_IC_FUNDS_BRANCH_ID;
 
     const existing = await query(
       `SELECT id FROM ic_fund_accounts
@@ -45,11 +42,10 @@ export async function syncCustomerFundAccount(customerId: string): Promise<void>
              phone = COALESCE($2, phone),
              status = $3,
              customer_id = $4,
-             currency = $5,
              source_type = COALESCE(source_type, 'ic_customer'),
              source_id = COALESCE(source_id, $4)
-         WHERE id = $6`,
-        [name, phone, status, customerId, currency, String(existing.rows[0].id)],
+         WHERE id = $5`,
+        [name, phone, status, customerId, String(existing.rows[0].id)],
       );
       return;
     }
@@ -58,19 +54,10 @@ export async function syncCustomerFundAccount(customerId: string): Promise<void>
     try {
       await query(
         `INSERT INTO ic_fund_accounts (
-           id, branch_id, name, account_type, currency, opening_balance, notes,
+           id, branch_id, name, account_type, opening_balance, notes,
            customer_id, phone, source_type, source_id, status
-         ) VALUES ($1, $2, $3, 'personal', $4, 0, $5, $6, $7, 'ic_customer', $6, $8)`,
-        [
-          id,
-          branchId,
-          name,
-          currency,
-          'Auto-synced from Customers',
-          customerId,
-          phone,
-          status,
-        ],
+         ) VALUES ($1, $2, $3, 'personal', 0, $4, $5, $6, 'ic_customer', $5, $7)`,
+        [id, branchId, name, 'Auto-synced from Customers', customerId, phone, status],
       );
     } catch (err) {
       const code = (err as { code?: string }).code;
@@ -78,10 +65,10 @@ export async function syncCustomerFundAccount(customerId: string): Promise<void>
       const altName = `${name} [${customerId.slice(0, 8)}]`;
       await query(
         `INSERT INTO ic_fund_accounts (
-           id, branch_id, name, account_type, currency, opening_balance, notes,
+           id, branch_id, name, account_type, opening_balance, notes,
            customer_id, phone, source_type, source_id, status
-         ) VALUES ($1, $2, $3, 'personal', $4, 0, $5, $6, $7, 'ic_customer', $6, $8)`,
-        [id, branchId, altName, currency, 'Auto-synced from Customers', customerId, phone, status],
+         ) VALUES ($1, $2, $3, 'personal', 0, $4, $5, $6, 'ic_customer', $5, $7)`,
+        [id, branchId, altName, 'Auto-synced from Customers', customerId, phone, status],
       );
     }
   } catch (err) {
@@ -91,9 +78,7 @@ export async function syncCustomerFundAccount(customerId: string): Promise<void>
 
 export async function backfillCustomerFundAccounts(): Promise<void> {
   try {
-    const res = await query(
-      `SELECT id FROM customers WHERE branch_id IS NOT NULL ORDER BY created_at ASC`,
-    );
+    const res = await query(`SELECT id FROM customers ORDER BY created_at ASC`);
     for (const row of res.rows) {
       await syncCustomerFundAccount(String(row.id));
     }

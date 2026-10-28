@@ -3,7 +3,7 @@ import { DEFAULT_IC_SALE_TRANSACTION_TYPE, transactionTypeRequiresBank } from '@
 
 export type ICSaleContentFields = Pick<
   ICSale,
-  'units' | 'transactionType' | 'address' | 'location' | 'district' | 'imageUrl' | 'serviceCharge' | 'convertedAmount' | 'aedAmount' | 'bank' | 'conversionRate' | 'currency'
+  'units' | 'transactionType' | 'address' | 'location' | 'district' | 'imageUrl' | 'serviceCharge' | 'aedAmount' | 'bank'
 >;
 
 function normStr(v?: string | null): string {
@@ -51,7 +51,6 @@ export function hasICSaleContentChanged(
   updates: ICSaleContentFields,
 ): boolean {
   if (hasICSaleEditableFieldsChanged(original, updates)) return true;
-  if (Math.abs(normNum(updates.convertedAmount) - normNum(original.convertedAmount)) > 0.0001) return true;
   if (Math.abs(normNum(updates.aedAmount) - normNum(original.aedAmount)) > 0.0001) return true;
   return false;
 }

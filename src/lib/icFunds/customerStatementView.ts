@@ -1,5 +1,13 @@
 import { IC_FUNDS_BASE_CURRENCY } from '@/lib/icFunds/currencyPolicy';
-import { roundFxCalc, formatFxAmount } from '@/lib/icTransfer/saleFxProfit';
+import { formatAmount } from '@/lib/icTransfer/rateCalculations';
+
+function roundFxCalc(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function formatFxAmount(n: number): string {
+  return formatAmount(n);
+}
 import type { ICFundStatementLine } from '@/types';
 
 /** Ledger lines that must not appear on customer-facing statements. */

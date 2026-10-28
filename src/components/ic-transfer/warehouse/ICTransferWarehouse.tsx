@@ -123,15 +123,7 @@ export default function ICTransferWarehouse({
 
   return (
     <PageShell>
-      <AsicPageHeader
-        title="Warehouse"
-        subtitle={
-          isBranchPortal
-            ? 'Branch warehouses, stock, and delivery performance'
-            : 'Stock, orders, and delivery performance by warehouse'
-        }
-        actions={addWarehouseButton}
-      />
+      <AsicPageHeader title="Warehouses" actions={addWarehouseButton} />
 
       <ICTransferDateFilterBar
         dateFilter={dateFilter}
@@ -191,7 +183,6 @@ export default function ICTransferWarehouse({
         registerOpenAdd={fn => {
           openAddWarehouseRef.current = fn;
         }}
-        addButton={addWarehouseButton}
       />
     </PageShell>
   );

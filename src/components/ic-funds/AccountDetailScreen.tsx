@@ -28,13 +28,11 @@ import {
 } from '@/lib/icFunds/accountDetailAnalytics';
 import { accountTypeLabel, IC_FUND_VOUCHER_LABELS } from '@/lib/icFunds/constants';
 import { fmtICAmount, fmtICDate, fmtLedgerAed } from '@/lib/icFunds/format';
-import { AccountCurrencyBadge } from '@/components/ic-funds/AccountCurrencyBadge';
 import { icFundsReportPath } from '@/lib/icFunds/nav';
 import { ASICPageSkeleton, ASICTableRowsSkeleton } from '@/components/asic/ASICTableSkeleton';
 import { useApp } from '@/context/AppContext';
 import { useWriteAccess } from '@/context/RbacWriteContext';
 import { icFundsBranchOptions } from '@/lib/icFunds/hqBranch';
-import CollectionAgentWalletActivitySection from '@/components/ic-funds/CollectionAgentWalletActivitySection';
 import type { ICFundAccountType, ICFundStatementLine } from '@/types';
 
 type TabId = 'ledger' | 'vouchers' | 'related';
@@ -48,7 +46,7 @@ function AmountCell({ n, danger }: { n: number; danger?: boolean }) {
 }
 
 function trendLabels(accountType: ICFundAccountType): { title: string; debit: string; credit: string } {
-  if (accountType === 'bank' || accountType === 'collection_agent') {
+  if (accountType === 'bank') {
     return { title: 'Monthly cash in vs out', debit: 'Inflow', credit: 'Outflow' };
   }
   if (accountType === 'income') {
@@ -61,7 +59,7 @@ function trendLabels(accountType: ICFundAccountType): { title: string; debit: st
 }
 
 function voucherBreakdownTitle(accountType: ICFundAccountType): string {
-  if (accountType === 'bank' || accountType === 'collection_agent') return 'Voucher mix (amount)';
+  if (accountType === 'bank') return 'Voucher mix (amount)';
   return 'Entries by voucher type';
 }
 
@@ -193,11 +191,9 @@ export default function AccountDetailScreen() {
   const navSlug = detail?.account.branchSlug || slug;
 
   const hasRelated = Boolean(detail?.relatedPurchases?.length || detail?.relatedSales?.length);
-  const isCollectionAgent = detail?.account.accountType === 'collection_agent';
-
   const tabs = useMemo(() => {
     const items: Array<{ id: TabId; label: string; count?: number }> = [
-      { id: 'ledger', label: 'Ledger (AED)', count: Math.max(0, (detail?.statement.lines.length ?? 1) - 1) },
+      { id: 'ledger', label: 'Ledger', count: Math.max(0, (detail?.statement.lines.length ?? 1) - 1) },
       { id: 'vouchers', label: 'Vouchers', count: detail?.vouchers.length ?? 0 },
     ];
     if (hasRelated) {
@@ -240,7 +236,6 @@ export default function AccountDetailScreen() {
     account.balance,
     account.openingBalance,
     account.pendingBalance ?? 0,
-    account.currency,
   );
   const voucherChartData = stats.voucherTypeBreakdown.map(v => ({
     label: IC_FUND_VOUCHER_LABELS[v.type].replace(/s$/, ''),
@@ -267,7 +262,6 @@ export default function AccountDetailScreen() {
                 <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-600">
                   {accountTypeLabel(account.accountType)}
                 </span>
-                <AccountCurrencyBadge accountType={account.accountType} currency={account.currency} />
                 <span
                   className={`rounded-md px-1.5 py-0.5 text-[10px] font-medium capitalize ${
                     account.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
@@ -341,27 +335,10 @@ export default function AccountDetailScreen() {
         </div>
       </div>
 
-      {isCollectionAgent ? (
-        <div className={icfCard}>
-          <div className="border-b border-slate-200 px-3 py-2.5">
-            <h3 className="text-sm font-semibold text-slate-900">Wallet activity</h3>
-            <p className="mt-0.5 text-[11px] text-slate-500">
-              {(account.currency || 'SAR').toUpperCase()} customer payments held until FX remittance —
-              separate from the AED ledger below
-            </p>
-          </div>
-          <CollectionAgentWalletActivitySection
-            collectionAccountId={account.id}
-            currency={account.currency || 'SAR'}
-            branchSlug={navSlug}
-          />
-        </div>
-      ) : null}
-
       <div className={icfCard}>
         <div className="border-b border-slate-200 px-3 py-2.5">
           <h3 className="text-sm font-semibold text-slate-900">IC Funds ledger</h3>
-          <p className="mt-0.5 text-[11px] text-slate-500">AED company ledger — vouchers and statement</p>
+          <p className="mt-0.5 text-[11px] text-slate-500">Vouchers and statement</p>
         </div>
         <AsicTabBar
           tabs={tabs.map(t => ({ id: t.id, label: t.label, count: t.count }))}

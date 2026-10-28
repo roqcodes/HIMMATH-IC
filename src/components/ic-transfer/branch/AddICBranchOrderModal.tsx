@@ -92,8 +92,8 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
     const branchId = currentBranchId ?? user?.branchId;
 
     if (isCustomer && linkedCustomerId) {
-      const branchGroup = resolveCustomerPortalRateGroup(icRateGroups, linkedCustomerId, branchId);
-      return { branchGroup, adminGroup: undefined };
+      const group = resolveCustomerPortalRateGroup(icRateGroups, linkedCustomerId, branchId);
+      return { group, saleRateAed: group?.saleRate ?? 0 };
     }
 
     return resolveBranchOrderRates(icRateGroups, {
@@ -111,26 +111,14 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
     branchCustomerIdSet,
   ]);
 
-  const applicableGroup = orderRates.branchGroup;
-  const adminRateGroup = orderRates.adminGroup;
+  const applicableGroup = orderRates.group;
 
   const resolvedBranchRate = useMemo(() => {
     if (!applicableGroup) return { saleRate: 0, conversionRate: 1 };
     return resolveGroupOrderRate(applicableGroup, transactionType, parseFloat(units) || 0);
   }, [applicableGroup, transactionType, units]);
 
-  const resolvedAdminRate = useMemo(() => {
-    if (!adminRateGroup) return null;
-    return resolveGroupOrderRate(adminRateGroup, transactionType, parseFloat(units) || 0);
-  }, [adminRateGroup, transactionType, units]);
-
-  const groupConversionRate = initialData
-    ? (initialData.conversionRate ?? 1)
-    : resolvedBranchRate.conversionRate;
-  const groupCurrency = applicableGroup?.currency || 'Currency';
   const groupSaleRate = initialData ? initialData.unitRate : resolvedBranchRate.saleRate;
-  const adminSaleRate = resolvedAdminRate?.saleRate ?? adminRateGroup?.saleRate;
-  const adminConversionRate = resolvedAdminRate?.conversionRate ?? adminRateGroup?.conversionRate ?? 1;
 
   useEffect(() => {
     if (!open || !currentSlug) return;
@@ -185,7 +173,7 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
       } else {
         setEditBaseline(null);
       }
-      setHandleAtBranch(initialData?.fulfillmentHandler === 'branch');
+      setHandleAtBranch(false);
     }
   }, [open, initialData, isCustomer, linkedCustomerId, linkedCustomerName]);
 
@@ -219,7 +207,7 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
   const rateNum = groupSaleRate;
   const serviceChargeNum = 0;
 
-  const amounts = computeICSaleAmounts(unitNum, rateNum, groupConversionRate, serviceChargeNum);
+  const amounts = computeICSaleAmounts(unitNum, rateNum, serviceChargeNum);
 
   const isEditMode = !!initialData && canEditOrder(initialData, user?.role);
 
@@ -267,7 +255,6 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
     transactionType,
     unitRate: rateNum,
     units: unitNum,
-    convertedAmount: amounts.currencyTotal,
     aedAmount: amounts.aedNetTotal,
     bank: showBankField ? (bank || undefined) : undefined,
     address: address || undefined,
@@ -275,17 +262,12 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
     district: isByHand ? district.trim() || undefined : undefined,
     imageUrl: imageUrl || undefined,
     serviceCharge: serviceChargeNum,
-    conversionRate: groupConversionRate,
-    currency: groupCurrency,
-    adminUnitRate: adminSaleRate,
-    adminConversionRate: adminSaleRate != null ? adminConversionRate : undefined,
-    fulfillmentHandler: handleAtBranch ? ('branch' as const) : ('hq_admin' as const),
+    fulfillmentHandler: 'hq_admin' as const,
   };
 
   const contentPayload = {
     units: unitNum,
     transactionType,
-    convertedAmount: amounts.currencyTotal,
     aedAmount: amounts.aedNetTotal,
     bank: showBankField ? (bank || undefined) : undefined,
     address: address || undefined,
@@ -293,8 +275,6 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
     district: isByHand ? district.trim() || undefined : undefined,
     imageUrl: imageUrl || undefined,
     serviceCharge: serviceChargeNum,
-    conversionRate: groupConversionRate,
-    currency: groupCurrency,
   };
 
   const editableSnapshot = {
@@ -525,30 +505,6 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
             <h3 className="border-b border-slate-100 pb-2 text-sm font-bold text-slate-900">Transaction Details</h3>
             
             <div className="flex flex-col gap-4">
-              {isBranchManager && !isCustomer && !isEditMode && (
-                <label className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5">
-                  <div className="min-w-0">
-                    <span className="text-xs font-semibold text-slate-800">Handle at branch</span>
-                    <p className="text-[10px] text-slate-500">Off = send to admin for fulfillment (your customer rate still applies)</p>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={handleAtBranch}
-                    onClick={() => setHandleAtBranch(prev => !prev)}
-                    className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 ${
-                      handleAtBranch ? 'bg-accent' : 'bg-slate-200'
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block size-5 translate-y-0.5 rounded-full bg-white shadow transition-transform ${
-                        handleAtBranch ? 'translate-x-[22px]' : 'translate-x-0.5'
-                      }`}
-                    />
-                  </button>
-                </label>
-              )}
-
               <div className="order-2 md:order-1">
                 <InputField label="Transaction Type">
                   <TransactionTypeSelector
@@ -572,10 +528,10 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
                   />
                 </InputField>
 
-                <InputField label={`Unit Rate (${groupCurrency}) (Locked)`}>
+                <InputField label="Unit Rate (AED) (Locked)">
                   <input 
                     className={`${formInput} bg-slate-50 text-slate-500 font-semibold cursor-not-allowed`} 
-                    value={amounts.currencyUnitRate} 
+                    value={rateNum} 
                     disabled 
                     readOnly 
                     type="number" 
@@ -602,16 +558,14 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
                 <InrAmountInWords amount={amounts.inrTotal} />
               </div>
 
-              {applicableGroup && (
-                <div className="text-center p-3 rounded-xl bg-white border border-slate-100 flex flex-col justify-center shadow-sm">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    Amount ({groupCurrency})
-                  </span>
-                  <span className="mt-1.5 text-base sm:text-lg font-bold text-slate-800 font-mono">
-                    {formatAmount(amounts.currencyTotal)}
-                  </span>
-                </div>
-              )}
+              <div className="text-center p-3 rounded-xl bg-white border border-slate-100 flex flex-col justify-center shadow-sm">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Amount (AED)
+                </span>
+                <span className="mt-1.5 text-base sm:text-lg font-bold text-slate-800 font-mono">
+                  {formatAmount(amounts.aedNetTotal)}
+                </span>
+              </div>
             </div>
           </div>
         </div>

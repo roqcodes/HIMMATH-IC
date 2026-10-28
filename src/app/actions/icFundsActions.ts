@@ -7,11 +7,9 @@ import { writeAuditLog } from '@/lib/audit';
 import { revalidatePath } from 'next/cache';
 import {
   createCustomerCognitoUser,
-  createCollectionAgentCognitoUser,
   resetCustomerCognitoPasswordAction,
   updateCognitoUserName,
 } from '@/app/actions/cognitoActions';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { requireICFundsAccess } from '@/lib/icFunds/requireAccess';
 import { ensureHqIcFundsBranch } from '@/lib/icFunds/ensureHqBranch';
 import { backfillICTransferFundAccounts } from '@/lib/icFunds/icTransferFundSync';
@@ -105,10 +103,8 @@ function mapAccount(row: Record<string, unknown>): ICFundAccount {
     branchId,
     branchName: row.branch_name ? String(row.branch_name) : undefined,
     branchSlug,
-    isDirect: isHqIcFundsBranch({ id: branchId, slug: branchSlug ?? '' }),
     name: String(row.name),
     accountType: row.account_type as ICFundAccountType,
-    currency: row.currency ? String(row.currency).toUpperCase() : 'AED',
     status: row.status === 'inactive' ? 'inactive' : 'active',
     openingBalance: Number(row.opening_balance) || 0,
     notes: String(row.notes ?? ''),
@@ -122,7 +118,7 @@ function mapAccount(row: Record<string, unknown>): ICFundAccount {
         ? String(row.customer_email)
         : undefined,
     phone: row.customer_phone ? String(row.customer_phone) : undefined,
-    hasPortalLogin: Boolean(row.customer_auth_user_id || row.agent_auth_user_id),
+    hasPortalLogin: Boolean(row.customer_auth_user_id),
     sourceType: row.source_type ? String(row.source_type) : undefined,
     sourceId: row.source_id ? String(row.source_id) : undefined,
   };
@@ -178,14 +174,12 @@ function accountBalanceSelectSql(opts?: {
     c.email AS customer_email,
     COALESCE(c.phone, a.phone) AS customer_phone,
     c.auth_user_id AS customer_auth_user_id,
-    p.id AS agent_auth_user_id,
     b.name AS branch_name,
     b.slug AS branch_slug
     FROM ic_fund_accounts a
     ${movementJoin}
     ${pendingJoin}
     LEFT JOIN customers c ON c.id = a.customer_id
-    LEFT JOIN profiles p ON p.collection_account_id = a.id
     LEFT JOIN branches b ON b.id = a.branch_id`;
 }
 
@@ -461,7 +455,7 @@ export async function listICFundAccountsLiteAction(branchId: string): Promise<IC
   if (!access.ok) return [];
   try {
     const res = await query(
-      `SELECT a.id, a.branch_id, a.name, a.account_type, a.currency, a.status, a.opening_balance,
+      `SELECT a.id, a.branch_id, a.name, a.account_type, a.status, a.opening_balance,
               a.notes, a.created_at, a.customer_id, a.source_type, a.source_id, a.phone,
               c.email AS customer_email,
               COALESCE(c.phone, a.phone) AS customer_phone,
@@ -489,7 +483,8 @@ export async function listHQICFundAccountsAction(): Promise<ICFundAccount[]> {
   try {
     await ensureHqIcFundsBranch();
     const res = await query(
-      `${accountBalanceSelectSql()} ORDER BY a.account_type, LOWER(a.name)`,
+      `${accountBalanceSelectSql({ branchParam: '$1' })} WHERE a.branch_id = $1 ORDER BY a.account_type, LOWER(a.name)`,
+      [HQ_IC_FUNDS_BRANCH_ID],
     );
     return res.rows.map(r => mapAccount(r as Record<string, unknown>));
   } catch (err) {
@@ -528,6 +523,12 @@ export async function createICFundAccountAction(
   const access = await requireICFundsAccess(parsed.data.branchId, 'write');
   if (!access.ok) return { success: false, error: access.error };
 
+  await ensureHqIcFundsBranch();
+  const ledgerBranchId =
+    access.user.role === 'admin' || isHqIcFundsBranchId(parsed.data.branchId)
+      ? HQ_IC_FUNDS_BRANCH_ID
+      : parsed.data.branchId;
+
   const id = `ICFA-${crypto.randomUUID().slice(0, 10).toUpperCase()}`;
   const email = parsed.data.email?.trim() || '';
   const password = parsed.data.password?.trim() || '';
@@ -545,39 +546,12 @@ export async function createICFundAccountAction(
   let portalUserId: string | null = null;
 
   try {
-    if (parsed.data.requireSignIn && parsed.data.accountType === 'collection_agent') {
-      await query(
-        `INSERT INTO ic_fund_accounts (id, branch_id, name, account_type, currency, opening_balance, notes, phone, source_type, source_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ic_collection_agent', $1)`,
-        [
-          id,
-          parsed.data.branchId,
-          parsed.data.name.trim(),
-          parsed.data.accountType,
-          String(parsed.data.currency || 'AED').trim().toUpperCase(),
-          Number(parsed.data.openingBalance.toFixed(2)),
-          parsed.data.notes?.trim() ?? '',
-          phone,
-        ],
-      );
-      const cognitoRes = await createCollectionAgentCognitoUser({
-        email,
-        name: parsed.data.name.trim(),
-        branchId: parsed.data.branchId,
-        password,
-        collectionAccountId: id,
-      });
-      if (!cognitoRes.success || !cognitoRes.userId) {
-        await query(`DELETE FROM ic_fund_accounts WHERE id = $1`, [id]);
-        return { success: false, error: cognitoRes.error || 'Failed to create portal login account.' };
-      }
-      portalUserId = cognitoRes.userId;
-    } else if (parsed.data.requireSignIn) {
+    if (parsed.data.requireSignIn) {
       customerId = `cust_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
       const cognitoRes = await createCustomerCognitoUser({
         email,
         name: parsed.data.name.trim(),
-        branchId: parsed.data.branchId,
+        branchId: ledgerBranchId,
         password,
       });
       if (!cognitoRes.success || !cognitoRes.userId) {
@@ -585,16 +559,15 @@ export async function createICFundAccountAction(
       }
 
       await query(
-        `INSERT INTO customers (id, branch_id, name, phone, email, balance, status, auth_user_id, currency)
-         VALUES ($1, $2, $3, $4, $5, 0, 'active', $6, $7)`,
+        `INSERT INTO customers (id, branch_id, name, phone, email, balance, status, auth_user_id)
+         VALUES ($1, $2, $3, $4, $5, 0, 'active', $6)`,
         [
           customerId,
-          parsed.data.branchId,
+          ledgerBranchId,
           parsed.data.name.trim(),
           phone,
           email,
           cognitoRes.userId,
-          String(parsed.data.currency || 'AED').trim().toUpperCase(),
         ],
       );
       await query(`UPDATE profiles SET customer_id = $1 WHERE id = $2`, [customerId, cognitoRes.userId]);
@@ -602,20 +575,19 @@ export async function createICFundAccountAction(
 
     if (!portalUserId) {
       await query(
-        `INSERT INTO ic_fund_accounts (id, branch_id, name, account_type, currency, opening_balance, notes, customer_id, phone, source_type, source_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        `INSERT INTO ic_fund_accounts (id, branch_id, name, account_type, opening_balance, notes, customer_id, phone, source_type, source_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
         [
           id,
-          parsed.data.branchId,
+          ledgerBranchId,
           parsed.data.name.trim(),
           parsed.data.accountType,
-          String(parsed.data.currency || 'AED').trim().toUpperCase(),
           Number(parsed.data.openingBalance.toFixed(2)),
           parsed.data.notes?.trim() ?? '',
           customerId,
           phone,
-          customerId ? 'ic_customer' : parsed.data.accountType === 'collection_agent' ? 'ic_collection_agent' : null,
-          customerId ?? (parsed.data.accountType === 'collection_agent' ? id : null),
+          customerId ? 'ic_customer' : null,
+          customerId,
         ],
       );
     }
@@ -707,49 +679,7 @@ export async function updateICFundAccountAction(input: unknown): Promise<ActionR
     }
 
     const existingType = String(existing.rows[0].account_type);
-    const existingCurrency = String(existing.rows[0].currency || 'AED').trim().toUpperCase();
     const nextType = parsed.data.accountType ?? existingType;
-    const nextCurrency = parsed.data.currency
-      ? String(parsed.data.currency).trim().toUpperCase()
-      : existingCurrency;
-
-    if (nextType === 'collection_agent' && nextCurrency === 'AED') {
-      return { success: false, error: 'Collection agents must use a foreign currency (e.g. SAR)' };
-    }
-
-    if (nextType !== 'collection_agent' && nextType !== 'personal' && nextCurrency !== 'AED') {
-      return { success: false, error: 'Only personal and collection agent accounts may use a non-AED currency tag' };
-    }
-
-    if (parsed.data.currency !== undefined && nextCurrency !== existingCurrency) {
-      const blocked = await query(
-        `SELECT
-           EXISTS (
-             SELECT 1 FROM ic_fund_vouchers
-             WHERE debit_account_id = $1 OR credit_account_id = $1
-           ) AS has_vouchers,
-           EXISTS (
-             SELECT 1 FROM customer_collection_agents
-             WHERE collection_account_id = $1
-           ) AS has_customer_links,
-           EXISTS (
-             SELECT 1 FROM ic_wallet_sale_allocations
-             WHERE collection_account_id = $1
-           ) AS has_wallet_allocations,
-           EXISTS (
-             SELECT 1 FROM ic_sale_fx_settlements
-             WHERE collection_account_id = $1
-           ) AS has_fx_settlements`,
-        [parsed.data.id],
-      );
-      const row = blocked.rows[0] as Record<string, unknown> | undefined;
-      if (row?.has_vouchers || row?.has_customer_links || row?.has_wallet_allocations || row?.has_fx_settlements) {
-        return {
-          success: false,
-          error: 'Currency cannot be changed after vouchers, customer links, or FX activity exist on this account.',
-        };
-      }
-    }
 
     const sets: string[] = [];
     const values: unknown[] = [];
@@ -762,7 +692,6 @@ export async function updateICFundAccountAction(input: unknown): Promise<ActionR
 
     if (parsed.data.name !== undefined) push('name', parsed.data.name.trim());
     if (parsed.data.accountType !== undefined) push('account_type', parsed.data.accountType);
-    if (parsed.data.currency !== undefined && nextCurrency !== existingCurrency) push('currency', nextCurrency);
     if (parsed.data.status !== undefined) push('status', parsed.data.status);
     if (parsed.data.openingBalance !== undefined) push('opening_balance', Number(parsed.data.openingBalance.toFixed(2)));
     if (parsed.data.notes !== undefined) push('notes', parsed.data.notes.trim());
@@ -793,18 +722,15 @@ export async function updateICFundAccountAction(input: unknown): Promise<ActionR
 
     if (enablingPortal) {
       const portalCheck = await query(
-        `SELECT
-           c.auth_user_id AS customer_auth_user_id,
-           p.id AS agent_auth_user_id
+        `SELECT c.auth_user_id AS customer_auth_user_id
          FROM ic_fund_accounts a
          LEFT JOIN customers c ON c.id = a.customer_id
-         LEFT JOIN profiles p ON p.collection_account_id = a.id
          WHERE a.id = $1 AND a.branch_id = $2
          LIMIT 1`,
         [parsed.data.id, parsed.data.branchId],
       );
       const portalRow = portalCheck.rows[0] as Record<string, unknown> | undefined;
-      const hasPortal = Boolean(portalRow?.customer_auth_user_id || portalRow?.agent_auth_user_id);
+      const hasPortal = Boolean(portalRow?.customer_auth_user_id);
       if (!hasPortal) {
         const email = parsed.data.email?.trim() || '';
         const password = parsed.data.password?.trim() || '';
@@ -817,25 +743,7 @@ export async function updateICFundAccountAction(input: unknown): Promise<ActionR
               ? String(existing.rows[0].phone)
               : null;
 
-        if (nextType === 'collection_agent') {
-          const cognitoRes = await createCollectionAgentCognitoUser({
-            email,
-            name: accountName,
-            branchId: parsed.data.branchId,
-            password,
-            collectionAccountId: parsed.data.id,
-          });
-          if (!cognitoRes.success) {
-            return { success: false, error: cognitoRes.error || 'Failed to create portal login account.' };
-          }
-          await query(
-            `UPDATE ic_fund_accounts
-             SET source_type = COALESCE(source_type, 'ic_collection_agent'),
-                 source_id = COALESCE(source_id, $1)
-             WHERE id = $2 AND branch_id = $3`,
-            [parsed.data.id, parsed.data.id, parsed.data.branchId],
-          );
-        } else {
+        {
           const newCustomerId = `cust_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
           const cognitoRes = await createCustomerCognitoUser({
             email,
@@ -848,17 +756,9 @@ export async function updateICFundAccountAction(input: unknown): Promise<ActionR
           }
 
           await query(
-            `INSERT INTO customers (id, branch_id, name, phone, email, balance, status, auth_user_id, currency)
-             VALUES ($1, $2, $3, $4, $5, 0, 'active', $6, $7)`,
-            [
-              newCustomerId,
-              parsed.data.branchId,
-              accountName,
-              phone,
-              email,
-              cognitoRes.userId,
-              nextCurrency,
-            ],
+            `INSERT INTO customers (id, branch_id, name, phone, email, balance, status, auth_user_id)
+             VALUES ($1, $2, $3, $4, $5, 0, 'active', $6)`,
+            [newCustomerId, parsed.data.branchId, accountName, phone, email, cognitoRes.userId],
           );
           await query(`UPDATE profiles SET customer_id = $1 WHERE id = $2`, [newCustomerId, cognitoRes.userId]);
           await query(
@@ -913,41 +813,23 @@ export async function resetICFundAccountPasswordAction(
 
   try {
     const res = await query(
-      `SELECT
-         c.email AS customer_email,
-         c.auth_user_id AS customer_auth_user_id,
-         p.email AS agent_email,
-         p.id AS agent_auth_user_id
+      `SELECT c.email AS customer_email, c.auth_user_id AS customer_auth_user_id
        FROM ic_fund_accounts a
        LEFT JOIN customers c ON c.id = a.customer_id
-       LEFT JOIN profiles p ON p.collection_account_id = a.id
        WHERE a.id = $1 AND a.branch_id = $2
        LIMIT 1`,
       [accountId, branchId],
     );
     if (res.rows.length === 0) return { success: false, error: 'Account not found' };
     const row = res.rows[0] as Record<string, unknown>;
-    const email = row.customer_email
-      ? String(row.customer_email)
-      : row.agent_email
-        ? String(row.agent_email)
-        : '';
+    const email = row.customer_email ? String(row.customer_email) : '';
     const customerAuthUserId = row.customer_auth_user_id ? String(row.customer_auth_user_id) : '';
-    const agentAuthUserId = row.agent_auth_user_id ? String(row.agent_auth_user_id) : '';
-    if (!email || (!customerAuthUserId && !agentAuthUserId)) {
+    if (!email || !customerAuthUserId) {
       return { success: false, error: 'This account has no portal login.' };
     }
 
-    if (customerAuthUserId) {
-      const reset = await resetCustomerCognitoPasswordAction(email, passwordRaw, access.slug);
-      if (!reset.success) return { success: false, error: reset.error || 'Failed to reset password' };
-      return { success: true, data: undefined };
-    }
-
-    const { error } = await createSupabaseAdminClient().auth.admin.updateUserById(agentAuthUserId, {
-      password: passwordRaw,
-    });
-    if (error) return { success: false, error: error.message };
+    const reset = await resetCustomerCognitoPasswordAction(email, passwordRaw, access.slug);
+    if (!reset.success) return { success: false, error: reset.error || 'Failed to reset password' };
     return { success: true, data: undefined };
   } catch (err) {
     logger.error({ err, branchId, accountId }, 'Failed to reset IC fund account password');
@@ -1006,7 +888,7 @@ export async function postICFundVoucherAction(input: unknown): Promise<ActionRes
   try {
     const id = await withTransaction(async (client) => {
       const accounts = await client.query(
-        `SELECT id, account_type, status, branch_id, currency
+        `SELECT id, account_type, status, branch_id
          FROM ic_fund_accounts
          WHERE id = ANY($1::varchar[]) AND branch_id = $2
          ORDER BY id
@@ -1260,7 +1142,6 @@ export async function getCustomerICFundStatementAction(params: {
   branchId: string;
   accountId: string;
   customerId: string;
-  customerCurrency?: string | null;
   startDate?: string;
   endDate?: string;
 }): Promise<
@@ -1269,31 +1150,9 @@ export async function getCustomerICFundStatementAction(params: {
     opening: number;
     closing: number;
     lines: ICFundStatementLine[];
-    defaultFxRate: number;
-    customerCurrency: string;
   }>
 > {
-  const base = await getICFundStatementAction(params);
-  if (!base.success) return base;
-
-  const { enrichStatementFxRates } = await import('@/lib/icFunds/customerStatementFx.server');
-  const { IC_FUNDS_BASE_CURRENCY } = await import('@/lib/icFunds/currencyPolicy');
-  const currency =
-    params.customerCurrency?.trim().toUpperCase() || IC_FUNDS_BASE_CURRENCY;
-
-  const { lines, defaultFxRate } = await enrichStatementFxRates(base.data.lines, params.customerId);
-
-  return {
-    success: true,
-    data: {
-      account: base.data.account,
-      opening: base.data.opening,
-      closing: base.data.closing,
-      lines,
-      defaultFxRate,
-      customerCurrency: currency,
-    },
-  };
+  return getICFundStatementAction(params);
 }
 
 export async function getICFundAccountDetailAction(params: {

@@ -1,10 +1,12 @@
-/** INR display for warehouse / delivery portals — matches branch convention (units × 1000). */
-export function getSaleInrAmount(units: number, convertedAmount?: number | null): number {
-  return Number(units) * 1000;
+import { INR_PER_UNIT } from '@/lib/icTransfer/rateCalculations';
+
+/** INR display — 1 unit = 1 lakh (100,000 INR). */
+export function getSaleInrAmount(units: number): number {
+  return Number(units) * INR_PER_UNIT;
 }
 
-export function formatInr(units: number, convertedAmount?: number | null): string {
-  return `${getSaleInrAmount(units, convertedAmount).toLocaleString('en-IN')} INR`;
+export function formatInr(units: number): string {
+  return `${getSaleInrAmount(units).toLocaleString('en-IN')} INR`;
 }
 
 export function formatUnits(units: number): string {
@@ -17,16 +19,13 @@ export function scaleSaleFinancials(
   newUnits: number,
   unitRate: number,
   serviceCharge: number = 0,
-  conversionRate: number = 1,
 ) {
   const ratio = originalUnits > 0 ? newUnits / originalUnits : 1;
   const aedBase = newUnits * unitRate;
   const scaledService = serviceCharge * ratio;
   const aedAmount = Math.max(0, aedBase - scaledService);
-  const convertedAmount = aedBase * conversionRate;
   return {
     units: newUnits,
-    convertedAmount,
     aedAmount,
     serviceCharge: scaledService,
   };
@@ -38,9 +37,9 @@ export function getDeliveredUnits(
   orderStatus?: string | null,
 ): number {
   if (orderStatus === 'completed' || orderStatus === 'delivery_pending_admin') {
-    return collectedUnits != null && collectedUnits > 0 ? Number(collectedUnits) : Number(units);
+    return Number(units);
   }
-  return Number(collectedUnits || 0);
+  return Number(collectedUnits ?? 0);
 }
 
 export function getRemainingUnits(
@@ -48,14 +47,19 @@ export function getRemainingUnits(
   collectedUnits?: number | null,
   orderStatus?: string | null,
 ): number {
-  return Math.max(0, Number(units) - getDeliveredUnits(units, collectedUnits, orderStatus));
+  const total = Number(units);
+  const delivered = getDeliveredUnits(units, collectedUnits, orderStatus);
+  return Math.max(0, total - delivered);
 }
 
 export function isSaleCompleted(orderStatus?: string | null): boolean {
   return orderStatus === 'completed';
 }
 
-/** Delivery agent finished — includes orders awaiting admin verification. */
 export function isDeliveryAgentFinished(orderStatus?: string | null): boolean {
-  return orderStatus === 'completed' || orderStatus === 'delivery_pending_admin';
+  return (
+    orderStatus === 'completed' ||
+    orderStatus === 'delivery_pending_admin' ||
+    orderStatus === 'da_rejected'
+  );
 }

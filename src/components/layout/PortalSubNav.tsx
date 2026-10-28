@@ -288,7 +288,7 @@ export default function PortalSubNav() {
   if (isICTransferAdminRoute && icTransferAdminLinks.length > 1) {
     return (
       <SubNavBar
-        label="IC Transfer (Admin)"
+        label="Transfer Administration"
         links={icTransferAdminLinks}
         isActive={isICTransferAdminActive}
       />
@@ -299,7 +299,6 @@ export default function PortalSubNav() {
     return (
       <SubNavBar
         label={branchPortalDisplay.title}
-        sublabel={branchPortalDisplay.subtitle}
         links={icTransferBranchLinks}
         isActive={isICTransferBranchActive}
       />
@@ -309,7 +308,7 @@ export default function PortalSubNav() {
   if (showWarehouseSubNav && warehouseLinks.length > 1) {
     return (
       <SubNavBar
-        label="Warehouse"
+        label="Warehouses"
         links={warehouseLinks}
         isActive={isWarehouseActive}
         variant="centered"

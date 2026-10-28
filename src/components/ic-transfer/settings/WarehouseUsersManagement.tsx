@@ -147,7 +147,6 @@ export default function WarehouseUsersManagement({
       {!embedded ? (
         <AsicPageHeader
           title="Warehouse Users"
-          subtitle="Manage users who have access to this specific warehouse."
           actions={
             <button type="button" className={asicBtnPrimary} onClick={() => setShowCreate(true)}>
               Add warehouse user

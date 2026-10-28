@@ -24,7 +24,6 @@ import {
   ICSale,
   ICWarehouseTransaction,
 } from '@/types';
-import { setGlobalCurrency } from '@/lib/format';
 import { getCurrentUserAction, logoutAction } from '@/app/actions/auth';
 import { fetchAsicInitialDataAction, fetchAsicTransactionalDataAction } from '@/app/actions/asicDataActions';
 import { parseAsicPath } from '@/lib/asic/routing';
@@ -61,12 +60,6 @@ import {
   updateICTransferAutoRateResetAction,
 } from '@/app/actions/icTransferSettingsActions';
 import { DEFAULT_IC_TRANSFER_SETTINGS } from '@/lib/icTransfer/settings';
-import { fetchCurrencyRatesAction } from '@/app/actions/currencyActions';
-import {
-  sanitizeEnabledCurrencies,
-  setLiveCurrencyRates,
-  type CurrencyCode,
-} from '@/lib/currency';
 import { isBranchScopedUser, isBranchPortalRole } from '@/lib/rbac';
 import {
   getVisibleMainNavItems,
@@ -90,10 +83,6 @@ interface AppState {
   globalBranches: Branch[];
   branches: Branch[];
   isInitialLoading: boolean;
-  activeCurrency: CurrencyCode;
-  currencyRates: Record<string, number>;
-  currencyRatesFetchedAt: string | null;
-  currencyRatesLive: boolean;
   icRegions: ICRegion[];
   icSuppliers: ICSupplier[];
   icWarehouses: ICWarehouse[];
@@ -112,9 +101,6 @@ interface AppContextType extends AppState {
   isICTransferBranchRoute: boolean;
   isWarehouseRoute: boolean;
   compactPortalHome: string;
-  setActiveCurrency: (c: CurrencyCode) => void;
-  enabledCurrencies: CurrencyCode[];
-  refetchCurrencyRates: () => Promise<void>;
   refetchData: (userOverride?: User | null, options?: { silent?: boolean }) => Promise<void>;
   registerPageRefresh: (handler: () => void | Promise<void>) => () => void;
   refreshAppData: () => Promise<void>;
@@ -287,10 +273,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     globalBranches: [],
     branches: [],
     isInitialLoading: true,
-    activeCurrency: 'AED',
-    currencyRates: {},
-    currencyRatesFetchedAt: null,
-    currencyRatesLive: false,
     icRegions: [],
     icSuppliers: [],
     icWarehouses: [],
@@ -300,17 +282,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     icSales: [],
     icWarehouseTransactions: [],
   });
-
-  const refetchCurrencyRates = useCallback(async () => {
-    const res = await fetchCurrencyRatesAction();
-    setLiveCurrencyRates(res.rates);
-    setState(s => ({
-      ...s,
-      currencyRates: res.rates,
-      currencyRatesFetchedAt: res.fetchedAt,
-      currencyRatesLive: res.success,
-    }));
-  }, []);
 
   const refetchData = useCallback(async (userOverride?: User | null, options?: { silent?: boolean }) => {
     if (refetchInFlightRef.current) return;
@@ -329,7 +300,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
             icWarehouseTransactions: dbRes.data!.icWarehouseTransactions,
           }));
         }
-        await refetchCurrencyRates();
       } catch (e) {
         console.error('Failed to refetch data:', e);
       } finally {
@@ -341,7 +311,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
     await trackLoading(run);
-  }, [currentSlug, refetchCurrencyRates]);
+  }, [currentSlug]);
 
   const registerPageRefresh = useCallback((handler: () => void | Promise<void>) => {
     pageRefreshHandlersRef.current.add(handler);
@@ -417,26 +387,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         errorToasts.push({ id: `db-init-${Date.now()}`, message: errText, type: 'error' });
       }
 
-      let rateRes: Awaited<ReturnType<typeof fetchCurrencyRatesAction>> | null = null;
-      try {
-        rateRes = await fetchCurrencyRatesAction();
-      } catch (e) {
-        console.error('Failed to load currency rates during bootstrap', e);
-      }
-      if (cancelled) return;
-
-      if (rateRes) {
-        setLiveCurrencyRates(rateRes.rates);
-      }
-
       setState(s => ({
         ...s,
         user: currentUser,
         isAuthenticated,
         ...(icData ? icStateFromAsicData(icData) : {}),
-        currencyRates: rateRes?.rates ?? s.currencyRates,
-        currencyRatesFetchedAt: rateRes?.fetchedAt ?? s.currencyRatesFetchedAt,
-        currencyRatesLive: rateRes?.success ?? s.currencyRatesLive,
         isInitialLoading: false,
         toasts: errorToasts.length > 0 ? [...s.toasts, ...errorToasts] : s.toasts,
       }));
@@ -473,11 +428,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const baseHref = currentSlug === 'superadmin' ? '/' : `/${currentSlug}`;
     window.location.href = baseHref;
   }, [currentSlug]);
-
-  const setActiveCurrency = useCallback((currency: CurrencyCode) => {
-    setGlobalCurrency(currency);
-    setState(s => ({ ...s, activeCurrency: currency }));
-  }, []);
 
   const addICRegion = useTrackedCallback(async (name: string, country: string) => {
     try {
@@ -1126,15 +1076,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       : resolveCompactPortalHome(visibleMainNavItems, currentSlug, filteredState.user);
 
     const viewBranchSlug = resolveViewBranchSlug(pathname, currentSlug);
-    let enabledCurrencies: CurrencyCode[] = sanitizeEnabledCurrencies(['AED', 'USD', 'INR']);
-    const viewBranch = viewBranchSlug
-      ? findBranchBySlug(state.branches, viewBranchSlug)
-      : filteredState.branches.length === 1
-        ? filteredState.branches[0]
-        : undefined;
-    if (viewBranch?.enabledCurrencies?.length) {
-      enabledCurrencies = sanitizeEnabledCurrencies(viewBranch.enabledCurrencies);
-    }
 
     return {
       ...filteredState,
@@ -1145,13 +1086,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       isWarehouseRoute,
       compactPortalHome,
       currentSlug,
-      enabledCurrencies,
       login,
       logout,
       showToast,
-      setActiveCurrency,
       refetchData,
-      refetchCurrencyRates,
       registerPageRefresh,
       refreshAppData,
       addICRegion,
@@ -1189,9 +1127,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     login,
     logout,
     showToast,
-    setActiveCurrency,
     refetchData,
-    refetchCurrencyRates,
     registerPageRefresh,
     refreshAppData,
     addICRegion,
@@ -1221,18 +1157,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     branchRequestCancelICSale,
     deleteICPurchase,
     deleteICSale,
-  ]);
-
-  useEffect(() => {
-    const enabled = contextValue.enabledCurrencies;
-    const active = contextValue.activeCurrency;
-    if (enabled.length > 0 && !enabled.includes(active)) {
-      setActiveCurrency(enabled[0]);
-    }
-  }, [
-    contextValue.enabledCurrencies.join(','),
-    contextValue.activeCurrency,
-    setActiveCurrency,
   ]);
 
   return (

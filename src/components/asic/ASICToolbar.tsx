@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { Suspense, useState } from 'react';
 import Link from 'next/link';
 import type { AsicPortal } from '@/lib/asic/routing';
 import {
-  getVisibleAdminTopMenu,
+  adminMobileNavActiveId,
+  getVisibleAdminMobileNavGroups,
   getVisibleNav,
   groupNav,
   portalLabel,
@@ -17,49 +18,10 @@ import { useApp } from '@/context/AppContext';
 import MobileDrawer from '@/components/ui/MobileDrawer';
 import { MobileMenuButton, MobileNavLinkList } from '@/components/layout/MobileNav';
 import { PRODUCT_NAME } from '@/lib/brand';
+import { useSearchParams } from 'next/navigation';
 
 function linkClass(active: boolean) {
   return `${asicNavLink} ${active ? asicNavLinkActive : ''}`;
-}
-
-function AdminTopMenu({
-  slug,
-  section,
-}: {
-  slug?: string;
-  section: AsicSectionId;
-}) {
-  const { user } = useApp();
-  const groups = getVisibleAdminTopMenu(user);
-
-  if (groups.length === 0) return null;
-
-  return (
-    <nav className="mb-2 hidden border-b border-slate-200 pb-1.5 md:block dark:border-[var(--theme-border)]" aria-label={`${PRODUCT_NAME} admin`}>
-      <div className="flex flex-wrap items-center gap-0.5">
-        {groups.map((group, groupIndex) => (
-          <React.Fragment key={group.id}>
-            {groupIndex > 0 && (
-              <span className="mx-0.5 hidden text-slate-300 sm:inline" aria-hidden>
-                |
-              </span>
-            )}
-            <div className="flex flex-wrap items-center gap-1">
-              {group.items.map(item => (
-                <Link
-                  key={item.id}
-                  href={sectionHref('admin', item.id, slug)}
-                  className={linkClass(item.id === section)}
-                >
-                  {item.label}
-                </Link>
-              ))}
-            </div>
-          </React.Fragment>
-        ))}
-      </div>
-    </nav>
-  );
 }
 
 function PortalGroupNav({
@@ -101,7 +63,7 @@ function PortalGroupNav({
   );
 }
 
-function MobileAsicNav({
+function MobileAsicNavInner({
   portal,
   slug,
   section,
@@ -112,18 +74,12 @@ function MobileAsicNav({
 }) {
   const [open, setOpen] = useState(false);
   const { user } = useApp();
+  const searchParams = useSearchParams();
+  const activeNavId = adminMobileNavActiveId(section, searchParams.get('view'));
 
   const navGroups =
     portal === 'admin'
-      ? getVisibleAdminTopMenu(user).map(g => ({
-          id: g.id,
-          label: g.id.replace('-', ' '),
-          items: g.items.map(item => ({
-            id: item.id,
-            label: item.label,
-            href: sectionHref('admin', item.id, slug),
-          })),
-        }))
+      ? getVisibleAdminMobileNavGroups(user, slug)
       : groupNav(getVisibleNav(portal, user)).map(g => ({
           id: g.group,
           label: g.label,
@@ -135,7 +91,7 @@ function MobileAsicNav({
         }));
 
   const activeLabel =
-    navGroups.flatMap(g => g.items).find(item => item.id === section)?.label ?? 'Menu';
+    navGroups.flatMap(g => g.items).find(item => item.id === activeNavId)?.label ?? 'Menu';
 
   return (
     <div className="mb-2 flex items-center gap-2 border-b border-slate-200 bg-white/80 px-1 pb-2 pt-0.5 md:hidden">
@@ -145,15 +101,26 @@ function MobileAsicNav({
         open={open}
         onClose={() => setOpen(false)}
         title={portalLabel(portal, user?.role)}
-        subtitle="Jump to section"
       >
         <MobileNavLinkList
           groups={navGroups}
-          activeId={section}
+          activeId={activeNavId}
           onNavigate={() => setOpen(false)}
         />
       </MobileDrawer>
     </div>
+  );
+}
+
+function MobileAsicNav(props: {
+  portal: AsicPortal;
+  slug?: string;
+  section: AsicSectionId;
+}) {
+  return (
+    <Suspense fallback={null}>
+      <MobileAsicNavInner {...props} />
+    </Suspense>
   );
 }
 
@@ -166,14 +133,14 @@ export default function ASICToolbar({
   slug?: string;
   section: AsicSectionId;
 }) {
+  if (portal === 'admin') {
+    return <MobileAsicNav portal={portal} slug={slug} section={section} />;
+  }
+
   return (
     <>
       <MobileAsicNav portal={portal} slug={slug} section={section} />
-      {portal === 'admin' ? (
-        <AdminTopMenu slug={slug} section={section} />
-      ) : (
-        <PortalGroupNav portal={portal} slug={slug} section={section} />
-      )}
+      <PortalGroupNav portal={portal} slug={slug} section={section} />
     </>
   );
 }

@@ -128,7 +128,7 @@ export default function DeliveryAgentsClient({ branchSlug }: { branchSlug: strin
   }), [agents]);
 
   return (
-    <WarehousePortalShell title="Delivery agents" subtitle="Manage delivery agent accounts for this warehouse">
+    <WarehousePortalShell title="Delivery Agents">
       <AsicKpiStrip
         metrics={[
           { label: 'Agents', value: kpi.total.toLocaleString(), hint: 'This warehouse' },

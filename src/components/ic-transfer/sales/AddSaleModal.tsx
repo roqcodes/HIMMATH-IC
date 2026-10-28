@@ -15,12 +15,7 @@ import RateGroupBanner from '../shared/RateGroupBanner';
 import ICSaleAmountCards from '../shared/ICSaleAmountCards';
 import {
   computeICSaleAmounts,
-  formatRateAmount,
-  formatRateInputValue,
-  getCurrencyUnitRate,
-  parseRateInputValue,
   resolveApplicableRateGroup,
-  resolveSaleCurrencyContext,
 } from '@/lib/icTransfer/rateCalculations';
 import { resolveGroupOrderRate } from '@/lib/icTransfer/ratePricing';
 import { DEFAULT_IC_SALE_TRANSACTION_TYPE, type ICSaleTransactionType } from '@/lib/icTransfer/transactionTypes';
@@ -69,7 +64,6 @@ export default function AddSaleModal({ open, onClose, initialData }: Props) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
-  const [conversionText, setConversionText] = useState('');
 
   const selectedCustomer = useMemo(() => {
     if (initialData?.orderCustomerId) {
@@ -86,13 +80,6 @@ export default function AddSaleModal({ open, onClose, initialData }: Props) {
     customerId: selectedCustomerId,
   });
 
-  const currencyContext = resolveSaleCurrencyContext({
-    customerId: selectedCustomerId,
-    customerCurrency: selectedCustomer?.currency,
-    rateGroup: applicableGroup,
-  });
-
-  const saleCurrency = currencyContext.currency;
   const groupSaleRate = applicableGroup?.saleRate || 0;
 
   const unitNum = parseFloat(units) || 0;
@@ -101,42 +88,6 @@ export default function AddSaleModal({ open, onClose, initialData }: Props) {
     if (!applicableGroup) return null;
     return resolveGroupOrderRate(applicableGroup, transactionType, unitNum);
   }, [applicableGroup, transactionType, unitNum]);
-
-  const defaultConversionRate =
-    currencyContext.source === 'rate_group' && resolvedGroupRate
-      ? resolvedGroupRate.conversionRate
-      : currencyContext.conversionRate;
-
-  const defaultConversionKey = [
-    selectedCustomerId ?? '',
-    applicableGroup?.id ?? '',
-    transactionType,
-    defaultConversionRate,
-  ].join('|');
-
-  React.useEffect(() => {
-    if (!open) return;
-    if (saleCurrency === 'AED') {
-      setConversionText('');
-      return;
-    }
-    setConversionText(formatRateInputValue(defaultConversionRate));
-  }, [open, defaultConversionKey, defaultConversionRate, saleCurrency]);
-
-  React.useEffect(() => {
-    if (!open) return;
-    if (initialData?.conversionRate != null && initialData.conversionRate > 0) {
-      setConversionText(formatRateInputValue(initialData.conversionRate));
-    }
-  }, [open, initialData?.id, initialData?.conversionRate]);
-
-  const parsedConversion = parseRateInputValue(conversionText);
-  const effectiveConversionRate =
-    saleCurrency !== 'AED'
-      ? parsedConversion != null && parsedConversion > 0
-        ? parsedConversion
-        : defaultConversionRate
-      : 1;
 
   React.useEffect(() => {
     if (open) {
@@ -197,23 +148,16 @@ export default function AddSaleModal({ open, onClose, initialData }: Props) {
     setDeleteToken('');
   };
 
-  const rateNum = parseFloat(rate) || groupSaleRate;
+  const rateNum = parseFloat(rate) || resolvedGroupRate?.saleRate || groupSaleRate;
   const serviceChargeNum = initialData?.serviceCharge ?? 0;
 
-  const amounts = computeICSaleAmounts(unitNum, rateNum, effectiveConversionRate, serviceChargeNum);
-  const customerUnitRate = getCurrencyUnitRate(rateNum, effectiveConversionRate);
-  const showForeignCurrency = saleCurrency !== 'AED';
+  const amounts = computeICSaleAmounts(unitNum, rateNum, serviceChargeNum);
 
   const isByHand = transactionType === 'by_hand';
   const customerEditUrl =
     selectedCustomerId ? customerEditHref(currentSlug, selectedCustomerId) : null;
 
-  const canSubmit =
-    unitNum > 0 &&
-    rateNum > 0 &&
-    customerName.trim().length > 0 &&
-    !currencyContext.needsCustomerCurrency &&
-    (!showForeignCurrency || effectiveConversionRate > 0);
+  const canSubmit = unitNum > 0 && rateNum > 0 && customerName.trim().length > 0;
 
   const handleTransactionTypeChange = (value: ICSaleTransactionType) => {
     setTransactionType(value);
@@ -238,7 +182,6 @@ export default function AddSaleModal({ open, onClose, initialData }: Props) {
       transactionType,
       unitRate: rateNum,
       units: unitNum,
-      convertedAmount: amounts.currencyTotal,
       aedAmount: amounts.aedNetTotal,
       serviceCharge: serviceChargeNum,
       priority,
@@ -246,8 +189,6 @@ export default function AddSaleModal({ open, onClose, initialData }: Props) {
       location: isByHand ? location.trim() || undefined : undefined,
       district: isByHand ? district.trim() || undefined : undefined,
       imageUrl: imageUrl || undefined,
-      conversionRate: effectiveConversionRate,
-      currency: saleCurrency,
     };
 
     if (initialData) {
@@ -283,40 +224,6 @@ export default function AddSaleModal({ open, onClose, initialData }: Props) {
       <form id="ic-sale-form" onSubmit={handleSubmit} className="space-y-5">
         {applicableGroup && <RateGroupBanner group={applicableGroup} />}
 
-        {currencyContext.needsCustomerCurrency && selectedCustomer ? (
-          <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-            <p className="font-semibold">Customer currency required</p>
-            <p className="mt-1 text-rose-700">
-              <strong>{selectedCustomer.name}</strong> has no rate group with a valid currency and no
-              currency on their profile. Assign a rate group or set profile currency before registering.
-            </p>
-            {customerEditUrl ? (
-              <Link
-                href={customerEditUrl}
-                className="mt-2 inline-block font-semibold text-rose-900 underline underline-offset-2"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Open customer profile →
-              </Link>
-            ) : (
-              <p className="mt-2 text-rose-700">Edit the customer in Customers and set their currency.</p>
-            )}
-          </div>
-        ) : null}
-
-        {currencyContext.fxFallbackWarning ? (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
-            {currencyContext.fxFallbackWarning}
-          </div>
-        ) : null}
-
-        {currencyContext.unregisteredCustomerWarning ? (
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-600">
-            {currencyContext.unregisteredCustomerWarning}
-          </div>
-        ) : null}
-
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
           <div className="space-y-4 lg:col-span-5">
             <h3 className="border-b border-slate-100 pb-2 text-sm font-bold text-slate-900">Customer</h3>
@@ -329,15 +236,6 @@ export default function AddSaleModal({ open, onClose, initialData }: Props) {
                 placeholder="Search customer or type name..."
               />
             </InputField>
-
-            {selectedCustomer && saleCurrency !== 'AED' ? (
-              <p className="text-xs text-slate-500">
-                Sale currency:{' '}
-                <span className="font-semibold text-slate-700">{saleCurrency}</span>
-                {currencyContext.source === 'rate_group' ? ' (rate group)' : null}
-                {currencyContext.source === 'live_fx' ? ' (customer profile FX)' : null}
-              </p>
-            ) : null}
 
             <InputField label="Address / Description">
               <textarea
@@ -424,42 +322,14 @@ export default function AddSaleModal({ open, onClose, initialData }: Props) {
                 </InputField>
               </div>
 
-              {showForeignCurrency ? (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <InputField label={`Conversion (AED → ${saleCurrency})`}>
-                    <input
-                      className={formInput}
-                      value={conversionText}
-                      onChange={e => setConversionText(e.target.value)}
-                      onBlur={() => {
-                        const parsed = parseRateInputValue(conversionText);
-                        if (parsed != null && parsed > 0) {
-                          setConversionText(formatRateInputValue(parsed));
-                        }
-                      }}
-                      type="text"
-                      inputMode="decimal"
-                      required
-                    />
-                  </InputField>
-
-                  <InputField label={`Unit Rate (${saleCurrency})`}>
-                    <div className={`${formInput} bg-slate-50 text-slate-700 tabular-nums`}>
-                      {formatRateAmount(customerUnitRate)}
-                    </div>
-                  </InputField>
-                </div>
-              ) : null}
             </div>
 
             <h3 className="border-b border-slate-100 pb-2 pt-2 text-sm font-bold text-slate-900">Calculations</h3>
 
             <ICSaleAmountCards
+              units={unitNum}
               inrTotal={amounts.inrTotal}
-              currencyTotal={amounts.currencyTotal}
-              currencyCode={saleCurrency}
-              aedBaseTotal={amounts.aedBaseTotal}
-              showCurrency={showForeignCurrency}
+              aedNetTotal={amounts.aedNetTotal}
             />
           </div>
         </div>

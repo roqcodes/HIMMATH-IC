@@ -10,7 +10,6 @@ export const createICFundAccountSchema = z
     branchId: nonEmpty,
     name: nonEmpty.max(255),
     accountType: z.enum(IC_FUND_ACCOUNT_TYPES),
-    currency: z.string().trim().min(3).max(10).optional().default('AED'),
     openingBalance: finiteFormAmountSchema,
     notes: z.string().max(2000).optional().default(''),
     requireSignIn: z.boolean().optional().default(false),
@@ -19,22 +18,6 @@ export const createICFundAccountSchema = z
     phone: z.string().max(50).optional(),
   })
   .superRefine((data, ctx) => {
-    const cur = String(data.currency || 'AED').trim().toUpperCase();
-    if (data.accountType === 'collection_agent') {
-      if (cur === 'AED') {
-        ctx.addIssue({
-          code: 'custom',
-          message: 'Collection agents must use a foreign currency (e.g. SAR)',
-          path: ['currency'],
-        });
-      }
-    } else if (data.accountType !== 'personal' && cur !== 'AED') {
-      ctx.addIssue({
-        code: 'custom',
-        message: 'Only personal and collection agent accounts may use a non-AED currency tag',
-        path: ['currency'],
-      });
-    }
     if (!data.requireSignIn) return;
     if (!data.email) {
       ctx.addIssue({ code: 'custom', message: 'Email is required when sign-in is enabled', path: ['email'] });
@@ -50,7 +33,6 @@ export const updateICFundAccountSchema = z
     id: nonEmpty,
     name: nonEmpty.max(255).optional(),
     accountType: z.enum(IC_FUND_ACCOUNT_TYPES).optional(),
-    currency: z.string().trim().min(3).max(10).optional(),
     status: z.enum(['active', 'inactive']).optional(),
     openingBalance: finiteFormAmountSchema.optional(),
     notes: z.string().max(2000).optional(),

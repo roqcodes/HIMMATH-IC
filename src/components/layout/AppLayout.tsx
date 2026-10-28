@@ -7,29 +7,32 @@ import PortalSubNav from '@/components/layout/PortalSubNav';
 import BranchPageGuard from '@/components/layout/BranchPageGuard';
 import { RbacWriteProvider } from '@/context/RbacWriteContext';
 import { usePathname } from 'next/navigation';
-import { getSessionSlugFromPath, isAsicPortalPath } from '@/lib/asic/routing';
+import { getSessionSlugFromPath, isAdminAsicPath, isAsicPortalPath } from '@/lib/asic/routing';
 import { ASICAppShellSkeleton } from '@/components/asic/ASICTableSkeleton';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isInitialLoading, toasts } = useApp();
   const pathname = usePathname();
   const asic = isAsicPortalPath(pathname);
+  const adminAsic = isAdminAsicPath(pathname);
 
   if (!isInitialLoading && !isAuthenticated) {
     const slug = getSessionSlugFromPath(pathname);
     return <LoginPage branchSlug={slug} />;
   }
 
-  const mainClass = asic
-    ? 'flex min-h-0 w-full flex-1 flex-col px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:px-3 sm:py-2'
-    : 'mx-auto w-full max-w-[1680px] flex-1 px-3 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-6 lg:px-8 lg:py-7';
+  const mainClass = adminAsic
+    ? 'flex min-h-0 w-full flex-1 flex-col p-0 pb-[max(0.5rem,env(safe-area-inset-bottom))]'
+    : asic
+      ? 'flex min-h-0 w-full flex-1 flex-col px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:px-3 sm:py-2'
+      : 'mx-auto w-full max-w-[1680px] flex-1 px-3 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-6 lg:px-8 lg:py-7';
 
   return (
     <RbacWriteProvider>
       <div className="flex min-h-dvh bg-slate-50/50 dark:bg-[var(--theme-canvas)]">
         <BranchPageGuard />
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="sticky top-0 z-50 shrink-0">
+          <div className={`sticky top-0 z-50 shrink-0 ${adminAsic ? 'md:hidden' : ''}`}>
             <Topbar />
             {!asic && <PortalSubNav />}
           </div>

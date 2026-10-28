@@ -89,7 +89,7 @@ const VOUCHER_TOTAL_LABELS: Record<
   },
 };
 
-export function computeAccountsKpis(accounts: ICFundAccount[], hqMode: boolean): AsicKpiMetric[] {
+export function computeAccountsKpis(accounts: ICFundAccount[], _hqMode?: boolean): AsicKpiMetric[] {
   const active = accounts.filter(a => a.status === 'active');
   const inactive = accounts.length - active.length;
   const bankAccounts = accounts.filter(a => a.accountType === 'bank');
@@ -100,53 +100,6 @@ export function computeAccountsKpis(accounts: ICFundAccount[], hqMode: boolean):
   const receivables = receivableRows.reduce((sum, a) => sum + a.balance, 0);
   const payables = payableRows.reduce((sum, a) => sum + Math.abs(a.balance), 0);
   const pending = sumAbsPending(accounts);
-  const collectionAgents = accounts.filter(
-    a => a.accountType === 'collection_agent' && a.status === 'active',
-  ).length;
-
-  if (hqMode) {
-    const directReceivable = personal
-      .filter(a => a.isDirect && a.balance > 0)
-      .reduce((sum, a) => sum + a.balance, 0);
-    const branchReceivable = personal
-      .filter(a => !a.isDirect && a.balance > 0)
-      .reduce((sum, a) => sum + a.balance, 0);
-    const directCount = personal.filter(a => a.isDirect && a.balance > 0).length;
-    const branchCount = personal.filter(a => !a.isDirect && a.balance > 0).length;
-
-    return [
-      {
-        label: 'Cash & bank',
-        value: fmtLedgerAed(cashBank),
-        hint: `${bankAccounts.length} liquidity accounts`,
-        tone: cashBank < 0 ? 'red' : 'emerald',
-      },
-      {
-        label: 'HQ receivables',
-        value: fmtLedgerAed(directReceivable),
-        hint: `${directCount} direct customers owe us`,
-      },
-      {
-        label: 'Branch receivables',
-        value: fmtLedgerAed(branchReceivable),
-        hint: `${branchCount} branch customers owe us`,
-        tone: 'indigo',
-      },
-      pending.count > 0
-        ? {
-            label: 'Pending approval',
-            value: fmtLedgerAed(pending.total),
-            hint: `${pending.count} accounts awaiting activation`,
-            tone: 'amber',
-          }
-        : {
-            label: 'Collection agents',
-            value: collectionAgents.toLocaleString(),
-            hint: 'Active FX remitter accounts',
-            tone: 'slate',
-          },
-    ];
-  }
 
   return [
     {
@@ -625,35 +578,6 @@ export function computeAccountDetailKpis(
         });
       }
       return items;
-    }
-    case 'collection_agent': {
-      const currency = walletCurrency?.trim().toUpperCase() || 'FX';
-      return [
-        {
-          label: 'Ledger balance',
-          value: fmtAmount(balance),
-          hint: 'AED balance after settlements',
-          tone: balance >= 0 ? 'emerald' : 'red',
-        },
-        {
-          label: 'Wallet tag',
-          value: currency,
-          hint: 'Foreign currency on remittances',
-          tone: 'indigo',
-        },
-        {
-          label: 'Receipts',
-          value: fmtAmount(stats.receiptTotal),
-          hint: 'Customer payments allocated',
-          tone: 'emerald',
-        },
-        {
-          label: 'Settlements',
-          value: fmtAmount(stats.paymentTotal),
-          hint: 'Remitted to IC Funds',
-          tone: stats.paymentTotal > 0 ? 'amber' : 'slate',
-        },
-      ];
     }
     case 'income':
       return [

@@ -6,9 +6,9 @@ import { usePathname } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
 import AppLogo from '@/components/layout/AppLogo';
 import GlobalSearch from '@/components/layout/GlobalSearch';
-import CurrencySwitcher from '@/components/ui/CurrencySwitcher';
 import ThemeToggle from '@/components/ui/ThemeToggle';
 import { parseAsicPath } from '@/lib/asic/routing';
+import { adminShellHeader } from '@/components/layout/adminShell';
 import { iconBtn, uiShadowOverlay } from '@/lib/ui';
 
 type SearchFieldProps = {
@@ -141,8 +141,6 @@ function TopbarActions({
 
       <ThemeToggle />
 
-      <CurrencySwitcher />
-
       <button
         type="button"
         className={`${iconBtn} size-10 motion-safe:hover:-translate-y-px motion-safe:active:translate-y-0 motion-safe:active:scale-[0.97]`}
@@ -234,7 +232,7 @@ function TopbarActions({
   );
 }
 
-export default function Topbar() {
+export default function Topbar({ variant = 'default' }: { variant?: 'default' | 'admin-column' }) {
   const pathname = usePathname();
   const { logout, user, refreshAppData, compactPortalHome } = useApp();
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -285,6 +283,10 @@ export default function Topbar() {
   }, [searchQuery]);
 
   const parsedPath = parseAsicPath(pathname);
+  const isAdminColumn = variant === 'admin-column';
+  const isAdminAsic =
+    !isAdminColumn &&
+    (parsedPath.portal === 'admin' || parsedPath.portal === 'admin-root');
   const accountHref =
     parsedPath.portal === 'admin-root' || parsedPath.portal === 'admin'
       ? '/admin/account'
@@ -296,8 +298,9 @@ export default function Topbar() {
             ? `/delivery/${parsedPath.branchSlug}/account`
             : null;
 
-  const headerShell =
-    'relative z-10 h-14 shrink-0 border-b border-slate-200/80 bg-white/95 px-4 shadow-none backdrop-blur-sm sm:px-5 md:px-6 lg:px-8 dark:border-[var(--theme-border)] dark:bg-[var(--theme-surface)]/95';
+  const headerShell = isAdminColumn
+    ? adminShellHeader
+    : `flex items-center gap-2 sm:gap-3 lg:px-8 ${adminShellHeader}`;
 
   const searchProps = {
     searchQuery,
@@ -315,12 +318,40 @@ export default function Topbar() {
     accountHref,
   };
 
+  if (isAdminColumn) {
+    return (
+      <>
+        <header className={headerShell}>
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <SearchField {...searchProps} searchWrapRef={searchWrapRef} />
+          </div>
+          <TopbarActions
+            {...actionsProps}
+            showMobileSearch
+            onOpenMobileSearch={() => setIsSearchOpen(true)}
+          />
+        </header>
+        {isSearchOpen ? (
+          <div className="fixed inset-x-0 top-0 z-[60] border-b border-slate-200 bg-white/95 px-4 pb-3 pt-2 backdrop-blur-sm md:hidden dark:border-[var(--theme-border)] dark:bg-[var(--theme-surface)]/95">
+            <SearchField {...searchProps} searchWrapRef={mobileSearchWrapRef} mobileOverlay />
+          </div>
+        ) : null}
+      </>
+    );
+  }
+
   return (
     <>
-      <header className={`flex items-center gap-2 sm:gap-3 ${headerShell}`}>
-        <div className="shrink-0">
-          <AppLogo variant="header" href={compactPortalHome} />
-        </div>
+      <header className={headerShell}>
+        {isAdminAsic ? (
+          <div className="shrink-0 md:hidden">
+            <AppLogo variant="header" href={compactPortalHome} />
+          </div>
+        ) : (
+          <div className="shrink-0">
+            <AppLogo variant="header" href={compactPortalHome} />
+          </div>
+        )}
 
         <div className="hidden min-w-0 flex-1 justify-center px-4 md:flex">
           <SearchField {...searchProps} searchWrapRef={searchWrapRef} centered />

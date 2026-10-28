@@ -20,10 +20,10 @@ export type FlatRateValues = {
   conversionRate: number;
 };
 
-export function getFlatRateFromGroup(group: Pick<ICRateGroup, 'saleRate' | 'conversionRate'>): FlatRateValues {
+export function getFlatRateFromGroup(group: Pick<ICRateGroup, 'saleRate'>): FlatRateValues {
   return {
     saleRate: group.saleRate,
-    conversionRate: group.conversionRate ?? 1,
+    conversionRate: 1,
   };
 }
 
@@ -444,7 +444,7 @@ export type PricingEditorHydration = {
 
 /** Single source of truth for loading group data into the pricing editor. */
 export function hydratePricingEditorFromGroup(
-  group: Pick<ICRateGroup, 'saleRate' | 'conversionRate' | 'pricingConfig'> | undefined,
+  group: Pick<ICRateGroup, 'saleRate' | 'pricingConfig'> | undefined,
 ): PricingEditorHydration {
   const groupFlat = group ? getFlatRateFromGroup(group) : { saleRate: 0, conversionRate: 1 };
   const flat = flatForNormalize({
@@ -751,7 +751,7 @@ function resolveFromTransactionPricing(
 
 /** Resolve AED + conversion for an order from group pricing, transaction type, and units. */
 export function resolveGroupOrderRate(
-  group: Pick<ICRateGroup, 'saleRate' | 'conversionRate' | 'pricingConfig'>,
+  group: Pick<ICRateGroup, 'saleRate' | 'pricingConfig'>,
   transactionType: ICSaleTransactionType | string | null | undefined,
   units: number,
 ): FlatRateValues {

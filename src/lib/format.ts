@@ -1,5 +1,5 @@
 import React from 'react';
-import { convertFromAed, getLiveCurrencyRates, type CurrencyCode } from '@/lib/currency';
+import type { CurrencyCode } from '@/lib/currency';
 
 export type Currency = CurrencyCode;
 let globalCurrency: Currency = 'AED';
@@ -9,43 +9,31 @@ export function getGlobalCurrency(): Currency {
 }
 
 export function setGlobalCurrency(c: Currency) {
-  globalCurrency = c;
+  globalCurrency = c === 'AED' ? 'AED' : 'AED';
+}
+
+function formatNumber(amount: number, fractionDigits: Intl.NumberFormatOptions, showPlus: boolean): string {
+  const absAmount = Math.abs(amount);
+  const numStr = absAmount.toLocaleString('en-US', fractionDigits);
+  const sign = amount < 0 ? '-' : showPlus && amount > 0 ? '+' : '';
+  return `${sign}${numStr}`;
 }
 
 export function formatAED(amount: number, showPlus = false): React.ReactNode {
-  const currency = getGlobalCurrency();
-  const convertedAmount = convertFromAed(amount, currency);
-  const absAmount = Math.abs(convertedAmount);
-  const numStr = absAmount.toLocaleString('en-US', {
-    maximumFractionDigits: 4,
-    minimumFractionDigits: 0,
-  });
-  const sign = amount < 0 ? '-' : showPlus && amount > 0 ? '+' : '';
-  return React.createElement(React.Fragment, null, sign ? `${sign}` : null, numStr);
+  const numStr = formatNumber(
+    amount,
+    { maximumFractionDigits: 4, minimumFractionDigits: 0 },
+    showPlus,
+  );
+  return React.createElement(React.Fragment, null, numStr);
 }
 
 export function formatAEDStr(amount: number, showPlus = false): string {
-  const currency = getGlobalCurrency();
-  const convertedAmount = convertFromAed(amount, currency);
-  const absAmount = Math.abs(convertedAmount);
-  const numStr = absAmount.toLocaleString('en-US', {
-    maximumFractionDigits: 4,
-    minimumFractionDigits: 0,
-  });
-  const sign = amount < 0 ? '-' : showPlus && amount > 0 ? '+' : '';
-  return `${sign}${numStr}`;
+  return formatNumber(amount, { maximumFractionDigits: 4, minimumFractionDigits: 0 }, showPlus);
 }
 
-export function formatMoneyValue(amount: number, currency?: Currency, showPlus = false): string {
-  const curr = currency ?? getGlobalCurrency();
-  const convertedAmount = convertFromAed(amount, curr);
-  const absAmount = Math.abs(convertedAmount);
-  const numStr = absAmount.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  const sign = amount < 0 ? '-' : showPlus && amount > 0 ? '+' : '';
-  return `${sign}${numStr}`;
+export function formatMoneyValue(amount: number, _currency?: Currency, showPlus = false): string {
+  return formatNumber(amount, { minimumFractionDigits: 2, maximumFractionDigits: 2 }, showPlus);
 }
 
 export function formatMoneyLabel(amount: number, currency?: Currency, showPlus = false): string {

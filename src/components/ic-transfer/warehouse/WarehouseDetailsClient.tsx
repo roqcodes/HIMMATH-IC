@@ -99,7 +99,7 @@ export default function WarehouseDetailsClient({
   if (!warehouse) return null;
 
   const regionName = icRegions.find(r => r.id === warehouse.regionId)?.name || '—';
-  const warehouseListHref = getICTransferWarehouseBase(branchSlug, portalMode);
+  const warehouseListHref = getICTransferWarehouseBase(portalMode, branchSlug);
   const deliveryProofLabel =
     warehouse.sendDeliveryProofToCustomer === false ? 'Admin verifies' : 'Customer';
 
@@ -137,7 +137,6 @@ export default function WarehouseDetailsClient({
 
       <AsicPageHeader
         title={warehouse.name}
-        subtitle={[regionName, warehouse.phone, warehouse.email].filter(Boolean).join(' · ') || 'Warehouse profile'}
         meta={
           <span className="inline-flex rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-600">
             {deliveryProofLabel}

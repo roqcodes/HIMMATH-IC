@@ -157,7 +157,7 @@ export function accountSourceLabel(sourceType?: string): string | null {
   if (!sourceType) return null;
   if (sourceType === 'ic_supplier') return 'IC Transfer supplier';
   if (sourceType === 'ic_warehouse') return 'IC Transfer warehouse';
-  if (sourceType === 'ic_customer') return 'Branch customer';
+  if (sourceType === 'ic_customer') return 'Customer';
   if (sourceType === 'ic_system') return 'System account';
   return sourceType.replace(/_/g, ' ');
 }

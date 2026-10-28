@@ -225,27 +225,6 @@ async function resolveICTransferAdminUser(branchSlug?: string): Promise<User | n
   return null;
 }
 
-/** Branch-created rate groups must use the same currency as the HQ admin-assigned branch rate. */
-async function assertBranchRateGroupCurrencyMatchesAdmin(
-  branchId: string,
-  currency: string,
-): Promise<string | null> {
-  const res = await query(
-    `SELECT rg.currency
-     FROM ic_rate_groups rg
-     INNER JOIN ic_rate_group_branches rgb ON rgb.group_id = rg.id
-     WHERE rgb.branch_id = $1 AND rg.created_by_branch_id IS NULL
-     LIMIT 1`,
-    [branchId],
-  );
-  if (res.rows.length === 0) return null;
-  const adminCurrency = String(res.rows[0].currency).toUpperCase();
-  if (currency.toUpperCase() !== adminCurrency) {
-    return `Rate group currency must match the admin-assigned branch currency (${adminCurrency})`;
-  }
-  return null;
-}
-
 /** Assert the current user may perform IC Transfer admin actions. */
 async function assertAdminRole(branchSlug?: string): Promise<{ error: string } | { enteredBy: string }> {
   const user = await resolveICTransferAdminUser(branchSlug);
@@ -510,26 +489,13 @@ export async function dbAddICRateGroupAction(
       if (!user || user.role !== 'branch_manager' || user.branchId !== parsed.createdByBranchId) {
         return { success: false, error: 'Unauthorized' };
       }
-      const currencyError = await assertBranchRateGroupCurrencyMatchesAdmin(
-        parsed.createdByBranchId,
-        parsed.currency,
-      );
-      if (currencyError) return { success: false, error: currencyError };
     }
 
     const id = crypto.randomUUID();
     const res = await query(
-      `INSERT INTO ic_rate_groups (id, name, country, currency, sale_rate, conversion_rate, created_by_branch_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [
-        id,
-        parsed.name,
-        parsed.country,
-        parsed.currency,
-        parsed.saleRate,
-        parsed.conversionRate,
-        parsed.createdByBranchId ?? null,
-      ],
+      `INSERT INTO ic_rate_groups (id, name, country, sale_rate)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [id, parsed.name, parsed.country, parsed.saleRate],
     );
     return { success: true, data: mapICRateGroupRow(res.rows[0]) };
   } catch (error: unknown) {
@@ -544,24 +510,12 @@ export async function dbUpdateICRateGroupAction(
   try {
     const parsed = updateRateGroupSchema.parse({ id, name, country, currency, saleRate, conversionRate });
 
-    const existing = await query(
-      `SELECT created_by_branch_id FROM ic_rate_groups WHERE id = $1 LIMIT 1`,
-      [parsed.id],
-    );
-    if (existing.rows.length === 0) return { success: false, error: 'Group not found' };
-
-    const createdByBranchId = existing.rows[0].created_by_branch_id as string | null;
-    if (createdByBranchId) {
-      const currencyError = await assertBranchRateGroupCurrencyMatchesAdmin(
-        createdByBranchId,
-        parsed.currency,
-      );
-      if (currencyError) return { success: false, error: currencyError };
-    }
-
     const res = await query(
-      `UPDATE ic_rate_groups SET name=$1, country=$2, currency=$3, sale_rate=$4, conversion_rate=$5, updated_at=CURRENT_TIMESTAMP WHERE id=$6 RETURNING *`,
-      [parsed.name, parsed.country, parsed.currency, parsed.saleRate, parsed.conversionRate, parsed.id]
+      `UPDATE ic_rate_groups
+       SET name = $1, country = $2, sale_rate = $3, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $4
+       RETURNING *`,
+      [parsed.name, parsed.country, parsed.saleRate, parsed.id],
     );
     if (res.rowCount === 0) return { success: false, error: 'Group not found' };
     return { success: true, data: mapICRateGroupRow(res.rows[0]) };
@@ -602,10 +556,10 @@ export async function dbBulkUpdateICRateGroupRatesAction(
 
     const res = await query(
       `UPDATE ic_rate_groups
-       SET sale_rate = $1, conversion_rate = $2, pricing_config = $3::jsonb, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ANY($4::text[])
+       SET sale_rate = $1, pricing_config = $2::jsonb, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ANY($3::text[])
        RETURNING *`,
-      [parsed.saleRate, parsed.conversionRate, configPayload, parsed.groupIds],
+      [parsed.saleRate, configPayload, parsed.groupIds],
     );
     if (res.rowCount === 0) return { success: false, error: 'No groups were updated' };
     return { success: true, data: res.rows.map(mapICRateGroupRow) };
@@ -646,10 +600,10 @@ export async function dbUpdateICRateGroupPricingAction(
 
     const res = await query(
       `UPDATE ic_rate_groups
-       SET sale_rate = $1, conversion_rate = $2, pricing_config = $3::jsonb, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $4
+       SET sale_rate = $1, pricing_config = $2::jsonb, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3
        RETURNING *`,
-      [parsed.saleRate, parsed.conversionRate, configPayload, parsed.groupId],
+      [parsed.saleRate, configPayload, parsed.groupId],
     );
     if (res.rowCount === 0) return { success: false, error: 'Group not found' };
     return { success: true, data: mapICRateGroupRow(res.rows[0]) };
@@ -676,46 +630,6 @@ export async function dbSetICRateGroupCustomersAction(groupId: string, customerI
     const parsed = setRateGroupCustomersSchema.parse({ groupId, customerIds });
     await withTransaction(async (client) => {
       if (parsed.customerIds.length > 0) {
-        const groupRes = await client.query(
-          `SELECT currency FROM ic_rate_groups WHERE id = $1 LIMIT 1`,
-          [parsed.groupId],
-        );
-        if (groupRes.rows.length === 0) throw new Error('Rate group not found');
-        const groupCurrency = String(groupRes.rows[0].currency || 'AED').trim().toUpperCase();
-
-        const customerRes = await client.query(
-          `SELECT id, name, UPPER(COALESCE(currency, 'AED')) AS currency
-           FROM customers WHERE id = ANY($1::varchar[])`,
-          [parsed.customerIds],
-        );
-        for (const row of customerRes.rows) {
-          const customerCurrency = String(row.currency);
-          if (customerCurrency !== groupCurrency) {
-            throw new Error(
-              `Customer ${row.name} currency (${customerCurrency}) must match rate group (${groupCurrency})`,
-            );
-          }
-        }
-
-        const fundRes = await client.query(
-          `SELECT a.name, UPPER(COALESCE(a.currency, 'AED')) AS currency
-           FROM ic_fund_accounts a
-           WHERE a.account_type = 'personal'
-             AND (
-               a.customer_id = ANY($1::varchar[])
-               OR (a.source_type = 'ic_customer' AND a.source_id = ANY($1::varchar[]))
-             )`,
-          [parsed.customerIds],
-        );
-        for (const row of fundRes.rows) {
-          const accountCurrency = String(row.currency);
-          if (accountCurrency !== groupCurrency) {
-            throw new Error(
-              `Personal account ${row.name} currency (${accountCurrency}) must match rate group (${groupCurrency})`,
-            );
-          }
-        }
-
         const checkRes = await client.query(
           `SELECT c.customer_id, g.name as group_name 
            FROM ic_rate_group_customers c 
@@ -747,31 +661,7 @@ export async function dbSetICRateGroupCustomersAction(groupId: string, customerI
 
 export async function dbSetICRateGroupBranchesAction(groupId: string, branchIds: string[]): Promise<DbActionResult<void>> {
   try {
-    const parsed = setRateGroupBranchesSchema.parse({ groupId, branchIds });
-    await withTransaction(async (client) => {
-      if (parsed.branchIds.length > 0) {
-        const checkRes = await client.query(
-          `SELECT b.branch_id, g.name as group_name 
-           FROM ic_rate_group_branches b 
-           JOIN ic_rate_groups g ON b.group_id = g.id
-           WHERE b.branch_id = ANY($1) AND b.group_id != $2`,
-          [parsed.branchIds, parsed.groupId]
-        );
-        if (checkRes.rows.length > 0) {
-          const dup = checkRes.rows[0];
-          throw new Error(`Branch is already assigned to another rate group: ${dup.group_name}`);
-        }
-      }
-
-      await client.query('DELETE FROM ic_rate_group_branches WHERE group_id = $1', [parsed.groupId]);
-      if (parsed.branchIds.length > 0) {
-        await client.query(
-          `INSERT INTO ic_rate_group_branches (group_id, branch_id)
-           SELECT $1, unnest($2::text[])`,
-          [parsed.groupId, parsed.branchIds]
-        );
-      }
-    });
+    setRateGroupBranchesSchema.parse({ groupId, branchIds });
     return { success: true };
   } catch (err: unknown) {
     logger.error({ err, groupId, branchIds }, 'Error in dbSetICRateGroupBranchesAction');

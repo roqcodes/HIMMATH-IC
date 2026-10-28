@@ -26,6 +26,7 @@ export async function resolvePostLoginPath(
   if (!role) return '/admin';
   if (role === 'admin') return '/admin/dashboard';
   if (role === 'auditor') return '/admin/audit-log';
+  if (role === 'staff' || role === 'branch_manager') return '/admin/dashboard';
 
   const sessionSlug =
     loginSlug && !RESERVED_BRANCH_SLUGS.has(loginSlug) && !isHqOperationsPortalSlug(loginSlug)
@@ -45,13 +46,9 @@ export async function resolvePostLoginPath(
     if (role === 'customer' && isHqIcFundsBranchId(branchId)) {
       return portalHome('customer', HQ_IC_FUNDS_BRANCH_SLUG);
     }
-    if (role === 'collection_agent' && isHqIcFundsBranchId(branchId)) {
-      return portalHome('collection', HQ_IC_FUNDS_BRANCH_SLUG);
-    }
     return '/admin/dashboard';
   }
 
   if (role === 'customer') return portalHome('customer', sessionSlug);
-  if (role === 'collection_agent') return portalHome('collection', sessionSlug);
-  return portalHome('branch', sessionSlug);
+  return '/admin/dashboard';
 }

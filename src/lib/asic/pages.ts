@@ -40,13 +40,7 @@ export function getEffectiveSectionAccess(
   }
 
   if (user.role === 'customer') {
-    return portal === 'customer' && (section === 'orders' || section === 'wallet') ? 'write' : 'none';
-  }
-
-  if (user.role === 'collection_agent') {
-    if (portal !== 'collection') return 'none';
-    if (section === 'fx-settlements' || section === 'account') return 'write';
-    return 'none';
+    return portal === 'customer' && section === 'orders' ? 'write' : 'none';
   }
 
   if (section === 'account') {
@@ -70,7 +64,7 @@ export function getEffectiveSectionAccess(
   if (user.role === 'branch_manager') {
     if (portal !== 'branch' && portal !== 'admin') return 'none';
     if (section === 'users' && portal === 'branch') return 'write';
-    if (section === 'branches' || section === 'global-settings' || section === 'backup') {
+    if (section === 'global-settings' || section === 'backup') {
       return 'none';
     }
     if (section === 'users' && portal === 'admin') return 'none';

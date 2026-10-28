@@ -5,7 +5,7 @@ import { cookies } from 'next/headers';
 import { User, UserRole, PagePermissionMap, DealPermissionMap } from '@/types';
 import { env } from '@/lib/env';
 import { fetchStaffAccessFromDb } from '@/lib/userPermissions';
-import { isHqIcFundsBranchId, isHqAdminStaff, isHqPortalCustomer, isHqPortalCollectionAgent } from '@/lib/icFunds/hqBranch';
+import { isHqIcFundsBranchId, isHqAdminStaff, isHqPortalCustomer } from '@/lib/icFunds/hqBranch';
 import { authSessionSlug, isHqOpsUser } from '@/lib/icTransfer/warehouseSlug';
 import { defaultStaffPermissions, normalizePermissionMap } from '@/lib/rbac';
 import { query } from '@/lib/db';
@@ -20,7 +20,6 @@ export interface SessionPayload {
   name: string;
   branchId?: string;
   customerId?: string;
-  collectionAccountId?: string;
   permissions?: PagePermissionMap;
   dealPermissions?: DealPermissionMap;
   expiresAt: string;
@@ -70,32 +69,6 @@ async function loadCustomerProfile(user: User): Promise<User> {
   }
 }
 
-async function loadCollectionAgentProfile(user: User): Promise<User> {
-  if (user.role !== 'collection_agent' || !user.id) return user;
-
-  try {
-    const res = await query(
-      `SELECT p.collection_account_id, a.name, a.branch_id, a.status
-       FROM profiles p
-       JOIN ic_fund_accounts a ON a.id = p.collection_account_id
-       WHERE p.id = $1 AND a.account_type = 'collection_agent'
-       LIMIT 1`,
-      [user.id],
-    );
-    if (res.rows.length === 0) return user;
-    const row = res.rows[0];
-    if (String(row.status) !== 'active') return user;
-    return {
-      ...user,
-      collectionAccountId: String(row.collection_account_id),
-      name: String(row.name || user.name),
-      branchId: row.branch_id ? String(row.branch_id) : user.branchId,
-    };
-  } catch {
-    return user;
-  }
-}
-
 async function loadStaffPermissions(user: User): Promise<User> {
   if (user.role !== 'staff' || !user.id || !user.branchId) return user;
 
@@ -120,8 +93,6 @@ export async function createSession(user: User, branchSlug?: string): Promise<Us
     enriched = await loadStaffPermissions(user);
   } else if (user.role === 'customer') {
     enriched = await loadCustomerProfile(user);
-  } else if (user.role === 'collection_agent') {
-    enriched = await loadCollectionAgentProfile(user);
   }
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   const session = await encrypt({
@@ -173,8 +144,7 @@ async function getSessionUserUncached(branchSlug?: string): Promise<User | null>
     payload.role !== 'auditor' &&
     !isHqAdminStaff({ role: payload.role, branchId: payload.branchId }) &&
     !isHqOpsUser({ role: payload.role, branchId: payload.branchId }) &&
-    !isHqPortalCustomer({ role: payload.role, branchId: payload.branchId }) &&
-    !isHqPortalCollectionAgent({ role: payload.role, branchId: payload.branchId })
+    !isHqPortalCustomer({ role: payload.role, branchId: payload.branchId })
   ) {
     return null;
   }
@@ -186,7 +156,6 @@ async function getSessionUserUncached(branchSlug?: string): Promise<User | null>
     role: payload.role,
     branchId: payload.branchId,
     customerId: payload.customerId,
-    collectionAccountId: payload.collectionAccountId,
     permissions: payload.permissions,
     dealPermissions: payload.dealPermissions,
   };
@@ -195,10 +164,6 @@ async function getSessionUserUncached(branchSlug?: string): Promise<User | null>
   if (baseUser.role === 'customer') {
     if (baseUser.customerId) return baseUser;
     return loadCustomerProfile(baseUser);
-  }
-  if (baseUser.role === 'collection_agent') {
-    if (baseUser.collectionAccountId) return baseUser;
-    return loadCollectionAgentProfile(baseUser);
   }
   return baseUser;
 }

@@ -90,7 +90,6 @@ async function upsertProfile(input: {
   customerId?: string | null;
   warehouseId?: string | null;
   deliveryAgentId?: string | null;
-  collectionAccountId?: string | null;
 }) {
   const admin = createSupabaseAdminClient();
   const { error } = await admin.from('profiles').upsert(
@@ -103,7 +102,6 @@ async function upsertProfile(input: {
       customer_id: input.customerId || null,
       warehouse_id: input.warehouseId || null,
       delivery_agent_id: input.deliveryAgentId || null,
-      collection_account_id: input.collectionAccountId || null,
     },
     { onConflict: 'id' },
   );
@@ -404,46 +402,6 @@ export async function createCustomerCognitoUser(input: {
   } catch (error: unknown) {
     logger.error({ error, email: input.email }, 'Error creating customer login');
     return { success: false, error: error instanceof Error ? error.message : 'Failed to create customer account' };
-  }
-}
-
-export async function createCollectionAgentCognitoUser(input: {
-  email: string;
-  name: string;
-  branchId: string;
-  password: string;
-  collectionAccountId: string;
-}): Promise<{ success: boolean; userId?: string; error?: string }> {
-  if (!validatePassword(input.password).isValid) {
-    return { success: false, error: PASSWORD_INVALID_MESSAGE };
-  }
-  try {
-    const admin = createSupabaseAdminClient();
-    const { data, error } = await admin.auth.admin.createUser({
-      email: input.email,
-      password: input.password,
-      email_confirm: true,
-      user_metadata: { name: input.name },
-      app_metadata: { role: 'collection_agent', branch_id: input.branchId },
-    });
-    if (error || !data.user) {
-      return { success: false, error: error?.message || 'Failed to create collection agent login' };
-    }
-    await upsertProfile({
-      id: data.user.id,
-      email: input.email,
-      name: input.name,
-      role: 'collection_agent',
-      branchId: input.branchId,
-      collectionAccountId: input.collectionAccountId,
-    });
-    return { success: true, userId: data.user.id };
-  } catch (error: unknown) {
-    logger.error({ error, email: input.email }, 'Error creating collection agent login');
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to create collection agent login',
-    };
   }
 }
 
