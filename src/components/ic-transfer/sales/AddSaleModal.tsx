@@ -15,10 +15,14 @@ import RateGroupBanner from '../shared/RateGroupBanner';
 import ICSaleAmountCards from '../shared/ICSaleAmountCards';
 import {
   computeICSaleAmounts,
+  formatRateInputValue,
   resolveApplicableRateGroup,
 } from '@/lib/icTransfer/rateCalculations';
 import { resolveGroupOrderRate } from '@/lib/icTransfer/ratePricing';
-import { DEFAULT_IC_SALE_TRANSACTION_TYPE, type ICSaleTransactionType } from '@/lib/icTransfer/transactionTypes';
+import {
+  normalizeICSaleTransactionType,
+  type ICSaleTransactionType,
+} from '@/lib/icTransfer/transactionTypes';
 import type { OrderPriority } from '@/types/warehouse';
 import ImageDropZone from '@/components/ui/ImageDropZone';
 import { uploadImageToCloudinary, deleteCloudinaryImageByToken } from '@/lib/cloudinary';
@@ -54,7 +58,9 @@ export default function AddSaleModal({ open, onClose, initialData }: Props) {
   const [rate, setRate] = useState(initialData?.unitRate?.toString() || '');
   const [customerName, setCustomerName] = useState(initialData?.customerName || '');
   const [warehouseId, setWarehouseId] = useState(initialData?.warehouseId || '');
-  const [transactionType, setTransactionType] = useState(initialData?.transactionType || DEFAULT_IC_SALE_TRANSACTION_TYPE);
+  const [transactionType, setTransactionType] = useState<ICSaleTransactionType>(() =>
+    normalizeICSaleTransactionType(initialData?.transactionType),
+  );
   const [priority, setPriority] = useState<OrderPriority>(initialData?.priority || 'Normal');
   const [address, setAddress] = useState(initialData?.address || '');
   const [location, setLocation] = useState(initialData?.location || '');
@@ -80,14 +86,16 @@ export default function AddSaleModal({ open, onClose, initialData }: Props) {
     customerId: selectedCustomerId,
   });
 
-  const groupSaleRate = applicableGroup?.saleRate || 0;
-
   const unitNum = parseFloat(units) || 0;
 
-  const resolvedGroupRate = useMemo(() => {
-    if (!applicableGroup) return null;
-    return resolveGroupOrderRate(applicableGroup, transactionType, unitNum);
-  }, [applicableGroup, transactionType, unitNum]);
+  React.useEffect(() => {
+    if (!open) return;
+    if (!applicableGroup) return;
+    const resolved = resolveGroupOrderRate(applicableGroup, transactionType, unitNum);
+    if (resolved.saleRate > 0) {
+      setRate(formatRateInputValue(resolved.saleRate));
+    }
+  }, [open, selectedCustomerId, transactionType, unitNum, applicableGroup?.id]);
 
   React.useEffect(() => {
     if (open) {
@@ -97,7 +105,7 @@ export default function AddSaleModal({ open, onClose, initialData }: Props) {
         initialData?.orderCustomerName || initialData?.customerName || '',
       );
       setWarehouseId(initialData?.warehouseId || '');
-      setTransactionType(initialData?.transactionType || DEFAULT_IC_SALE_TRANSACTION_TYPE);
+      setTransactionType(normalizeICSaleTransactionType(initialData?.transactionType));
       setPriority(initialData?.priority || 'Normal');
       setAddress(initialData?.address || '');
       setLocation(initialData?.location || '');
@@ -148,7 +156,7 @@ export default function AddSaleModal({ open, onClose, initialData }: Props) {
     setDeleteToken('');
   };
 
-  const rateNum = parseFloat(rate) || resolvedGroupRate?.saleRate || groupSaleRate;
+  const rateNum = parseFloat(rate) || 0;
   const serviceChargeNum = initialData?.serviceCharge ?? 0;
 
   const amounts = computeICSaleAmounts(unitNum, rateNum, serviceChargeNum);
@@ -318,7 +326,18 @@ export default function AddSaleModal({ open, onClose, initialData }: Props) {
                 </InputField>
 
                 <InputField label="Unit Rate (AED)">
-                  <input className={formInput} value={rate} onChange={e => setRate(e.target.value)} type="number" step="0.01" required />
+                  <input
+                    className={formInput}
+                    value={rate}
+                    onChange={e => setRate(e.target.value)}
+                    type="number"
+                    step="0.01"
+                    placeholder={
+                      applicableGroup
+                        ? 'Filled from rate group when available'
+                        : 'Enter unit rate'
+                    }
+                  />
                 </InputField>
               </div>
 

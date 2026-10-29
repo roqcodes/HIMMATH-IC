@@ -1,5 +1,6 @@
 import type { ICRateGroup } from '@/types';
 import { resolveGroupOrderRate } from './ratePricing';
+import { normalizeICSaleTransactionType } from './transactionTypes';
 
 /** Max fractional digits for IC rate inputs / storage display. */
 export const RATE_DECIMAL_PLACES = 14;
@@ -63,7 +64,7 @@ export function resolveGroupSaleRateAed(
   transactionType?: string | null,
 ): number {
   if (!group) return 0;
-  return resolveGroupOrderRate(group, transactionType || 'transfer', 0).saleRate;
+  return resolveGroupOrderRate(group, normalizeICSaleTransactionType(transactionType), 0).saleRate;
 }
 
 /** Foreign/local unit rate derived from AED sale rate × conversion (pricing slabs only). */

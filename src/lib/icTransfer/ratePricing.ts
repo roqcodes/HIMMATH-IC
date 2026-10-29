@@ -2,6 +2,7 @@ import type { ICSaleTransactionType } from './transactionTypes';
 import {
   IC_SALE_TRANSACTION_TYPES,
   IC_SALE_TRANSACTION_TYPE_OPTIONS,
+  normalizeICSaleTransactionType,
 } from './transactionTypes';
 import type { ICRateGroup, ICRateGroupPricingConfig, ICRateSlabTier, ICRateTransactionPricing } from '@/types';
 import { coerceFlatRate, nextUnitTierMin, type NullableFlatRate } from './rateFieldInput';
@@ -756,7 +757,7 @@ export function resolveGroupOrderRate(
   units: number,
 ): FlatRateValues {
   const fallback = getFlatRateFromGroup(group);
-  const type = (transactionType || 'transfer') as ICSaleTransactionType;
+  const type = normalizeICSaleTransactionType(transactionType);
   const config = group.pricingConfig
     ? normalizePricingConfig(group.pricingConfig, fallback)
     : null;
@@ -770,7 +771,14 @@ export function resolveGroupOrderRate(
   }
 
   if (config.scope === 'per_type' && config.byTransactionType) {
-    const typePricing = config.byTransactionType[type];
+    const byType = config.byTransactionType as Partial<
+      Record<string, ICRateTransactionPricing>
+    >;
+    const typePricing =
+      byType[type] ??
+      (type === 'sdm'
+        ? byType.transfer ?? byType.cdm ?? byType.nre
+        : undefined);
     if (typePricing) {
       return resolveFromTransactionPricing(typePricing, units, fallback);
     }

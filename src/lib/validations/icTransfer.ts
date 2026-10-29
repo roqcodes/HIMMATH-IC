@@ -1,12 +1,15 @@
 import { z } from 'zod';
-import { IC_SALE_TRANSACTION_TYPES } from '@/lib/icTransfer/transactionTypes';
+import { IC_SALE_TRANSACTION_TYPES, LEGACY_IC_SALE_TRANSACTION_TYPES } from '@/lib/icTransfer/transactionTypes';
 import { PASSWORD_INVALID_MESSAGE, validatePassword } from '@/lib/passwordValidation';
 
 const passwordSchema = z.string().refine((val) => validatePassword(val).isValid, {
   message: PASSWORD_INVALID_MESSAGE,
 });
 
-const icSaleTransactionTypeSchema = z.enum(IC_SALE_TRANSACTION_TYPES);
+const icSaleTransactionTypeSchema = z.enum([
+  ...IC_SALE_TRANSACTION_TYPES,
+  ...LEGACY_IC_SALE_TRANSACTION_TYPES,
+]);
 
 const idSchema = z.string().uuid('Invalid UUID format');
 const nameSchema = z.string().min(1, 'Name is required');
@@ -91,13 +94,21 @@ const rateTransactionPricingSchema = z.object({
   slabs: z.array(rateSlabTierSchema).optional(),
 });
 
+const rateByTransactionTypeSchema = z
+  .object({
+    sdm: rateTransactionPricingSchema.optional(),
+    by_hand: rateTransactionPricingSchema.optional(),
+    transfer: rateTransactionPricingSchema.optional(),
+    cdm: rateTransactionPricingSchema.optional(),
+    nre: rateTransactionPricingSchema.optional(),
+  })
+  .optional();
+
 export const rateGroupPricingConfigSchema = z.object({
   scope: z.enum(['all_types', 'per_type']),
   kind: z.enum(['flat', 'slab']),
   common: rateTransactionPricingSchema.optional(),
-  byTransactionType: z
-    .record(z.enum(['transfer', 'cdm', 'by_hand', 'nre']), rateTransactionPricingSchema)
-    .optional(),
+  byTransactionType: rateByTransactionTypeSchema,
 });
 
 export const updateRateGroupPricingSchema = z.object({

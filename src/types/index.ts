@@ -676,7 +676,7 @@ export type ICRateGroupPricingConfig = {
   common?: ICRateTransactionPricing;
   /** When scope=per_type. */
   byTransactionType?: Partial<
-    Record<'transfer' | 'cdm' | 'by_hand' | 'nre', ICRateTransactionPricing>
+    Record<ICSaleTransactionType, ICRateTransactionPricing>
   >;
 };
 

@@ -20,7 +20,7 @@ import TransactionTypeSelector from '../shared/TransactionTypeSelector';
 import { computeICSaleAmounts, formatAmount } from '@/lib/icTransfer/rateCalculations';
 import { resolveGroupOrderRate } from '@/lib/icTransfer/ratePricing';
 import InrAmountInWords from '../shared/InrAmountInWords';
-import { DEFAULT_IC_SALE_TRANSACTION_TYPE, transactionTypeRequiresBank, type ICSaleTransactionType } from '@/lib/icTransfer/transactionTypes';
+import { DEFAULT_IC_SALE_TRANSACTION_TYPE, normalizeICSaleTransactionType, transactionTypeRequiresBank, type ICSaleTransactionType } from '@/lib/icTransfer/transactionTypes';
 import { resolveBranchOrderRates } from '@/lib/icTransfer/branchRateScope';
 import { resolveCustomerPortalRateGroup } from '@/lib/icTransfer/customerPortalScope';
 import SubCustomerSearchInput from './SubCustomerSearchInput';
@@ -47,7 +47,9 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
   const linkedCustomerId = user?.customerId;
   const linkedCustomerName = user?.name;
   const [units, setUnits] = useState(initialData?.units?.toString() || '');
-  const [transactionType, setTransactionType] = useState(initialData?.transactionType || DEFAULT_IC_SALE_TRANSACTION_TYPE);
+  const [transactionType, setTransactionType] = useState<ICSaleTransactionType>(() =>
+    normalizeICSaleTransactionType(initialData?.transactionType),
+  );
   const [bank, setBank] = useState(initialData?.bank || '');
   const [address, setAddress] = useState(initialData?.address || '');
   const [location, setLocation] = useState(initialData?.location || '');
@@ -140,7 +142,7 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
   useEffect(() => {
     if (open) {
       setUnits(initialData?.units?.toString() || '');
-      setTransactionType(initialData?.transactionType || DEFAULT_IC_SALE_TRANSACTION_TYPE);
+      setTransactionType(normalizeICSaleTransactionType(initialData?.transactionType));
       setBank(
         initialData?.transactionType === 'by_hand' ? '' : (initialData?.bank || ''),
       );
@@ -163,7 +165,7 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
       if (initialData && canEditOrder(initialData, user?.role)) {
         setEditBaseline({
           units: initialData.units,
-          transactionType: initialData.transactionType || DEFAULT_IC_SALE_TRANSACTION_TYPE,
+          transactionType: normalizeICSaleTransactionType(initialData.transactionType),
           address: initialData.address,
           location: initialData.location,
           district: initialData.district,
