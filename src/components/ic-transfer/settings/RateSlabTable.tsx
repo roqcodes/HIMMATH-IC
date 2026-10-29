@@ -158,6 +158,8 @@ export default function RateSlabTable({
   defaultConversionRate,
   onChange,
 }: Props) {
+  const singleAedRate =
+    lockedConversionRate != null && lockedConversionRate > 0 && lockedConversionRate === 1;
   const updateTier = (index: number, patch: Partial<EditableSlabTier>) => {
     const withLocked =
       lockedConversionRate != null && lockedConversionRate > 0
@@ -222,20 +224,20 @@ export default function RateSlabTable({
           <colgroup>
             <col className="w-[14%]" />
             <col className="w-[14%]" />
-            {!convertedRateOnly ? (
+            {!singleAedRate && !convertedRateOnly ? (
               <>
                 <col className="w-[18%]" />
                 <col className="w-[16%]" />
               </>
             ) : null}
-            <col className={convertedRateOnly ? 'w-[72%]' : 'w-[18%]'} />
+            <col className={singleAedRate || convertedRateOnly ? 'w-[72%]' : 'w-[18%]'} />
             <col className="w-8" />
           </colgroup>
           <thead>
             <tr className="border-b border-slate-100 bg-slate-50/80">
               <th className={slabHead}>From (units)</th>
               <th className={slabHead}>To (units)</th>
-              {!convertedRateOnly ? (
+              {!singleAedRate && !convertedRateOnly ? (
                 <>
                   <th className={slabHead}>AED rate</th>
                   <th className={slabHead}>Conversion</th>
@@ -258,9 +260,11 @@ export default function RateSlabTable({
                       ? defaultConversionRate
                       : null;
               const converted =
-                tier.saleRate != null && tierConv != null
-                  ? getCurrencyUnitRate(tier.saleRate, tierConv)
-                  : null;
+                singleAedRate
+                  ? tier.saleRate
+                  : tier.saleRate != null && tierConv != null
+                    ? getCurrencyUnitRate(tier.saleRate, tierConv)
+                    : null;
               const isLast = index === slabs.length - 1;
 
               return (
@@ -286,7 +290,7 @@ export default function RateSlabTable({
                       />
                     )}
                   </td>
-                  {!convertedRateOnly ? (
+                  {!singleAedRate && !convertedRateOnly ? (
                     <>
                       <td className={slabCell}>
                         <DecimalInput
@@ -326,11 +330,11 @@ export default function RateSlabTable({
                       onCommit={next => {
                         if (next == null) return;
 
-                        // Branch: conversion locked → derive AED.
-                        if (lockedConversionRate != null && lockedConversionRate > 0) {
+                        if (singleAedRate || (lockedConversionRate != null && lockedConversionRate > 0)) {
+                          const conv = lockedConversionRate ?? 1;
                           updateTier(index, {
-                            saleRate: next / lockedConversionRate,
-                            conversionRate: lockedConversionRate,
+                            saleRate: next,
+                            conversionRate: conv,
                           });
                           return;
                         }

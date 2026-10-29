@@ -8,7 +8,7 @@ import {
   formatRateGroupUpdatedAt,
   isRateGroupUpdatedToday,
 } from '@/lib/icTransfer/rateGroupUtils';
-import { getCurrencyUnitRate, formatAmount } from '@/lib/icTransfer/rateCalculations';
+import { formatAmount } from '@/lib/icTransfer/rateCalculations';
 import {
   ensurePricingConversions,
   getPricingSummaryLabel,
@@ -87,8 +87,8 @@ export default function RateGroupsTable({
   const columns = [
     '',
     'Group',
-    ...(convertedRateOnly ? [] : ['Country', 'Currency', 'Sale Rate', 'Conversion']),
-    convertedRateOnly ? 'Rate' : 'Converted Rate',
+    ...(convertedRateOnly ? [] : ['Country', 'Currency']),
+    'Rate (AED)',
     'Pricing',
     'Updated',
     ...(hideBranchColumn ? [] : ['Branches']),
@@ -101,8 +101,7 @@ export default function RateGroupsTable({
     const value = getRowEditorValue(group);
 
     const validationError = validatePricingEditorForSave(value.flat, value.pricingConfig, {
-      lockedConversionRate:
-        convertedRateOnly && 1 > 0 ? 1 : undefined,
+      lockedConversionRate: 1,
     });
     if (validationError) {
       showToast(validationError, 'error');
@@ -110,8 +109,7 @@ export default function RateGroupsTable({
     }
 
     const seeded = seedFlatRateForSave(value.flat, value.pricingConfig, {
-      lockedConversionRate:
-        convertedRateOnly && 1 > 0 ? 1 : undefined,
+      lockedConversionRate: 1,
       convertedRate: value.convertedRate,
     });
     if (!seeded) {
@@ -124,12 +122,7 @@ export default function RateGroupsTable({
         ? mergePerTypePricingUpdate(group.pricingConfig, value.pricingConfig.byTransactionType, seeded)
         : value.pricingConfig;
 
-    const prepared = ensurePricingConversions(
-      pricingBase,
-      (convertedRateOnly && 1 > 0
-        ? 1
-        : seeded.conversionRate),
-    );
+    const prepared = ensurePricingConversions(pricingBase, 1);
     const normalized = normalizePricingConfig(prepared, seeded);
     const configToSave = hasAdvancedPricing(normalized) ? normalized : null;
     const success = await onSavePricing(
@@ -172,7 +165,7 @@ export default function RateGroupsTable({
             const isExpanded = expandedId === group.id;
             const advanced = hasAdvancedPricing(group.pricingConfig);
             const colSpan = columns.length;
-            const converted = getCurrencyUnitRate(group.saleRate, 1);
+            const converted = group.saleRate;
 
             const openView = () => onView(group);
 
@@ -247,12 +240,6 @@ export default function RateGroupsTable({
                       <td className={`border-y border-black/5 px-3 py-3.5 text-sm font-semibold text-slate-800 sm:px-4 sm:py-4 ${cellBg}`}>
                         {'AED'}
                       </td>
-                      <td className={`border-y border-black/5 px-3 py-3.5 text-sm font-semibold tabular-nums text-emerald-700 sm:px-4 sm:py-4 ${cellBg}`}>
-                        {group.saleRate.toLocaleString()}
-                      </td>
-                      <td className={`border-y border-black/5 px-3 py-3.5 text-sm font-semibold tabular-nums text-indigo-700 sm:px-4 sm:py-4 ${cellBg}`}>
-                        {String(1)}
-                      </td>
                     </>
                   ) : null}
                   <td className={`border-y border-black/5 px-3 py-3.5 text-sm font-bold tabular-nums text-slate-900 sm:px-4 sm:py-4 ${cellBg}`}>
@@ -326,11 +313,7 @@ export default function RateGroupsTable({
                           group={group}
                           currency={'AED'}
                           convertedRateOnly={convertedRateOnly}
-                          lockedConversionRate={
-                            convertedRateOnly && 1 > 0
-                              ? 1
-                              : undefined
-                          }
+                          lockedConversionRate={1}
                           defaultExpanded={advanced}
                           showExpandToggle
                           idPrefix={`row-${group.id}`}

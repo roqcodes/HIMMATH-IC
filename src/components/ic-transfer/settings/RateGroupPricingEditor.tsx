@@ -107,10 +107,6 @@ export default function RateGroupPricingEditor({
     () => initialHydration.selectedTypes,
   );
   const [rateTab, setRateTab] = useState<RatePricingTab>(() => initialHydration.rateTab);
-  /** Admin-only seed value — prefills empty row conversions; does not lock or hide fields. */
-  const [defaultConversionText, setDefaultConversionText] = useState(() =>
-    baseFlat.conversionRate > 0 ? formatRateInputValue(baseFlat.conversionRate) : '',
-  );
 
   useEffect(() => {
     lastEmitKeyRef.current = null;
@@ -119,20 +115,16 @@ export default function RateGroupPricingEditor({
     if (group) {
       const groupFlat = getFlatRateFromGroup(group);
       onSaleChange(groupFlat.saleRate > 0 ? String(groupFlat.saleRate) : '');
-      onConversionChange(groupFlat.conversionRate > 0 ? String(groupFlat.conversionRate) : '');
+      onConversionChange('1');
       onConvertedChange(
-        groupFlat.saleRate > 0 && groupFlat.conversionRate > 0
-          ? String(getCurrencyUnitRate(groupFlat.saleRate, groupFlat.conversionRate))
+        groupFlat.saleRate > 0
+          ? String(groupFlat.saleRate)
           : '',
-      );
-      setDefaultConversionText(
-        groupFlat.conversionRate > 0 ? formatRateInputValue(groupFlat.conversionRate) : '',
       );
     } else {
       onSaleChange('');
-      onConversionChange('');
+      onConversionChange('1');
       onConvertedChange('');
-      setDefaultConversionText('');
     }
 
     setPerTypePricing(hydration.perTypePricing);
@@ -256,53 +248,7 @@ export default function RateGroupPricingEditor({
       return;
     }
 
-    // Admin: AED fixed → conversion ↔ converted.
     onConvertedChange(value);
-  };
-
-  /** Prefill empty conversions only — never hide or overwrite filled row values. */
-  const prefillConversion = (next: number) => {
-    if (!Number.isFinite(next) || next <= 0) return;
-
-    if (conversionRateNum == null || conversionRateNum <= 0) {
-      setConversionSilent(formatRateInputValue(next));
-      if (saleRateNum != null && saleRateNum > 0) {
-        onConvertedChange(formatRateInputValue(saleRateNum * next));
-      }
-    }
-
-    const stampEmpty = (pricing: ICRateTransactionPricing): ICRateTransactionPricing => {
-      if (pricing.mode === 'flat') {
-        if (pricing.conversionRate && pricing.conversionRate > 0) return pricing;
-        return { ...pricing, conversionRate: next };
-      }
-      return {
-        mode: 'slab',
-        slabs: (pricing.slabs ?? []).map(tier => ({
-          ...tier,
-          conversionRate: tier.conversionRate > 0 ? tier.conversionRate : next,
-        })),
-      };
-    };
-
-    if (!useSplitPanel) return;
-
-    setPerTypePricing(prev => {
-      const nextMap = { ...prev };
-      for (const type of selectedTypes) {
-        if (nextMap[type]) nextMap[type] = stampEmpty(nextMap[type]!);
-      }
-      return nextMap;
-    });
-  };
-
-  const handleDefaultConversionChange = (raw: string) => {
-    if (raw !== '' && !/^-?\d*\.?\d*$/u.test(raw)) return;
-    setDefaultConversionText(raw);
-    if (raw.trim() === '' || /^-?\d+\.$/u.test(raw.trim())) return;
-    const next = Number(raw);
-    if (!Number.isFinite(next) || next <= 0) return;
-    prefillConversion(next);
   };
 
   // Seed / rebase locked conversion for branch bulk / converted-only flows.
@@ -343,110 +289,55 @@ export default function RateGroupPricingEditor({
     }
   }, [effectiveLockedConversion]);
 
-  const defaultConversionNum = useMemo(() => {
-    const trimmed = defaultConversionText.trim();
-    if (!trimmed || /^-?\d+\.$/u.test(trimmed)) return null;
-    const parsed = Number(trimmed);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-  }, [defaultConversionText]);
-
   const baseRateFields = (
     <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-end">
       {!convertedRateOnly ? (
-        <>
-          <div className="w-full max-w-[140px]">
-            <label className={formLabel} htmlFor={`${idPrefix}-sale`}>
-              Rate in AED
-            </label>
-            <input
-              id={`${idPrefix}-sale`}
-              type="text"
-              inputMode="decimal"
-              className={`${formInput} tabular-nums`}
-              value={saleRate}
-              onChange={e => {
-                const raw = e.target.value;
-                if (raw !== '' && !/^-?\d*\.?\d*$/u.test(raw)) return;
-                onSaleChange(raw);
-              }}
-              placeholder="—"
-            />
-          </div>
-          <div className="w-full max-w-[140px]">
-            <label className={formLabel} htmlFor={`${idPrefix}-conv`}>
-              Conversion
-            </label>
-            <input
-              id={`${idPrefix}-conv`}
-              type="text"
-              inputMode="decimal"
-              className={`${formInput} tabular-nums`}
-              value={conversionRate}
-              onChange={e => {
-                const raw = e.target.value;
-                if (raw !== '' && !/^-?\d*\.?\d*$/u.test(raw)) return;
-                onConversionChange(raw);
-              }}
-              placeholder="—"
-            />
-          </div>
-        </>
-      ) : null}
-      <div className="w-full max-w-[160px]">
-        <label className={formLabel} htmlFor={`${idPrefix}-converted`}>
-          Rate ({currency})
-        </label>
-        <input
-          id={`${idPrefix}-converted`}
-          type="text"
-          inputMode="decimal"
-          className={`${formInput} tabular-nums`}
-          value={convertedRate}
-          onChange={e => {
-            const raw = e.target.value;
-            if (raw !== '' && !/^-?\d*\.?\d*$/u.test(raw)) return;
-            handleConvertedInput(raw);
-          }}
-          placeholder="—"
-        />
-      </div>
+        <div className="w-full max-w-[160px]">
+          <label className={formLabel} htmlFor={`${idPrefix}-sale`}>
+            Rate ({currency})
+          </label>
+          <input
+            id={`${idPrefix}-sale`}
+            type="text"
+            inputMode="decimal"
+            className={`${formInput} tabular-nums`}
+            value={saleRate}
+            onChange={e => {
+              const raw = e.target.value;
+              if (raw !== '' && !/^-?\d*\.?\d*$/u.test(raw)) return;
+              onSaleChange(raw);
+              if (effectiveLockedConversion === 1) {
+                onConvertedChange(raw);
+              }
+            }}
+            placeholder="—"
+          />
+        </div>
+      ) : (
+        <div className="w-full max-w-[160px]">
+          <label className={formLabel} htmlFor={`${idPrefix}-converted`}>
+            Rate ({currency})
+          </label>
+          <input
+            id={`${idPrefix}-converted`}
+            type="text"
+            inputMode="decimal"
+            className={`${formInput} tabular-nums`}
+            value={convertedRate}
+            onChange={e => {
+              const raw = e.target.value;
+              if (raw !== '' && !/^-?\d*\.?\d*$/u.test(raw)) return;
+              handleConvertedInput(raw);
+            }}
+            placeholder="—"
+          />
+        </div>
+      )}
     </div>
   );
 
-  const defaultConversionField =
-    !convertedRateOnly ? (
-      <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div className="min-w-0 flex-1">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Default conversion
-            </p>
-            <p className="mt-0.5 text-xs text-slate-500">
-              Prefills empty conversion fields only. Each row keeps its own conversion ↔ converted link (AED fixed).
-            </p>
-          </div>
-          <div className="w-full max-w-[180px] shrink-0">
-            <label className={formLabel} htmlFor={`${idPrefix}-default-conv`}>
-              Conversion rate
-            </label>
-            <input
-              id={`${idPrefix}-default-conv`}
-              type="text"
-              inputMode="decimal"
-              className={`${formInput} tabular-nums`}
-              value={defaultConversionText}
-              onChange={e => handleDefaultConversionChange(e.target.value)}
-              placeholder="—"
-            />
-          </div>
-        </div>
-      </div>
-    ) : null;
-
   return (
     <div className="space-y-4">
-      {useSplitPanel && defaultConversionField}
-
       {!useSplitPanel ? (
         <div className="space-y-2">
           <p className="text-xs text-slate-500">
@@ -495,7 +386,7 @@ export default function RateGroupPricingEditor({
             currency={currency}
             convertedRateOnly={convertedRateOnly}
             lockedConversionRate={effectiveLockedConversion}
-            defaultConversionRate={defaultConversionNum}
+            defaultConversionRate={1}
           />
         </div>
       ) : null}

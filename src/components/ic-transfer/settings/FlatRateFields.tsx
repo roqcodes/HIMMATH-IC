@@ -7,7 +7,6 @@ import {
   isIncompleteDecimalInput,
   parseRateFieldInput,
 } from '@/lib/icTransfer/rateFieldInput';
-import { getCurrencyUnitRate } from '@/lib/icTransfer/rateCalculations';
 import type { ICRateTransactionPricing } from '@/types';
 
 type Props = {
@@ -22,152 +21,50 @@ export default function FlatRateFields({
   pricing,
   currency,
   convertedRateOnly = false,
-  lockedConversionRate,
   onChange,
 }: Props) {
   const sale = pricing.saleRate ?? null;
-  const conversion =
-    lockedConversionRate != null && lockedConversionRate > 0
-      ? lockedConversionRate
-      : (pricing.conversionRate ?? null);
-  const converted =
-    sale != null && conversion != null && conversion > 0
-      ? getCurrencyUnitRate(sale, conversion)
-      : null;
+  const displayValue = sale;
 
-  const [saleText, setSaleText] = useState(() => formatRateFieldDisplay(sale));
-  const [conversionText, setConversionText] = useState(() => formatRateFieldDisplay(conversion));
-  const [convertedText, setConvertedText] = useState(() => formatRateFieldDisplay(converted));
+  const [text, setText] = useState(() => formatRateFieldDisplay(displayValue));
 
   useEffect(() => {
-    setSaleText(formatRateFieldDisplay(sale));
-    setConversionText(formatRateFieldDisplay(conversion));
-    setConvertedText(formatRateFieldDisplay(converted));
-  }, [sale, conversion, converted]);
+    setText(formatRateFieldDisplay(displayValue));
+  }, [displayValue]);
 
-  const commitFlat = (nextSale: number | null, nextConversion: number | null) => {
-    const conv =
-      lockedConversionRate != null && lockedConversionRate > 0
-        ? lockedConversionRate
-        : nextConversion;
+  const commitFlat = (nextSale: number | null) => {
     onChange({
       mode: 'flat',
       saleRate: nextSale ?? undefined,
-      conversionRate: conv ?? undefined,
+      conversionRate: 1,
     });
   };
 
-  if (convertedRateOnly) {
-    return (
-      <div className="max-w-[220px]">
-        <label className={formLabel}>Rate ({currency})</label>
-        <input
-          type="text"
-          inputMode="decimal"
-          className={`${formInput} tabular-nums`}
-          value={convertedText}
-          placeholder="—"
-          onChange={e => {
-            const raw = e.target.value;
-            if (raw !== '' && !/^-?\d*\.?\d*$/u.test(raw)) return;
-            setConvertedText(raw);
-            if (raw.trim() === '' || isIncompleteDecimalInput(raw)) {
-              if (raw.trim() === '') commitFlat(null, conversion);
-              return;
-            }
-            const nextConverted = parseRateFieldInput(raw);
-            if (nextConverted == null) {
-              commitFlat(null, conversion);
-              return;
-            }
-            const conv =
-              lockedConversionRate != null && lockedConversionRate > 0
-                ? lockedConversionRate
-                : conversion != null && conversion > 0
-                  ? conversion
-                  : 1;
-            commitFlat(nextConverted / conv, conv);
-          }}
-        />
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-wrap gap-3">
-      <div className="w-full max-w-[140px]">
-        <label className={formLabel}>AED rate</label>
-        <input
-          type="text"
-          inputMode="decimal"
-          className={`${formInput} tabular-nums`}
-          value={saleText}
-          placeholder="—"
-          onChange={e => {
-            const raw = e.target.value;
-            if (raw !== '' && !/^-?\d*\.?\d*$/u.test(raw)) return;
-            setSaleText(raw);
-            if (raw.trim() === '' || isIncompleteDecimalInput(raw)) {
-              if (raw.trim() === '') commitFlat(null, conversion);
-              return;
-            }
-            commitFlat(parseRateFieldInput(raw), conversion);
-          }}
-        />
-      </div>
-      {lockedConversionRate == null ? (
-        <div className="w-full max-w-[140px]">
-          <label className={formLabel}>Conversion</label>
-          <input
-            type="text"
-            inputMode="decimal"
-            className={`${formInput} tabular-nums`}
-            value={conversionText}
-            placeholder="—"
-            onChange={e => {
-              const raw = e.target.value;
-              if (raw !== '' && !/^-?\d*\.?\d*$/u.test(raw)) return;
-              setConversionText(raw);
-              if (raw.trim() === '' || isIncompleteDecimalInput(raw)) {
-                if (raw.trim() === '') commitFlat(sale, null);
-                return;
-              }
-              const nextConv = parseRateFieldInput(raw);
-              if (nextConv == null || nextConv <= 0) {
-                commitFlat(sale, null);
-                return;
-              }
-              commitFlat(sale, nextConv);
-            }}
-          />
-        </div>
-      ) : null}
-      <div className="w-full max-w-[140px]">
-        <label className={formLabel}>Rate ({currency})</label>
-        <input
-          type="text"
-          inputMode="decimal"
-          className={`${formInput} tabular-nums`}
-          value={convertedText}
-          placeholder="—"
-          onChange={e => {
-            const raw = e.target.value;
-            if (raw !== '' && !/^-?\d*\.?\d*$/u.test(raw)) return;
-            setConvertedText(raw);
-            if (raw.trim() === '' || isIncompleteDecimalInput(raw)) return;
-            const nextConverted = parseRateFieldInput(raw);
-            if (nextConverted == null || nextConverted <= 0) return;
-
-            if (sale != null && sale > 0) {
-              commitFlat(sale, nextConverted / sale);
-              return;
-            }
-            if (conversion != null && conversion > 0) {
-              commitFlat(nextConverted / conversion, conversion);
-            }
-          }}
-        />
-      </div>
+    <div className="w-full max-w-[160px]">
+      <label className={formLabel}>Rate ({currency})</label>
+      <input
+        type="text"
+        inputMode="decimal"
+        className={`${formInput} tabular-nums`}
+        value={text}
+        placeholder="—"
+        onChange={e => {
+          const raw = e.target.value;
+          if (raw !== '' && !/^-?\d*\.?\d*$/u.test(raw)) return;
+          setText(raw);
+          if (raw.trim() === '' || isIncompleteDecimalInput(raw)) {
+            if (raw.trim() === '') commitFlat(null);
+            return;
+          }
+          const next = parseRateFieldInput(raw);
+          if (next == null) {
+            commitFlat(null);
+            return;
+          }
+          commitFlat(next);
+        }}
+      />
     </div>
   );
 }

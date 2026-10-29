@@ -87,7 +87,7 @@ export default function RateGroupBulkUpdateBar({
 
   const currency = 'AED';
 
-  const lockedConversion = convertedRateOnly ? 1 : undefined;
+  const lockedConversion = 1;
 
   const filteredGroups = useMemo(() => {
     const q = groupSearch.trim().toLowerCase();

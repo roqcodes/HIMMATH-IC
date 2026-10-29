@@ -69,7 +69,7 @@ function RateValue({
         <span className="text-[11px] font-medium text-slate-400">{currency}</span>
       </span>
       <span className="block text-[11px] tabular-nums text-slate-500">
-        AED {formatRateAmount(saleRate)} · conv {formatRateAmount(conversionRate)}
+        AED {formatRateAmount(saleRate)}
       </span>
     </div>
   );
