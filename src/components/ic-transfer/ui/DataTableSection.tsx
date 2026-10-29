@@ -2,7 +2,8 @@
 
 import React from 'react';
 import { icfTableWrap } from '@/components/ic-funds/ui';
-import { icThClass, icRowLabelClass } from './tableStyles';
+import { icThClass, icRowLabelClass, icTdClass, inferTableColumnAligns } from './tableStyles';
+import type { TableCellAlign } from '@/lib/tableCellAlign';
 import SectionCard from './SectionCard';
 import SearchInput from './SearchInput';
 import {
@@ -25,6 +26,8 @@ type Props = {
   sortOrder?: 'asc' | 'desc';
   mobileView?: React.ReactNode;
   headerCellContent?: Partial<Record<string, React.ReactNode>>;
+  /** Per-column alignment; defaults inferred from header labels. */
+  columnAlign?: TableCellAlign[];
 };
 
 export default function DataTableSection({
@@ -43,9 +46,11 @@ export default function DataTableSection({
   sortOrder,
   mobileView,
   headerCellContent,
+  columnAlign,
 }: Props) {
   const showSearch = searchValue !== undefined && onSearchChange !== undefined;
   const tableVisibility = mobileView ? 'hidden md:block' : '';
+  const aligns = columnAlign ?? inferTableColumnAligns(columns);
 
   return (
     <SectionCard>
@@ -68,16 +73,21 @@ export default function DataTableSection({
           <table className="w-full border-collapse text-left text-sm" style={{ minWidth }}>
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/80">
-                {columns.map(col => {
+                {columns.map((col, colIndex) => {
                   const isSorted = sortField && col.toLowerCase().replace(/\s/g, '') === sortField.toLowerCase().replace(/\s/g, '');
+                  const align = aligns[colIndex] ?? 'left';
                   return (
                     <th
                       key={col}
-                      className={`${icThClass('left')} ${onHeaderClick ? 'cursor-pointer select-none hover:text-slate-800' : ''}`}
+                      className={`${icThClass(align)} ${onHeaderClick ? 'cursor-pointer select-none hover:text-slate-800' : ''}`}
                       onClick={() => onHeaderClick?.(col)}
                     >
                       {headerCellContent?.[col] ?? (
-                        <div className="flex items-center gap-1">
+                        <div
+                          className={`flex items-center gap-1 ${
+                            align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start'
+                          }`}
+                        >
                           <span>{col}</span>
                           {isSorted && (
                             <span className="text-[10px] text-slate-400">
@@ -95,9 +105,8 @@ export default function DataTableSection({
               {children || (data && data.length > 0 ? (
                 data.map((row, i) => (
                   <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
-                    <td className={icRowLabelClass}>{row[0]}</td>
-                    {row.slice(1).map((cell, j) => (
-                      <td key={j} className="px-2.5 py-1.5 text-sm text-slate-800">
+                    {row.map((cell, j) => (
+                      <td key={j} className={icTdClass(aligns[j] ?? 'left')}>
                         {cell}
                       </td>
                     ))}
@@ -119,4 +128,4 @@ export default function DataTableSection({
   );
 }
 
-export { icRowLabelClass };
+export { icRowLabelClass, icTdClass, inferTableColumnAligns };

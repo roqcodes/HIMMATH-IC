@@ -5,7 +5,7 @@ import { canReadSection, canWriteSection } from '@/lib/asic/pages';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { seedDefaultStaffPermissions } from '@/lib/userPermissions';
 import { HQ_IC_FUNDS_BRANCH_ID, isHqIcFundsBranchId } from '@/lib/icFunds/hqBranch';
-import { authSessionSlug } from '@/lib/icTransfer/warehouseSlug';
+import { authSessionSlug, isHqOpsUser } from '@/lib/icTransfer/warehouseSlug';
 import { logger } from '@/lib/logger';
 import { PASSWORD_INVALID_MESSAGE, validatePassword } from '@/lib/passwordValidation';
 import { PRODUCT_NAME } from '@/lib/brand';
@@ -63,8 +63,13 @@ async function requireUserManagementAccess(branchSlug?: string, mode: 'read' | '
     return { user, branchSlug: normalizedBranchSlug };
   }
 
-  if (user.role.startsWith('warehouse_') && normalizedBranchSlug) {
-    return { user, branchSlug: normalizedBranchSlug };
+  if (user.role.startsWith('warehouse_')) {
+    if (normalizedBranchSlug) {
+      return { user, branchSlug: normalizedBranchSlug };
+    }
+    if (isHqOpsUser(user)) {
+      return { user, branchSlug: undefined };
+    }
   }
 
   if (!normalizedBranchSlug && user.role === 'admin') {
@@ -160,11 +165,20 @@ export async function createCognitoUserAction(
     return { success: false, error: access.error };
   }
 
-  if (access.user?.role === 'branch_manager' || access.user?.role?.startsWith('warehouse_')) {
+  if (access.user?.role === 'branch_manager') {
     if (role !== 'staff' && !role.startsWith('warehouse_') && !role.startsWith('delivery')) {
       return { success: false, error: 'Managers can only create staff, warehouse, or delivery accounts.' };
     }
     if (branchId !== access.user.branchId) {
+      return { success: false, error: 'You can only create users for your branch.' };
+    }
+  }
+
+  if (access.user?.role?.startsWith('warehouse_')) {
+    if (!role.startsWith('delivery')) {
+      return { success: false, error: 'Warehouse managers can only create delivery agent accounts.' };
+    }
+    if (access.user.branchId && branchId && branchId !== access.user.branchId) {
       return { success: false, error: 'You can only create users for your branch.' };
     }
   }

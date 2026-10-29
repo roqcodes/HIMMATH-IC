@@ -13,6 +13,7 @@ import {
   PageHeader,
   PageShell,
   useICTransferFilters,
+  icTdClass,
 } from '../ui';
 import {
   filterPurchasesForBranchPortal,
@@ -26,8 +27,6 @@ import { portalMobileCardFooterClass } from '@/lib/icTransfer/layoutConstants';
 import AddPurchaseModal from './AddPurchaseModal';
 import ViewPurchaseModal from './ViewPurchaseModal';
 import { ICPurchase } from '@/types';
-
-const icCompactTd = (align: 'left'|'center'|'right') => `p-3 text-sm whitespace-nowrap text-${align}`;
 
 const fmt = (n: number) => `AED ${n.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`;
 
@@ -228,19 +227,19 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
       >
         {filteredPurchases.map((p) => (
           <tr key={p.id} onClick={() => handleView(p)} className="cursor-pointer hover:bg-slate-50/50 transition-colors border-b border-slate-100 last:border-0 group">
-            <td className={icCompactTd('left')}>{new Date(p.createdAt || '').toLocaleDateString()}</td>
-            <td className={icCompactTd('left')}><span className="font-mono text-slate-500">{getFormattedTxnId(p.id, 'purchase', p)}</span></td>
-            <td className={icCompactTd('left')}><span className="font-semibold text-slate-900">{getSupplierName(p.supplierId || '')}</span></td>
-            <td className={icCompactTd('right')}>{p.units.toLocaleString()}</td>
-            <td className={icCompactTd('right')}><span className="font-bold text-slate-900">{(p.aedTotal || 0).toLocaleString()}</span></td>
-            <td className={icCompactTd('center')}>
+            <td className={icTdClass('left')}>{new Date(p.createdAt || '').toLocaleDateString()}</td>
+            <td className={icTdClass('left')}><span className="font-mono text-slate-500">{getFormattedTxnId(p.id, 'purchase', p)}</span></td>
+            <td className={icTdClass('left')}><span className="font-semibold text-slate-900">{getSupplierName(p.supplierId || '')}</span></td>
+            <td className={icTdClass('right')}>{p.units.toLocaleString()}</td>
+            <td className={icTdClass('right')}><span className="font-bold text-slate-900">{(p.aedTotal || 0).toLocaleString()}</span></td>
+            <td className={icTdClass('center')}>
               <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
                 p.paymentStatus === 'paid' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
               }`}>
                 {p.paymentStatus || 'pending'}
               </span>
             </td>
-            <td className={icCompactTd('center')}>
+            <td className={icTdClass('center')}>
               <div className="flex items-center justify-center gap-1.5">
                 <button
                   type="button"

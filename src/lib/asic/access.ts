@@ -9,13 +9,18 @@ export type ResolvedAsicScope = {
 };
 
 function resolveSectionId(sectionRaw: string | null, portal: AsicPortal): AsicSectionId {
-  if (sectionRaw === 'customers' || sectionRaw === 'accounts') return 'entities';
+  if (sectionRaw === 'accounts') return 'entities';
   if (sectionRaw && isAsicSection(sectionRaw)) return sectionRaw;
   return defaultSection(portal);
 }
 
 /** Map the current URL to an ASIC portal + section for RBAC write checks. */
 export function resolveSectionFromPathname(pathname: string): ResolvedAsicScope | null {
+  const normalized = pathname.replace(/\/$/, '') || '/';
+  if (normalized === '/admin/customers' || normalized.startsWith('/admin/customers/')) {
+    return { portal: 'admin', section: 'customers' };
+  }
+
   const parsed = parseAsicPath(pathname);
 
   if (parsed.portal === 'legacy') {

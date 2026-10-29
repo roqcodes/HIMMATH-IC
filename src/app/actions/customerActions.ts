@@ -8,6 +8,14 @@ import { assertStaffWriteAccess } from '@/app/actions/permissionActions';
 import { createCustomerCognitoUser, deleteCognitoUserByEmail, resetCustomerCognitoPasswordAction, updateCognitoUserName } from '@/app/actions/cognitoActions';
 import { PASSWORD_INVALID_MESSAGE, validatePassword } from '@/lib/passwordValidation';
 import { syncCustomerFundAccount, deactivateCustomerFundAccount } from '@/lib/icFunds/customerFundSync';
+import { isHqAdminStaff } from '@/lib/icFunds/hqBranch';
+import { readSectionAccess } from '@/lib/staffSectionPermissions';
+
+function revalidateCustomerPaths(slug: string) {
+  revalidatePath(`/${slug}/customers`);
+  revalidatePath('/admin/customers');
+  revalidatePath(`/${slug}/ic-funds/accounts`);
+}
 
 const CUSTOMER_DELETE_BLOCKED_MESSAGE =
   'This customer cannot be deleted because they have existing orders or transactions.';
@@ -101,13 +109,30 @@ export async function getCustomerByCognitoUserId(cognitoUserId: string) {
 }
 
 export async function getAllCustomers() {
+  const user = await getSessionUser();
+  const canList =
+    user?.role === 'admin' ||
+    user?.role === 'auditor' ||
+    (user?.role === 'staff' &&
+      isHqAdminStaff(user) &&
+      readSectionAccess(user.permissions, 'customers') !== 'none');
+  if (!canList) {
+    return { success: false as const, error: 'Unauthorized', customers: [] };
+  }
   try {
     const res = await query(
       `
-      SELECT c.*
+      SELECT c.*,
+        COALESCE(h.has_orders, false) AS has_orders,
+        0 AS net_usdt
       FROM customers c
+      LEFT JOIN (
+        SELECT DISTINCT order_customer_id AS customer_id, true AS has_orders
+        FROM ic_sales
+        WHERE order_customer_id IS NOT NULL
+      ) h ON h.customer_id = c.id
       ORDER BY c.name ASC
-    `
+    `,
     );
     return { success: true, customers: res.rows.map(mapCustomerRow) };
   } catch (err: unknown) {
@@ -151,6 +176,7 @@ export async function saveCustomer(
     password?: string;
     balance?: number | string;
     status?: string;
+    enablePortalLogin?: boolean;
   },
 ) {
   try {
@@ -163,13 +189,16 @@ export async function saveCustomer(
     const isNew = !data.id;
     const email = data.email?.trim() || '';
     const password = data.password?.trim() || '';
+    const enablePortalLogin = Boolean(data.enablePortalLogin);
 
     if (isNew) {
-      if (!email) {
-        return { success: false, error: 'Email is required to create a customer portal account.' };
-      }
-      if (!validatePassword(password).isValid) {
-        return { success: false, error: PASSWORD_INVALID_MESSAGE };
+      if (enablePortalLogin) {
+        if (!email) {
+          return { success: false, error: 'Email is required when customer portal login is enabled.' };
+        }
+        if (!validatePassword(password).isValid) {
+          return { success: false, error: PASSWORD_INVALID_MESSAGE };
+        }
       }
     }
 
@@ -192,7 +221,24 @@ export async function saveCustomer(
     const status = data.status || 'active';
     let cognitoUserId = existingCognitoUserId;
 
-    if (isNew) {
+    if (isNew && enablePortalLogin) {
+      const cognitoRes = await createCustomerCognitoUser({
+        email,
+        name: data.name.trim(),
+        branchId,
+        password,
+      });
+      if (!cognitoRes.success || !cognitoRes.userId) {
+        return { success: false, error: cognitoRes.error || 'Failed to create customer login account.' };
+      }
+      cognitoUserId = cognitoRes.userId;
+    } else if (!isNew && enablePortalLogin && !existingCognitoUserId) {
+      if (!email) {
+        return { success: false, error: 'Email is required when customer portal login is enabled.' };
+      }
+      if (!validatePassword(password).isValid) {
+        return { success: false, error: PASSWORD_INVALID_MESSAGE };
+      }
       const cognitoRes = await createCustomerCognitoUser({
         email,
         name: data.name.trim(),
@@ -236,8 +282,7 @@ export async function saveCustomer(
       await query(`UPDATE profiles SET customer_id = $1 WHERE id = $2`, [id, cognitoUserId]);
     }
 
-    revalidatePath(`/${slug}/customers`);
-    revalidatePath(`/${slug}/ic-funds/accounts`);
+    revalidateCustomerPaths(slug);
     return { success: true, id };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
@@ -303,8 +348,7 @@ export async function deleteCustomer(id: string, slug: string) {
 
     await query(`DELETE FROM customers WHERE id = $1`, [id]);
     await deactivateCustomerFundAccount(id);
-    revalidatePath(`/${slug}/customers`);
-    revalidatePath(`/${slug}/ic-funds/accounts`);
+    revalidateCustomerPaths(slug);
     return { success: true };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useICFundsReportHeaderToolbar } from '@/components/ic-funds/ICFundsReportsChrome';
 import Link from 'next/link';
 import {
   getICFundReportBundleAction,
@@ -9,11 +10,19 @@ import {
   listICFundAccountsLiteAction,
 } from '@/app/actions/icFundsActions';
 import { accountTypeLabel, IC_FUND_VOUCHER_LABELS } from '@/lib/icFunds/constants';
-import { fmtICAmount, fmtICDate, fmtLedgerAed } from '@/lib/icFunds/format';
-import { IC_FUNDS_REPORTS, icFundsReportPath, type ICFundsReportId } from '@/lib/icFunds/nav';
+import { fmtICAmount, fmtICDate, fmtLedgerAed, icfLedgerColumnLabel } from '@/lib/icFunds/format';
+import { formatReportPeriodCaption } from '@/lib/icFunds/reportCaptions';
+import { downloadCsv, printReportArea } from '@/lib/icFunds/booksExport';
+import { btnSecondary } from '@/lib/ui';
+import TrialBalanceReport from '@/components/ic-funds/reports/TrialBalanceReport';
+import ProfitLossReport from '@/components/ic-funds/reports/ProfitLossReport';
+import BalanceSheetReport from '@/components/ic-funds/reports/BalanceSheetReport';
+import DayBookReport from '@/components/ic-funds/reports/DayBookReport';
+import CashBankBookReport from '@/components/ic-funds/reports/CashBankBookReport';
+import { icFundsReportPath, type ICFundsReportId } from '@/lib/icFunds/nav';
 import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
 import { computeBooksKpis } from '@/lib/icFunds/kpiMetrics';
-import { icfCard, icfInput, icfLabel, icfTableWrap, icfTd, icfTh, icfTheadRow, icfAccountLink } from '@/components/ic-funds/ui';
+import { icfCard, icfInput, icfLabel, icfTableWrap, icfTd, icfTh, icfThAlign, icfTheadRow, icfAccountLink } from '@/components/ic-funds/ui';
 import { ASICTableRowsSkeleton, ASICTableSkeleton } from '@/components/asic/ASICTableSkeleton';
 import ICFundsDateFilterBar from '@/components/ic-funds/ICFundsDateFilterBar';
 import { useICFundsDateFilter } from '@/components/ic-funds/useICFundsDateFilter';
@@ -64,7 +73,7 @@ export default function BooksScreen({
     setCustomEndDate,
     startDate,
     endDate,
-  } = useICFundsDateFilter(branch?.timezone);
+  } = useICFundsDateFilter(branch?.timezone, 'this-month');
   const [bundle, setBundle] = useState<ReportBundle | null>(null);
   const [warehousePl, setWarehousePl] = useState<ICWarehousePLReport | null>(null);
   const [accounts, setAccounts] = useState<ICFundAccount[]>([]);
@@ -153,10 +162,13 @@ export default function BooksScreen({
     void loadBundle();
   }, [loadBundle, loadStatement, loadWarehousePl, reportView]);
 
-  const activeLabel = IC_FUNDS_REPORTS.find(r => r.id === reportView)?.label ?? 'Reports';
+  const { periodLabel, asAtLabel } = formatReportPeriodCaption({
+    startDate: bundle?.startDate ?? startDate,
+    endDate: bundle?.endDate ?? endDate,
+  });
   const asOfLabel = bundle?.asOfDate
-    ? `Balances as of ${fmtICDate(bundle.asOfDate)}`
-    : 'Posted balances (active vouchers); pending amounts shown separately';
+    ? `As at ${fmtICDate(bundle.asOfDate)}`
+    : asAtLabel;
 
   const booksKpiMetrics = useMemo(() => {
     if (reportView === 'statement') {
@@ -170,6 +182,7 @@ export default function BooksScreen({
     return computeBooksKpis({
       reportView,
       profitLoss: bundle?.profitLoss,
+      plStatement: bundle?.plStatement,
       balanceSheet: bundle?.balanceSheet,
       trialBalance: bundle?.trialBalance,
       vouchers:
@@ -186,6 +199,63 @@ export default function BooksScreen({
     });
   }, [reportView, bundle, warehousePl, statement]);
 
+  const ledgerById = useMemo(
+    () => new Map((bundle?.accountLedgers ?? []).map(l => [l.accountId, l])),
+    [bundle?.accountLedgers],
+  );
+
+  const handleExportCsv = useCallback(() => {
+    if (!bundle) return;
+    if (reportView === 'trial-balance') {
+      downloadCsv(
+        'trial-balance.csv',
+        ['Account', 'Type', 'Opening Dr', 'Opening Cr', 'Period Dr', 'Period Cr', 'Closing Dr', 'Closing Cr'],
+        bundle.trialBalance.map(l => [
+          l.accountName,
+          l.accountType,
+          l.openingDebit ?? 0,
+          l.openingCredit ?? 0,
+          l.periodDebit ?? 0,
+          l.periodCredit ?? 0,
+          l.closingDebit ?? l.debit,
+          l.closingCredit ?? l.credit,
+        ]),
+      );
+      return;
+    }
+    if (reportView === 'profit-loss' && bundle.plStatement) {
+      const s = bundle.plStatement;
+      downloadCsv('profit-and-loss.csv', ['Section', 'Amount (AED)'], [
+        ['Sales / income', s.salesTotal],
+        ['Direct costs', -s.directCostsTotal],
+        ['Gross result', s.grossResult],
+        ['Operating expenses', -s.operatingTotal],
+        ['Net for period', s.netForPeriod],
+      ]);
+    }
+  }, [bundle, reportView]);
+
+  const showCsvExport =
+    (reportView === 'trial-balance' || reportView === 'profit-loss') && Boolean(bundle);
+
+  const headerToolbar = useMemo(
+    () => (
+      <>
+        <button type="button" className={btnSecondary} onClick={() => printReportArea('icf-report-print')}>
+          Print
+        </button>
+        {showCsvExport ? (
+          <button type="button" className={btnSecondary} onClick={handleExportCsv}>
+            Export CSV
+          </button>
+        ) : null}
+      </>
+    ),
+    [showCsvExport, handleExportCsv],
+  );
+
+  useICFundsReportHeaderToolbar(headerToolbar);
+
   const accountTable = (rows: ICFundAccount[], empty: string, showAsOf = false) => (
     <div>
       {showAsOf ? (
@@ -197,8 +267,8 @@ export default function BooksScreen({
           <tr className={icfTheadRow}>
             <th className={icfTh}>Account</th>
             <th className={icfTh}>Type</th>
-            <th className={`${icfTh} text-right`}>Opening</th>
-            <th className={`${icfTh} text-right`}>Balance</th>
+            <th className={icfThAlign('right')}>{icfLedgerColumnLabel.opening}</th>
+            <th className={icfThAlign('right')}>{icfLedgerColumnLabel.balance}</th>
           </tr>
         </thead>
         <tbody>
@@ -213,7 +283,7 @@ export default function BooksScreen({
                   </Link>
                 </td>
                 <td className={`${icfTd} text-slate-500`}>{accountTypeLabel(row.accountType)}</td>
-                <AmountCell n={row.openingBalance} />
+                <AmountCell n={ledgerById.get(row.id)?.opening ?? row.openingBalance} />
                 <BalanceWithPendingCell balance={row.balance} pendingBalance={row.pendingBalance} />
               </tr>
             ))
@@ -234,7 +304,7 @@ export default function BooksScreen({
             <th className={icfTh}>Type</th>
             <th className={icfTh}>Debit</th>
             <th className={icfTh}>Credit</th>
-            <th className={`${icfTh} text-right`}>Amount</th>
+            <th className={icfThAlign('right')}>{icfLedgerColumnLabel.amount}</th>
             <th className={icfTh}>User</th>
             <th className={icfTh}>Notes</th>
           </tr>
@@ -268,7 +338,7 @@ export default function BooksScreen({
                     accounts={accounts}
                   />
                 </td>
-                <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtICAmount(row.amount)}</td>
+                <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(row.amount)}</td>
                 <td className={icfTd}><VoucherUserCell voucher={row} /></td>
                 <td className={`${icfTd} max-w-[12rem] truncate text-slate-500`}>{row.notes || '—'}</td>
               </tr>
@@ -285,33 +355,9 @@ export default function BooksScreen({
   return (
     <div>
       {confirmDialog}
-      {portal !== 'admin' ? (
-        <div className={`${icfCard} mb-2 overflow-x-auto`}>
-          <nav className="flex min-w-max gap-0.5 p-1" aria-label="Report views">
-            {IC_FUNDS_REPORTS.map(item => {
-              const active = item.id === reportView;
-              return (
-                <Link
-                  key={item.id}
-                  href={icFundsReportPath(slug, item.id, portal)}
-                  className={`shrink-0 rounded-md px-2.5 py-1.5 text-xs no-underline ${
-                    active
-                      ? 'bg-slate-900 font-medium text-white'
-                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
-        </div>
-      ) : null}
-
       <div className={`${icfCard} min-w-0`}>
-        <div className="border-b border-slate-200 px-3 pt-2">
+        <div className="border-b border-slate-200 px-3 pt-2 dark:border-[var(--theme-border)]">
           <div className="flex flex-wrap items-center gap-3 pb-2">
-            <p className="text-sm font-medium text-slate-900">{activeLabel}</p>
             {reportView === 'statement' ? (
               <div className="min-w-[12rem]">
                 <label className={icfLabel} htmlFor="icf-stmt-acc">Account</label>
@@ -337,6 +383,7 @@ export default function BooksScreen({
         {booksKpiMetrics.length > 0 ? <AsicKpiStrip metrics={booksKpiMetrics} className="mx-3 mb-2" /> : null}
 
         {error ? <p className="px-3 py-2 text-sm text-red-600">{error}</p> : null}
+        <div id="icf-report-print">
         {loading && reportView !== 'statement' && reportView !== 'warehouse-pl' && !bundle ? (
           <ASICTableSkeleton framed={false} cols={7} rows={8} />
         ) : null}
@@ -356,9 +403,9 @@ export default function BooksScreen({
                     <th className={icfTh}>#</th>
                     <th className={icfTh}>Type</th>
                     <th className={icfTh}>Particulars</th>
-                    <th className={`${icfTh} text-right`}>Debit</th>
-                    <th className={`${icfTh} text-right`}>Credit</th>
-                    <th className={`${icfTh} text-right`}>Balance</th>
+                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.debit}</th>
+                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.credit}</th>
+                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.balance}</th>
                     <th className={icfTh}>User</th>
                     <th className={icfTh}>Remark</th>
                   </tr>
@@ -385,7 +432,7 @@ export default function BooksScreen({
                         </td>
                         <AmountCell n={line.debit} />
                         <AmountCell n={line.credit} danger />
-                        <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtICAmount(line.balance)}</td>
+                        <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(line.balance)}</td>
                         <td className={icfTd}>
                           <VoucherUserCell
                             voucher={{
@@ -403,9 +450,9 @@ export default function BooksScreen({
                   <tfoot>
                     <tr className="border-t border-slate-200 bg-slate-50 font-medium">
                       <td className={icfTd} colSpan={4}>Totals</td>
-                      <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtICAmount(totalDr)}</td>
-                      <td className={`${icfTd} text-right font-mono tabular-nums text-red-600`}>{fmtICAmount(totalCr)}</td>
-                      <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtICAmount(statement.closing)}</td>
+                      <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(totalDr)}</td>
+                      <td className={`${icfTd} text-right font-mono tabular-nums text-red-600`}>{fmtLedgerAed(totalCr)}</td>
+                      <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(statement.closing)}</td>
                       <td className={icfTd} />
                       <td className={icfTd} />
                     </tr>
@@ -416,8 +463,24 @@ export default function BooksScreen({
           )
         ) : null}
 
-        {bundle && reportView === 'all-vouchers' ? voucherTable(bundle.allVouchers, 'No vouchers in this period.') : null}
-        {bundle && reportView === 'cash-bank' ? accountTable(bundle.cashBank, 'No bank accounts yet.', true) : null}
+        {bundle && reportView === 'all-vouchers' ? (
+          <DayBookReport
+            vouchers={bundle.allVouchers}
+            slug={slug}
+            accounts={accounts}
+            periodLabel={periodLabel}
+            truncated={bundle.dayBookTruncated}
+          />
+        ) : null}
+        {bundle && reportView === 'cash-bank' ? (
+          <CashBankBookReport
+            ledgers={bundle.accountLedgers}
+            slug={slug}
+            accounts={accounts}
+            asAtLabel={asOfLabel}
+            periodLabel={periodLabel}
+          />
+        ) : null}
         {bundle && reportView === 'd-expenses' ? voucherTable(bundle.dExpenses, 'No direct expenses in this period.') : null}
         {bundle && reportView === 'receivables' ? (
           <div className="grid sm:grid-cols-2">
@@ -432,25 +495,13 @@ export default function BooksScreen({
             </div>
           </div>
         ) : null}
-        {bundle && reportView === 'profit-loss' ? (
-          <table className="w-full text-sm">
-            <tbody>
-              {[
-                ['Income', bundle.profitLoss.income],
-                ['Profit parked', bundle.profitLoss.profit],
-                ['Expense', bundle.profitLoss.expense],
-                ['D-Expense', bundle.profitLoss.dExpense],
-                ['Net', bundle.profitLoss.net],
-              ].map(([label, value]) => (
-                <tr key={String(label)} className="border-b border-slate-100">
-                  <td className={`${icfTd} font-medium`}>{label}</td>
-                  <td className={`${icfTd} text-right font-mono tabular-nums ${Number(value) < 0 ? 'text-red-600' : ''}`}>
-                    {fmtICAmount(Number(value))}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {bundle && reportView === 'profit-loss' && bundle.plStatement ? (
+          <ProfitLossReport
+            statement={bundle.plStatement}
+            periodLabel={periodLabel}
+            slug={slug}
+            accounts={accounts}
+          />
         ) : null}
         {warehousePl && reportView === 'warehouse-pl' ? (
           <div>
@@ -464,12 +515,12 @@ export default function BooksScreen({
                 <thead>
                   <tr className={icfTheadRow}>
                     <th className={icfTh}>Warehouse</th>
-                    <th className={`${icfTh} text-right`}>Stock u</th>
-                    <th className={`${icfTh} text-right`}>Avg cost</th>
-                    <th className={`${icfTh} text-right`}>Sold u</th>
-                    <th className={`${icfTh} text-right`}>Revenue</th>
-                    <th className={`${icfTh} text-right`}>COGS</th>
-                    <th className={`${icfTh} text-right`}>Gross profit</th>
+                    <th className={icfThAlign('right')}>Stock u</th>
+                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.avgCost}</th>
+                    <th className={icfThAlign('right')}>Sold u</th>
+                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.revenue}</th>
+                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.cogs}</th>
+                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.grossProfit}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -487,7 +538,7 @@ export default function BooksScreen({
                           {row.purchaseUnits.toLocaleString(undefined, { maximumFractionDigits: 4 })}
                         </td>
                         <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                          {row.weightedAvgRate > 0 ? fmtICAmount(row.weightedAvgRate) : '—'}
+                          {row.weightedAvgRate > 0 ? `${fmtICAmount(row.weightedAvgRate)} AED` : '—'}
                         </td>
                         <td className={`${icfTd} text-right font-mono tabular-nums`}>
                           {row.saleUnits.toLocaleString(undefined, { maximumFractionDigits: 4 })}
@@ -526,12 +577,12 @@ export default function BooksScreen({
                     <th className={icfTh}>Date</th>
                     <th className={icfTh}>Warehouse</th>
                     <th className={icfTh}>Customer</th>
-                    <th className={`${icfTh} text-right`}>Units</th>
-                    <th className={`${icfTh} text-right`}>Sale rate</th>
-                    <th className={`${icfTh} text-right`}>Avg cost</th>
-                    <th className={`${icfTh} text-right`}>Revenue</th>
-                    <th className={`${icfTh} text-right`}>COGS</th>
-                    <th className={`${icfTh} text-right`}>Profit</th>
+                    <th className={icfThAlign('right')}>Units</th>
+                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.saleRate}</th>
+                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.avgCost}</th>
+                    <th className={icfThAlign('right')}>Revenue</th>
+                    <th className={icfThAlign('right')}>COGS</th>
+                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.profit}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -550,9 +601,9 @@ export default function BooksScreen({
                         <td className={`${icfTd} text-right font-mono tabular-nums`}>
                           {line.units.toLocaleString(undefined, { maximumFractionDigits: 4 })}
                         </td>
-                        <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtICAmount(line.saleRate)}</td>
+                        <td className={`${icfTd} text-right font-mono tabular-nums`}>{`${fmtICAmount(line.saleRate)} AED`}</td>
                         <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                          {line.avgPurchaseRate > 0 ? fmtICAmount(line.avgPurchaseRate) : '—'}
+                          {line.avgPurchaseRate > 0 ? `${fmtICAmount(line.avgPurchaseRate)} AED` : '—'}
                         </td>
                         <AmountCell n={line.revenue} />
                         <AmountCell n={line.cogs} />
@@ -565,107 +616,25 @@ export default function BooksScreen({
             </div>
           </div>
         ) : null}
-        {bundle && reportView === 'balance-sheet' ? (
-          <div>
-            <p className="border-b border-slate-200 px-2.5 py-1 text-[11px] text-slate-500">{asOfLabel}</p>
-            <div className="grid md:grid-cols-2">
-              <div className="border-b border-slate-200 md:border-b-0 md:border-r">
-                <p className="border-b border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-slate-500">Assets</p>
-                <table className="w-full">
-                  <tbody>
-                    <tr className="border-b border-slate-100"><td className={icfTd}>Cash &amp; Bank</td><td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtICAmount(bundle.balanceSheet.bank)}</td></tr>
-                    <tr className="border-b border-slate-100"><td className={icfTd}>Receivables</td><td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtICAmount(bundle.balanceSheet.receivables)}</td></tr>
-                    <tr className="bg-slate-50 font-medium"><td className={icfTd}>Total assets</td><td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtICAmount(bundle.balanceSheet.totalAssets)}</td></tr>
-                  </tbody>
-                </table>
-              </div>
-              <div>
-                <p className="border-b border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-slate-500">Liabilities &amp; equity</p>
-                <table className="w-full">
-                  <tbody>
-                    <tr className="border-b border-slate-100"><td className={icfTd}>Payables</td><td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtICAmount(bundle.balanceSheet.payables)}</td></tr>
-                    <tr className="border-b border-slate-100"><td className={icfTd}>Profit reserve</td><td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtICAmount(bundle.balanceSheet.equity)}</td></tr>
-                    <tr className="border-b border-slate-100"><td className={icfTd}>Accumulated P&amp;L</td><td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtICAmount(bundle.balanceSheet.accumulatedPL)}</td></tr>
-                    <tr className="bg-slate-50 font-medium"><td className={icfTd}>Total liabilities &amp; equity</td><td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtICAmount(bundle.balanceSheet.totalLiabilitiesEquity)}</td></tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            <p className={`px-2.5 py-2 text-[11px] ${bundle.balanceSheet.balanced ? 'text-emerald-600' : 'text-amber-600'}`}>
-              {bundle.balanceSheet.balanced
-                ? 'Trial balance ties: total debits equal total credits.'
-                : `Trial balance out of balance by ${fmtICAmount(
-                    bundle.trialBalance.reduce((s, l) => s + l.debit, 0)
-                    - bundle.trialBalance.reduce((s, l) => s + l.credit, 0),
-                  )} — review opening balances or post a journal adjustment.`}
-            </p>
-          </div>
+        {bundle && reportView === 'balance-sheet' && bundle.balanceSheetDetail ? (
+          <BalanceSheetReport
+            detail={bundle.balanceSheetDetail}
+            asAtLabel={asOfLabel}
+            balanced={bundle.balanceSheet.balanced}
+            outOfBalance={bundle.balanceSheet.outOfBalance}
+            slug={slug}
+            accounts={accounts}
+          />
         ) : null}
         {bundle && reportView === 'trial-balance' ? (
-          <div>
-            <p className="border-b border-slate-200 px-2.5 py-1 text-[11px] text-slate-500">{asOfLabel}</p>
-            <div className={icfTableWrap}>
-              <table className="w-full min-w-[520px] text-left">
-                <thead>
-                  <tr className={icfTheadRow}>
-                    <th className={icfTh}>Account</th>
-                    <th className={icfTh}>Type</th>
-                    <th className={`${icfTh} text-right`}>Debit</th>
-                    <th className={`${icfTh} text-right`}>Credit</th>
-                    <th className={`${icfTh} text-right`}>Pending Dr</th>
-                    <th className={`${icfTh} text-right`}>Pending Cr</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {bundle.trialBalance.length === 0 ? (
-                    <tr><td colSpan={6} className={`${icfTd} py-6 text-center text-slate-500`}>No account balances in this snapshot.</td></tr>
-                  ) : (
-                    bundle.trialBalance.map(line => (
-                      <tr key={line.accountId} className="border-b border-slate-100 hover:bg-slate-50">
-                        <td className={icfTd}>
-                          <ICFundAccountLink
-                            slug={slug}
-                            accountId={line.accountId}
-                            name={line.accountName}
-                            accounts={accounts}
-                          />
-                        </td>
-                        <td className={`${icfTd} text-slate-500`}>{accountTypeLabel(line.accountType)}</td>
-                        <td className={`${icfTd} text-right font-mono tabular-nums`}>{line.debit ? fmtICAmount(line.debit) : '—'}</td>
-                        <td className={`${icfTd} text-right font-mono tabular-nums`}>{line.credit ? fmtICAmount(line.credit) : '—'}</td>
-                        <td className={`${icfTd} text-right font-mono tabular-nums text-amber-700`}>
-                          {line.pendingDebit ? fmtICAmount(line.pendingDebit) : '—'}
-                        </td>
-                        <td className={`${icfTd} text-right font-mono tabular-nums text-amber-700`}>
-                          {line.pendingCredit ? fmtICAmount(line.pendingCredit) : '—'}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-                {bundle.trialBalance.length > 0 ? (
-                  <tfoot>
-                    <tr className="border-t border-slate-200 bg-slate-50 font-medium">
-                      <td className={icfTd} colSpan={2}>Totals (posted)</td>
-                      <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                        {fmtICAmount(bundle.trialBalance.reduce((s, l) => s + l.debit, 0))}
-                      </td>
-                      <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                        {fmtICAmount(bundle.trialBalance.reduce((s, l) => s + l.credit, 0))}
-                      </td>
-                      <td className={`${icfTd} text-right font-mono tabular-nums text-amber-700`}>
-                        {fmtICAmount(bundle.trialBalance.reduce((s, l) => s + (l.pendingDebit ?? 0), 0))}
-                      </td>
-                      <td className={`${icfTd} text-right font-mono tabular-nums text-amber-700`}>
-                        {fmtICAmount(bundle.trialBalance.reduce((s, l) => s + (l.pendingCredit ?? 0), 0))}
-                      </td>
-                    </tr>
-                  </tfoot>
-                ) : null}
-              </table>
-            </div>
-          </div>
+          <TrialBalanceReport
+            lines={bundle.trialBalance}
+            slug={slug}
+            accounts={accounts}
+            asAtLabel={asOfLabel}
+          />
         ) : null}
+        </div>
       </div>
     </div>
   );

@@ -8,6 +8,7 @@ import { ICSale } from '@/types';
 import { useApp } from '@/context/AppContext';
 import { ConfirmModal } from '@/components/warehouse/shared';
 import SalePriorityControl from '../shared/SalePriorityControl';
+import FulfillmentHandlerControl from '../shared/FulfillmentHandlerControl';
 import SaleOrderWorkflowSection from '../shared/SaleOrderWorkflowSection';
 import ProofImageActions from '../shared/ProofImageActions';
 import CopyOrderDetailsButton from '../shared/CopyOrderDetailsButton';
@@ -28,6 +29,7 @@ import { getCustomerPortalSubCustomerName } from '@/lib/icTransfer/customerPorta
 import { isBranchHandledSale } from '@/lib/icTransfer/fulfillmentHandler';
 import { formatICSaleTransactionTypeLabel } from '@/lib/icTransfer/transactionTypes';
 import InrAmountInWords from '../shared/InrAmountInWords';
+import { ModalRecordedOnValue } from '../shared/modalDetailUi';
 
 type Props = {
   open: boolean;
@@ -124,7 +126,7 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
       <Modal
         open={open}
         onClose={onClose}
-        title="Sale Details"
+        title="Sale details"
         maxWidth="max-w-4xl"
         footer={
           <div className={`flex w-full items-center ${showDelete ? 'justify-between' : 'justify-end'}`}>
@@ -158,16 +160,18 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
                 <p className="font-mono text-sm font-semibold text-slate-900 mt-0.5">{getFormattedTxnId(liveSale.id, 'sale', liveSale, branches, txnBranchName)}</p>
               </div>
               <div>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Date</p>
-                <p className="text-sm font-semibold text-slate-900 mt-0.5">{new Date(liveSale.createdAt || '').toLocaleString()}</p>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Recorded on</p>
+                <div className="mt-0.5 text-sm font-semibold text-slate-900">
+                  <ModalRecordedOnValue iso={liveSale.createdAt} />
+                </div>
               </div>
             </div>
 
             {liveSale.derivedFromSaleId && (
               <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-2 text-xs text-indigo-800">
-                <span className="font-bold">Derived from order: </span>
-                <span className="font-mono">{getFormattedTxnId(liveSale.derivedFromSaleId, 'sale', null, branches, txnBranchName)}</span>
-                <span className="text-indigo-600"> — created from a partial delivery split</span>
+                <span className="font-semibold">Split order</span>
+                <span className="text-indigo-600"> · remainder from </span>
+                <span className="font-mono font-medium">{getFormattedTxnId(liveSale.derivedFromSaleId, 'sale', null, branches, txnBranchName)}</span>
               </div>
             )}
 
@@ -179,7 +183,7 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
                 <p className="text-sm font-semibold text-slate-900 mt-0.5">{displayCustomerName}</p>
               </div>
               <div>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Transaction Type</p>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Transaction type</p>
                 <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize mt-0.5 ${
                   liveSale.transactionType === 'by_hand'
                     ? 'border border-violet-200 bg-violet-50 text-violet-700'
@@ -200,7 +204,7 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
                 </div>
                 {!isCustomerViewer ? (
                   <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Unit Rate (AED)</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Unit rate (AED)</p>
                     <p className="mt-0.5 text-sm font-bold text-slate-900">{formatAmount(liveSale.unitRate)}</p>
                   </div>
                 ) : null}
@@ -208,18 +212,18 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
 
               <div className={`grid gap-4 rounded-lg border border-slate-100 bg-slate-50/55 p-4 ${isCustomerViewer ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1 sm:grid-cols-3'}`}>
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total INR</p>
-                  <p className="mt-0.5 text-sm font-bold text-slate-900">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total (INR)</p>
+                  <p className="mt-0.5 text-sm font-bold tabular-nums text-slate-900">
                     {getSaleInrAmount(Number(liveSale.units)).toLocaleString()} INR
                   </p>
                   <InrAmountInWords
                     amount={getSaleInrAmount(Number(liveSale.units))}
-                    className="mt-0.5 text-[11px] font-medium leading-snug text-slate-500"
+                    className="mt-0.5 text-sm font-medium leading-snug text-slate-500"
                   />
                 </div>
                 {!isCustomerViewer ? (
                   <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total AED</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total (AED)</p>
                     <p className="mt-0.5 text-sm font-bold text-accent">{formatAED(liveSale.aedAmount)}</p>
                   </div>
                 ) : null}
@@ -227,22 +231,28 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
             </div>
 
             {!isBranchPortalView && (
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Priority</p>
-                <SalePriorityControl saleId={liveSale.id} priority={liveSale.priority} />
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">Priority</p>
+                  <SalePriorityControl saleId={liveSale.id} priority={liveSale.priority} />
+                </div>
+                <div>
+                  <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">Handling</p>
+                  <FulfillmentHandlerControl sale={liveSale} />
+                </div>
               </div>
             )}
 
             {liveSale.deliveryAgentName && !isBranchPortalView && (
               <div>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Assigned Agent</p>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Assigned agent</p>
                 <p className="text-sm font-semibold text-slate-900 mt-0.5">{liveSale.deliveryAgentName}</p>
               </div>
             )}
 
             {liveSale.address ? (
               <div>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Delivery Address</p>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Delivery address</p>
                 <p className="text-sm text-slate-700 mt-0.5 bg-slate-50 p-3 rounded-xl border border-slate-100 whitespace-pre-wrap">{liveSale.address}</p>
               </div>
             ) : !isBranchPortalView ? (
@@ -319,7 +329,7 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
           <div className="flex flex-col gap-6 lg:border-l lg:pl-8 lg:border-slate-100">
             {/* Original Order Image */}
             <div>
-              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">{orderImageLabel}</p>
+              <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">{orderImageLabel}</p>
               {liveSale.imageUrl ? (
                 <div className="relative aspect-[4/3] w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
                   <a href={liveSale.imageUrl} target="_blank" rel="noopener noreferrer">
@@ -341,7 +351,7 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
 
             {/* Delivery Proof */}
             <div>
-              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">Delivery/Payment Proof (Agent Upload)</p>
+              <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">Payment proof (agent upload)</p>
               {showDeliveryProofPending ? (
                 <div className="flex aspect-[4/3] w-full items-center justify-center rounded-xl border border-slate-200 bg-slate-50/50 text-slate-500 text-xs font-medium">
                   Pending
@@ -380,9 +390,9 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
 
       <ConfirmModal
         open={confirmDeleteOpen}
-        title="Delete Sale"
+        title="Delete sale"
         message="Are you sure you want to delete this sale? This action cannot be undone."
-        confirmLabel="Delete Sale"
+        confirmLabel="Delete sale"
         variant="danger"
         loading={deleteLoading}
         onConfirm={handleDelete}

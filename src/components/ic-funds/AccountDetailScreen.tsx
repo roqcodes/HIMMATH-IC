@@ -20,6 +20,7 @@ import {
   icfTableWrap,
   icfTd,
   icfTh,
+  icfThAlign,
   icfTheadRow,
 } from '@/components/ic-funds/ui';
 import {
@@ -27,7 +28,7 @@ import {
   type ICFundAccountDetail,
 } from '@/lib/icFunds/accountDetailAnalytics';
 import { accountTypeLabel, IC_FUND_VOUCHER_LABELS } from '@/lib/icFunds/constants';
-import { fmtICAmount, fmtICDate, fmtLedgerAed } from '@/lib/icFunds/format';
+import { fmtICDate, fmtLedgerAed, icfLedgerColumnLabel } from '@/lib/icFunds/format';
 import { icFundsReportPath } from '@/lib/icFunds/nav';
 import { ASICPageSkeleton, ASICTableRowsSkeleton } from '@/components/asic/ASICTableSkeleton';
 import { useApp } from '@/context/AppContext';
@@ -85,9 +86,9 @@ function StatementTable({
             <th className={icfTh}>#</th>
             <th className={icfTh}>Type</th>
             <th className={icfTh}>Particulars</th>
-            <th className={`${icfTh} text-right`}>Debit</th>
-            <th className={`${icfTh} text-right`}>Credit</th>
-            <th className={`${icfTh} text-right`}>Balance</th>
+            <th className={icfThAlign('right')}>{icfLedgerColumnLabel.debit}</th>
+            <th className={icfThAlign('right')}>{icfLedgerColumnLabel.credit}</th>
+            <th className={icfThAlign('right')}>{icfLedgerColumnLabel.balance}</th>
             <th className={icfTh}>User</th>
             <th className={icfTh}>Remark</th>
           </tr>
@@ -120,7 +121,7 @@ function StatementTable({
                 </td>
                 <AmountCell n={line.debit} />
                 <AmountCell n={line.credit} danger />
-                <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtICAmount(line.balance)}</td>
+                <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(line.balance)}</td>
                 <td className={icfTd}>
                   <VoucherUserCell
                     voucher={{ createdByName: line.userName, createdAt: line.userAt ?? '' }}
@@ -137,9 +138,9 @@ function StatementTable({
               <td className={icfTd} colSpan={4}>
                 Totals
               </td>
-              <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtICAmount(totalDr)}</td>
-              <td className={`${icfTd} text-right font-mono tabular-nums text-red-600`}>{fmtICAmount(totalCr)}</td>
-              <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtICAmount(closing)}</td>
+              <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(totalDr)}</td>
+              <td className={`${icfTd} text-right font-mono tabular-nums text-red-600`}>{fmtLedgerAed(totalCr)}</td>
+              <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(closing)}</td>
               <td className={icfTd} colSpan={2} />
             </tr>
           </tfoot>
@@ -360,8 +361,8 @@ export default function AccountDetailScreen() {
                   <th className={icfTh}>#</th>
                   <th className={icfTh}>Type</th>
                   <th className={icfTh}>Counterparty</th>
-                  <th className={`${icfTh} text-right`}>Amount</th>
-                  <th className={`${icfTh} text-right`}>Dr/Cr</th>
+                  <th className={icfThAlign('right')}>{icfLedgerColumnLabel.amount}</th>
+                  <th className={icfThAlign('right')}>Dr/Cr</th>
                   <th className={icfTh}>Ref</th>
                   <th className={icfTh}>Remark</th>
                 </tr>
@@ -399,7 +400,7 @@ export default function AccountDetailScreen() {
                             name={counterparty}
                           />
                         </td>
-                        <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtICAmount(v.amount)}</td>
+                        <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(v.amount)}</td>
                         <td className={`${icfTd} text-right text-slate-500`}>{isDebit ? 'Dr' : 'Cr'}</td>
                         <td className={`${icfTd} font-mono text-[11px] text-slate-500`}>
                           {v.referenceType && v.referenceId ? `${v.referenceType}:${v.referenceId.slice(0, 8)}` : '—'}
@@ -422,8 +423,8 @@ export default function AccountDetailScreen() {
                   <th className={icfTh}>Date</th>
                   <th className={icfTh}>Purchase</th>
                   <th className={icfTh}>Warehouse</th>
-                  <th className={`${icfTh} text-right`}>Units</th>
-                  <th className={`${icfTh} text-right`}>AED</th>
+                  <th className={icfThAlign('right')}>Units</th>
+                  <th className={icfThAlign('right')}>AED</th>
                   <th className={icfTh}>Payment</th>
                 </tr>
               </thead>
@@ -441,7 +442,7 @@ export default function AccountDetailScreen() {
                       <td className={`${icfTd} font-mono text-[11px]`}>{p.id.slice(0, 8)}…</td>
                       <td className={icfTd}>{p.warehouseName || '—'}</td>
                       <td className={`${icfTd} text-right font-mono tabular-nums`}>{p.units}</td>
-                      <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtICAmount(p.aedAmount)}</td>
+                      <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(p.aedAmount)}</td>
                       <td className={`${icfTd} capitalize text-slate-500`}>{p.paymentMethod || '—'}</td>
                     </tr>
                   ))
@@ -459,8 +460,8 @@ export default function AccountDetailScreen() {
                   <th className={icfTh}>Date</th>
                   <th className={icfTh}>Order</th>
                   <th className={icfTh}>Customer</th>
-                  <th className={`${icfTh} text-right`}>Units</th>
-                  <th className={`${icfTh} text-right`}>AED</th>
+                  <th className={icfThAlign('right')}>Units</th>
+                  <th className={icfThAlign('right')}>AED</th>
                   <th className={icfTh}>Order</th>
                   <th className={icfTh}>Payment</th>
                 </tr>
@@ -479,7 +480,7 @@ export default function AccountDetailScreen() {
                       <td className={`${icfTd} font-mono text-[11px]`}>{s.id.slice(0, 8)}…</td>
                       <td className={icfTd}>{s.customerName || '—'}</td>
                       <td className={`${icfTd} text-right font-mono tabular-nums`}>{s.units}</td>
-                      <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtICAmount(s.aedAmount)}</td>
+                      <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(s.aedAmount)}</td>
                       <td className={`${icfTd} capitalize text-slate-500`}>{s.orderStatus || '—'}</td>
                       <td className={`${icfTd} capitalize text-slate-500`}>{s.paymentStatus || '—'}</td>
                     </tr>

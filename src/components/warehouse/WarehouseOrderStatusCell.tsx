@@ -4,11 +4,14 @@ import React from 'react';
 import {
   canWarehouseAct,
   canWarehouseRecordDelivery,
-  getAdminStatusLabel,
-  getAdminStatusStyle,
+  getDeliveryAgentStatusLabel,
+  getDeliveryAgentStatusStyle,
+  getWarehousePortalStatusLabel,
+  getWarehousePortalStatusStyle,
   isWarehouseDirectDeliverOrder,
   normalizeOrderStatus,
 } from '@/lib/icTransfer/orderStatus';
+import { warehouseOrderToPortalPick, warehouseOrderToStatusPick } from '@/lib/warehouse/orderStatusPick';
 import {
   OrderWorkflowActionStack,
   WorkflowActionButton,
@@ -41,10 +44,25 @@ export function WarehouseOrderStatusCard({ order }: { order: WarehouseOrder }) {
     orderStatus: order.order_status ?? undefined,
     deliveryAgentId: order.delivery_agent_id ?? undefined,
   });
+  const portalPick = warehouseOrderToPortalPick(order);
   return (
     <OrderStatusCard
-      label={directDeliver ? 'Direct Delivery' : getAdminStatusLabel(order.order_status)}
-      statusStyle={getAdminStatusStyle(order.order_status)}
+      label={getWarehousePortalStatusLabel(portalPick, { directDelivery: directDeliver })}
+      statusStyle={getWarehousePortalStatusStyle(portalPick, { directDelivery: directDeliver })}
+      remarks={order.rejection_remarks}
+      remarksVariant={getWarehouseRemarksVariant(order.order_status)}
+      compact
+    />
+  );
+}
+
+/** Status badge for delivery agent settlement (assigned = ready to deliver). */
+export function DeliveryAgentOrderStatusCard({ order }: { order: WarehouseOrder }) {
+  const pick = warehouseOrderToStatusPick(order);
+  return (
+    <OrderStatusCard
+      label={getDeliveryAgentStatusLabel(pick)}
+      statusStyle={getDeliveryAgentStatusStyle(pick)}
       remarks={order.rejection_remarks}
       remarksVariant={getWarehouseRemarksVariant(order.order_status)}
       compact

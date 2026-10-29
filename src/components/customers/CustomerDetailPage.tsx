@@ -12,7 +12,7 @@ import CustomerICFundsTab from './customer-detail/CustomerICFundsTab';
 import CustomerProfileCard from './customer-detail/CustomerProfileCard';
 import DetailSection from './customer-detail/DetailSection';
 import { useWriteAccess } from '@/context/RbacWriteContext';
-import { fmtICAmount } from '@/lib/icFunds/format';
+import { fmtLedgerAed } from '@/lib/icFunds/format';
 import { iconBtn } from '@/lib/ui';
 import { asicBtnPrimary } from '@/components/asic/ui';
 import AsicKpiStrip, { type AsicKpiMetric } from '@/components/asic/AsicKpiStrip';
@@ -22,8 +22,8 @@ import { HQ_IC_FUNDS_BRANCH_ID } from '@/lib/icFunds/hqBranch';
 export default function CustomerDetailPage() {
   const params = useParams();
   const customerId = params.customerId as string;
-  const backHref = '/admin/entities';
-  const backLabel = 'Back to entities';
+  const backHref = '/admin/customers';
+  const backLabel = 'Back to customers';
   const { canWrite, writeBlockedReason, buttonProps: wp } = useWriteAccess();
 
   const branchId = HQ_IC_FUNDS_BRANCH_ID;
@@ -70,9 +70,9 @@ export default function CustomerDetailPage() {
     if (icFundAccount) {
       metrics.push({
         label: 'IC Funds',
-        value: fmtICAmount(icFundAccount.balance),
+        value: fmtLedgerAed(icFundAccount.balance),
         hint: icFundAccount.pendingBalance
-          ? `${fmtICAmount(icFundAccount.pendingBalance)} pending`
+          ? `${fmtLedgerAed(icFundAccount.pendingBalance)} pending`
           : 'Fund account balance',
         tone: icFundAccount.balance > 0 ? 'emerald' : icFundAccount.balance < 0 ? 'red' : 'default',
       });

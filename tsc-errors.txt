@@ -1,0 +1,217 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm 
+help npmrc` for supported config options.
+At C:\nvm4w\nodejs\npx.ps1:16 char:5
++     & "$basedir/node$exe"  "$basedir/node_modules/npm/bin/npx-cli.js" ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+src/app/actions/icFundsActions.ts(1279,51): error TS2307: Cannot find module '@/lib/icFunds/customerStatementFx.server' or its corresponding type declarations.
+src/app/actions/warehouseActions.ts(501,103): error TS2554: Expected 3-4 arguments, but got 5.
+src/app/actions/warehouseActions.ts(533,31): error TS2339: Property 'convertedAmount' does not exist on type '{ units: number; aedAmount: number; serviceCharge: number; }'.
+src/app/actions/warehouseActions.ts(546,105): error TS2554: Expected 3-4 arguments, but got 5.
+src/app/actions/warehouseActions.ts(577,33): error TS2339: Property 'convertedAmount' does not exist on type '{ units: number; aedAmount: number; serviceCharge: number; }'.
+src/components/ic-funds/AccountDetailScreen.tsx(37,50): error TS2307: Cannot find module '@/components/ic-funds/CollectionAgentWalletActivitySection' or its corresponding type declarations.
+src/components/ic-funds/AccountDetailScreen.tsx(51,33): error TS2367: This comparison appears to be unintentional because the types '"personal" | "income" | "profit" | "expense" | "d_expense"' and '"collection_agent"' have no overlap.
+src/components/ic-funds/AccountDetailScreen.tsx(64,33): error TS2367: This comparison appears to be unintentional because the types '"personal" | "income" | "profit" | "expense" | "d_expense"' and '"collection_agent"' have no overlap.
+src/components/ic-funds/AccountDetailScreen.tsx(196,29): error TS2367: This comparison appears to be unintentional because the types 'ICFundAccountType | undefined' and '"collection_agent"' have no overlap.
+src/components/ic-transfer/branch/AddICBranchOrderModal.tsx(102,7): error TS2353: Object literal may only specify known properties, and 'branchCustomerIds' does not exist in type '{ branchId?: string | undefined; customerId?: string | undefined; transactionType?: string | null | undefined; }'.
+src/components/ic-transfer/branch/AddICBranchOrderModal.tsx(114,38): error TS2339: Property 'branchGroup' does not exist on type '{ group: ICRateGroup | undefined; saleRateAed: number; } | { branchGroup: ICRateGroup | undefined; adminGroup: undefined; }'.
+  Property 'branchGroup' does not exist on type '{ group: ICRateGroup | undefined; saleRateAed: number; }'.
+src/components/ic-transfer/branch/AddICBranchOrderModal.tsx(115,37): error TS2339: Property 'adminGroup' does not exist on type '{ group: ICRateGroup | undefined; saleRateAed: number; } | { branchGroup: ICRateGroup | undefined; adminGroup: undefined; }'.
+  Property 'adminGroup' does not exist on type '{ group: ICRateGroup | undefined; saleRateAed: number; }'.
+src/components/ic-transfer/branch/AddICBranchOrderModal.tsx(128,20): error TS2339: Property 'conversionRate' does not exist on type 'ICSale'.
+src/components/ic-transfer/branch/AddICBranchOrderModal.tsx(188,25): error TS2367: This comparison appears to be unintentional because the types '"hq_admin" | undefined' and '"branch"' have no overlap.
+src/components/ic-transfer/branch/AddICBranchOrderModal.tsx(222,79): error TS2554: Expected 2-3 arguments, but got 4.
+src/components/ic-transfer/branch/AddICBranchOrderModal.tsx(270,30): error TS2339: Property 'currencyTotal' does not exist on type '{ saleRateAed: number; aedBaseTotal: number; aedNetTotal: number; inrTotal: number; }'.
+src/components/ic-transfer/branch/AddICBranchOrderModal.tsx(288,30): error TS2339: Property 'currencyTotal' does not exist on type '{ saleRateAed: number; aedBaseTotal: number; aedNetTotal: number; inrTotal: number; }'.
+src/components/ic-transfer/branch/AddICBranchOrderModal.tsx(331,23): error TS2345: Argument of type '{ customerName: string; orderCustomerName: string | undefined; orderCustomerId: string | undefined; subCustomerId: string | undefined; subCustomerName: string | undefined; transactionType: "transfer" | ... 2 more ... | "nre"; ... 14 more ...; fulfillmentHandler: "hq_admin" | "branch"; }' is not assignable to parameter of type 'Omit<ICSale, "id" | "createdAt" | "enteredBy" | "enteredByName" | "enteredByUserId">'.
+  Types of property 'fulfillmentHandler' are incompatible.
+    Type '"hq_admin" | "branch"' is not assignable to type '"hq_admin" | undefined'.
+      Type '"branch"' is not assignable to type '"hq_admin"'.
+src/components/ic-transfer/branch/AddICBranchOrderModal.tsx(578,36): error TS2339: Property 'currencyUnitRate' does not exist on type '{ saleRateAed: number; aedBaseTotal: number; aedNetTotal: number; inrTotal: number; }'.
+src/components/ic-transfer/branch/AddICBranchOrderModal.tsx(611,43): error TS2339: Property 'currencyTotal' does not exist on type '{ saleRateAed: number; aedBaseTotal: number; aedNetTotal: number; inrTotal: number; }'.
+src/components/ic-transfer/branch/ICTransferBranch.tsx(37,61): error TS2307: Cannot find module '@/lib/icTransfer/branchSaleProfit' or its corresponding type declarations.
+src/components/ic-transfer/branch/ICTransferBranch.tsx(114,45): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/purchase/AddPurchaseModal.tsx(12,32): error TS2305: Module '"@/lib/icTransfer/rateCalculations"' has no exported member 'resolveApplicableRateGroup'.
+src/components/ic-transfer/purchase/AddPurchaseModal.tsx(37,72): error TS2554: Expected 1 arguments, but got 2.
+src/components/ic-transfer/purchase/AddPurchaseModal.tsx(41,70): error TS2554: Expected 1 arguments, but got 2.
+src/components/ic-transfer/purchase/AddPurchaseModal.tsx(97,31): error TS2339: Property 'currencyTotal' does not exist on type '{ saleRateAed: number; aedBaseTotal: number; aedNetTotal: number; inrTotal: number; }'.
+src/components/ic-transfer/purchase/AddPurchaseModal.tsx(200,11): error TS2322: Type '{ inrTotal: number; currencyTotal: any; currencyCode: any; aedBaseTotal: number; showCurrency: boolean; }' is not assignable to type 'IntrinsicAttributes & Props'.
+  Property 'currencyTotal' does not exist on type 'IntrinsicAttributes & Props'.
+src/components/ic-transfer/purchase/AddPurchaseModal.tsx(200,34): error TS2339: Property 'currencyTotal' does not exist on type '{ saleRateAed: number; aedBaseTotal: number; aedNetTotal: number; inrTotal: number; }'.
+src/components/ic-transfer/purchase/ICTransferPurchase.tsx(18,3): error TS2724: '"@/lib/icTransfer/branchPortalScope"' has no exported member named 'filterPurchasesForBranchPortal'. Did you mean 'filterWarehousesForBranchPortal'?
+src/components/ic-transfer/purchase/ICTransferPurchase.tsx(23,8): error TS2305: Module '"@/lib/icTransfer/branchPortalScope"' has no exported member 'ICTransferPortalMode'.
+src/components/ic-transfer/purchase/ICTransferPurchase.tsx(56,58): error TS2554: Expected 1 arguments, but got 2.
+src/components/ic-transfer/purchase/ICTransferPurchase.tsx(65,76): error TS2554: Expected 1 arguments, but got 2.
+src/components/ic-transfer/purchase/ICTransferPurchase.tsx(84,52): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/components/ic-transfer/purchase/ICTransferPurchase.tsx(95,45): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+src/components/ic-transfer/purchase/ICTransferPurchase.tsx(95,50): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/components/ic-transfer/purchase/ICTransferPurchase.tsx(96,43): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/components/ic-transfer/purchase/ICTransferPurchase.tsx(96,84): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+src/components/ic-transfer/purchase/ICTransferPurchase.tsx(96,89): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/components/ic-transfer/purchase/ICTransferPurchase.tsx(98,50): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+src/components/ic-transfer/purchase/ICTransferPurchase.tsx(98,55): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/components/ic-transfer/purchase/ICTransferPurchase.tsx(115,57): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/components/ic-transfer/purchase/ICTransferPurchase.tsx(116,46): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+src/components/ic-transfer/purchase/ICTransferPurchase.tsx(116,51): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/components/ic-transfer/purchase/ICTransferPurchase.tsx(195,35): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/components/ic-transfer/purchase/ICTransferPurchase.tsx(229,33): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/components/ic-transfer/sales/AddSaleModal.tsx(20,3): error TS2305: Module '"@/lib/icTransfer/rateCalculations"' has no exported member 'getCurrencyUnitRate'.
+src/components/ic-transfer/sales/AddSaleModal.tsx(22,3): error TS2305: Module '"@/lib/icTransfer/rateCalculations"' has no exported member 'resolveApplicableRateGroup'.
+src/components/ic-transfer/sales/AddSaleModal.tsx(23,3): error TS2305: Module '"@/lib/icTransfer/rateCalculations"' has no exported member 'resolveSaleCurrencyContext'.
+src/components/ic-transfer/sales/AddSaleModal.tsx(128,22): error TS2339: Property 'conversionRate' does not exist on type 'ICSale'.
+src/components/ic-transfer/sales/AddSaleModal.tsx(128,60): error TS2339: Property 'conversionRate' does not exist on type 'ICSale'.
+src/components/ic-transfer/sales/AddSaleModal.tsx(129,58): error TS2339: Property 'conversionRate' does not exist on type 'ICSale'.
+src/components/ic-transfer/sales/AddSaleModal.tsx(131,43): error TS2339: Property 'conversionRate' does not exist on type 'ICSale'.
+src/components/ic-transfer/sales/AddSaleModal.tsx(203,83): error TS2554: Expected 2-3 arguments, but got 4.
+src/components/ic-transfer/sales/AddSaleModal.tsx(241,32): error TS2339: Property 'currencyTotal' does not exist on type '{ saleRateAed: number; aedBaseTotal: number; aedNetTotal: number; inrTotal: number; }'.
+src/components/ic-transfer/sales/AddSaleModal.tsx(459,15): error TS2322: Type '{ inrTotal: number; currencyTotal: any; currencyCode: any; aedBaseTotal: number; showCurrency: boolean; }' is not assignable to type 'IntrinsicAttributes & Props'.
+  Property 'currencyTotal' does not exist on type 'IntrinsicAttributes & Props'.
+src/components/ic-transfer/sales/AddSaleModal.tsx(459,38): error TS2339: Property 'currencyTotal' does not exist on type '{ saleRateAed: number; aedBaseTotal: number; aedNetTotal: number; inrTotal: number; }'.
+src/components/ic-transfer/sales/ViewSaleModal.tsx(12,35): error TS2307: Cannot find module '../collection/SaleFxSettlementPanel' or its corresponding type declarations.
+src/components/ic-transfer/sales/ViewSaleModal.tsx(18,28): error TS2305: Module '"@/lib/icTransfer/rateCalculations"' has no exported member 'getCurrencyUnitRate'.
+src/components/ic-transfer/sales/ViewSaleModal.tsx(49,54): error TS2339: Property 'currency' does not exist on type 'ICSale'.
+src/components/ic-transfer/sales/ViewSaleModal.tsx(67,19): error TS2339: Property 'currency' does not exist on type 'ICSale'.
+src/components/ic-transfer/sales/ViewSaleModal.tsx(68,28): error TS2339: Property 'currency' does not exist on type 'ICSale'.
+src/components/ic-transfer/sales/ViewSaleModal.tsx(76,55): error TS2339: Property 'currency' does not exist on type 'ICSale'.
+src/components/ic-transfer/sales/ViewSaleModal.tsx(115,55): error TS2339: Property 'conversionRate' does not exist on type 'ICSale'.
+src/components/ic-transfer/sales/ViewSaleModal.tsx(117,39): error TS2339: Property 'currency' does not exist on type 'ICSale'.
+src/components/ic-transfer/sales/ViewSaleModal.tsx(247,50): error TS2339: Property 'conversionRate' does not exist on type 'ICSale'.
+src/components/ic-transfer/sales/ViewSaleModal.tsx(276,31): error TS2339: Property 'convertedAmount' does not exist on type 'ICSale'.
+src/components/ic-transfer/sales/ViewSaleModal.tsx(277,44): error TS2339: Property 'convertedAmount' does not exist on type 'ICSale'.
+src/components/ic-transfer/settings/FlatRateFields.tsx(10,10): error TS2305: Module '"@/lib/icTransfer/rateCalculations"' has no exported member 'getCurrencyUnitRate'.
+src/components/ic-transfer/settings/ICTransferRatesPage.tsx(11,3): error TS2305: Module '"@/lib/icTransfer/branchPortalScope"' has no exported member 'mergeBranchPortalCustomerAssignments'.
+src/components/ic-transfer/settings/ICTransferRatesPage.tsx(12,8): error TS2305: Module '"@/lib/icTransfer/branchPortalScope"' has no exported member 'ICTransferPortalMode'.
+src/components/ic-transfer/settings/ICTransferRatesPage.tsx(16,3): error TS2305: Module '"@/lib/icTransfer/branchRateScope"' has no exported member 'getBranchManageableRateGroups'.
+src/components/ic-transfer/settings/ICTransferRatesPage.tsx(17,3): error TS2305: Module '"@/lib/icTransfer/branchRateScope"' has no exported member 'filterRateGroupsForAdminPortal'.
+src/components/ic-transfer/settings/ICTransferRatesPage.tsx(20,41): error TS2307: Cannot find module './BranchAdminAssignedRateCard' or its corresponding type declarations.
+src/components/ic-transfer/settings/ICTransferRatesPage.tsx(121,56): error TS7006: Parameter 'g' implicitly has an 'any' type.
+src/components/ic-transfer/settings/ICTransferRatesPage.tsx(122,55): error TS7006: Parameter 'g' implicitly has an 'any' type.
+src/components/ic-transfer/settings/ICTransferRatesPage.tsx(123,43): error TS7006: Parameter 'g' implicitly has an 'any' type.
+src/components/ic-transfer/settings/ICTransferRatesPage.tsx(135,33): error TS7006: Parameter 'group' implicitly has an 'any' type.
+src/components/ic-transfer/settings/ICTransferRatesPage.tsx(154,55): error TS7006: Parameter 'g' implicitly has an 'any' type.
+src/components/ic-transfer/settings/ICTransferRatesPage.tsx(174,49): error TS7006: Parameter 'g' implicitly has an 'any' type.
+src/components/ic-transfer/settings/ICTransferRatesPage.tsx(210,50): error TS7006: Parameter 'g' implicitly has an 'any' type.
+src/components/ic-transfer/settings/ICTransferRatesPage.tsx(212,41): error TS7006: Parameter 'g' implicitly has an 'any' type.
+src/components/ic-transfer/settings/ICTransferRatesPage.tsx(266,48): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/ICTransferRatesPage.tsx(283,22): error TS2339: Property 'conversionRate' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/ICTransferRatesPage.tsx(312,31): error TS2339: Property 'branchIds' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/ICTransferRatesPage.tsx(439,39): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/ICTransferSuppliersPage.tsx(12,8): error TS2305: Module '"@/lib/icTransfer/branchPortalScope"' has no exported member 'ICTransferPortalMode'.
+src/components/ic-transfer/settings/ICTransferSuppliersPage.tsx(27,76): error TS2554: Expected 1 arguments, but got 2.
+src/components/ic-transfer/settings/RateGroupBulkUpdateBar.tsx(11,10): error TS2305: Module '"@/lib/icTransfer/rateCalculations"' has no exported member 'getCurrencyUnitRate'.
+src/components/ic-transfer/settings/RateGroupBulkUpdateBar.tsx(81,51): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupBulkUpdateBar.tsx(92,36): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupBulkUpdateBar.tsx(95,42): error TS2339: Property 'conversionRate' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupBulkUpdateBar.tsx(95,75): error TS2339: Property 'conversionRate' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupBulkUpdateBar.tsx(96,24): error TS2339: Property 'conversionRate' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupBulkUpdateBar.tsx(107,11): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupBulkUpdateBar.tsx(397,56): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupBulkUpdateBar.tsx(399,100): error TS2339: Property 'conversionRate' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupFormModal.tsx(68,32): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupManageUsersModal.tsx(46,39): error TS2339: Property 'branchIds' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupManageUsersModal.tsx(84,33): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupManageUsersModal.tsx(118,42): error TS2339: Property 'branchIds' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupManageUsersModal.tsx(129,60): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupManageUsersModal.tsx(258,44): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupManageUsersModal.tsx(313,61): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupManageUsersModal.tsx(407,11): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupManageUsersModal.tsx(452,34): error TS2339: Property 'branchIds' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupManageUsersModal.tsx(463,26): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupPricingEditor.tsx(23,32): error TS2305: Module '"@/lib/icTransfer/rateCalculations"' has no exported member 'getCurrencyUnitRate'.
+src/components/ic-transfer/settings/RateGroupPricingEditor.tsx(71,41): error TS2345: Argument of type 'ICRateGroup' is not assignable to parameter of type 'Pick<ICRateGroup, "saleRate" | "conversionRate">'.
+  Property 'conversionRate' is missing in type 'ICRateGroup' but required in type 'Pick<ICRateGroup, "saleRate" | "conversionRate">'.
+src/components/ic-transfer/settings/RateGroupPricingEditor.tsx(72,41): error TS2339: Property 'conversionRate' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupPricingEditor.tsx(99,41): error TS2345: Argument of type 'ICRateGroup | undefined' is not assignable to parameter of type 'Pick<ICRateGroup, "pricingConfig" | "saleRate" | "conversionRate"> | undefined'.
+  Property 'conversionRate' is missing in type 'ICRateGroup' but required in type 'Pick<ICRateGroup, "pricingConfig" | "saleRate" | "conversionRate">'.
+src/components/ic-transfer/settings/RateGroupPricingEditor.tsx(117,53): error TS2345: Argument of type 'ICRateGroup | undefined' is not assignable to parameter of type 'Pick<ICRateGroup, "pricingConfig" | "saleRate" | "conversionRate"> | undefined'.
+  Property 'conversionRate' is missing in type 'ICRateGroup' but required in type 'Pick<ICRateGroup, "pricingConfig" | "saleRate" | "conversionRate">'.
+src/components/ic-transfer/settings/RateGroupPricingEditor.tsx(120,46): error TS2345: Argument of type 'ICRateGroup' is not assignable to parameter of type 'Pick<ICRateGroup, "saleRate" | "conversionRate">'.
+  Property 'conversionRate' is missing in type 'ICRateGroup' but required in type 'Pick<ICRateGroup, "saleRate" | "conversionRate">'.
+src/components/ic-transfer/settings/RateGroupPricingEditor.tsx(507,50): error TS2345: Argument of type 'ICRateGroup' is not assignable to parameter of type 'Pick<ICRateGroup, "saleRate" | "conversionRate">'.
+  Property 'conversionRate' is missing in type 'ICRateGroup' but required in type 'Pick<ICRateGroup, "saleRate" | "conversionRate">'.
+src/components/ic-transfer/settings/RateGroupPricingEditor.tsx(516,59): error TS2345: Argument of type 'ICRateGroup | undefined' is not assignable to parameter of type 'Pick<ICRateGroup, "pricingConfig" | "saleRate" | "conversionRate"> | undefined'.
+  Property 'conversionRate' is missing in type 'ICRateGroup' but required in type 'Pick<ICRateGroup, "pricingConfig" | "saleRate" | "conversionRate">'.
+src/components/ic-transfer/settings/RateGroupPricingStructure.tsx(16,28): error TS2305: Module '"@/lib/icTransfer/rateCalculations"' has no exported member 'getCurrencyUnitRate'.
+src/components/ic-transfer/settings/RateGroupPricingStructure.tsx(19,28): error TS2344: Type '"currency" | "pricingConfig" | "saleRate" | "conversionRate"' does not satisfy the constraint 'keyof ICRateGroup'.
+  Type '"currency"' is not assignable to type 'keyof ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupPricingStructure.tsx(272,11): error TS2322: Type 'unknown' is not assignable to type 'string'.
+src/components/ic-transfer/settings/RateGroupPricingStructure.tsx(283,13): error TS2322: Type 'unknown' is not assignable to type 'string'.
+src/components/ic-transfer/settings/RateGroupPricingStructure.tsx(299,13): error TS2322: Type 'unknown' is not assignable to type 'string'.
+src/components/ic-transfer/settings/RateGroupPricingStructure.tsx(308,11): error TS2322: Type 'unknown' is not assignable to type 'string'.
+src/components/ic-transfer/settings/RateGroupsTable.tsx(11,10): error TS2305: Module '"@/lib/icTransfer/rateCalculations"' has no exported member 'getCurrencyUnitRate'.
+src/components/ic-transfer/settings/RateGroupsTable.tsx(105,36): error TS2339: Property 'conversionRate' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupsTable.tsx(105,63): error TS2339: Property 'conversionRate' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupsTable.tsx(114,36): error TS2339: Property 'conversionRate' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupsTable.tsx(114,63): error TS2339: Property 'conversionRate' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupsTable.tsx(129,35): error TS2339: Property 'conversionRate' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupsTable.tsx(130,17): error TS2339: Property 'conversionRate' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupsTable.tsx(168,39): error TS2339: Property 'branchIds' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupsTable.tsx(175,73): error TS2339: Property 'conversionRate' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupsTable.tsx(236,54): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupsTable.tsx(248,32): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupsTable.tsx(254,33): error TS2339: Property 'conversionRate' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupsTable.tsx(261,87): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupsTable.tsx(328,43): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupsTable.tsx(331,56): error TS2339: Property 'conversionRate' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupsTable.tsx(332,39): error TS2339: Property 'conversionRate' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupViewModal.tsx(10,10): error TS2305: Module '"@/lib/icTransfer/rateCalculations"' has no exported member 'getCurrencyUnitRate'.
+src/components/ic-transfer/settings/RateGroupViewModal.tsx(64,30): error TS2339: Property 'branchIds' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupViewModal.tsx(65,10): error TS7006: Parameter 'id' implicitly has an 'any' type.
+src/components/ic-transfer/settings/RateGroupViewModal.tsx(69,63): error TS2339: Property 'conversionRate' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupViewModal.tsx(92,54): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupViewModal.tsx(94,42): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupViewModal.tsx(122,51): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupViewModal.tsx(125,29): error TS2339: Property 'conversionRate' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/settings/RateGroupViewModal.tsx(134,11): error TS2739: Type 'ICRateGroup' is missing the following properties from type 'Pick<ICRateGroup, "currency" | "pricingConfig" | "saleRate" | "conversionRate">': currency, conversionRate
+src/components/ic-transfer/settings/RateSlabTable.tsx(5,10): error TS2305: Module '"@/lib/icTransfer/rateCalculations"' has no exported member 'getCurrencyUnitRate'.
+src/components/ic-transfer/shared/BranchHandledOrderActions.tsx(76,58): error TS2554: Expected 1 arguments, but got 2.
+src/components/ic-transfer/shared/BranchOrderStatusCell.tsx(80,10): error TS2367: This comparison appears to be unintentional because the types 'ICOrderStatus | undefined' and '"branch_rejected"' have no overlap.
+src/components/ic-transfer/shared/FulfillmentHandlerControl.tsx(31,33): error TS2367: This comparison appears to be unintentional because the types 'ICOrderStatus | undefined' and '"pending_branch_review"' have no overlap.
+src/components/ic-transfer/shared/FulfillmentHandlerControl.tsx(47,10): error TS2367: This comparison appears to be unintentional because the types '"hq_admin" | undefined' and '"branch"' have no overlap.
+src/components/ic-transfer/shared/FulfillmentHandlerControl.tsx(52,19): error TS2367: This comparison appears to be unintentional because the types '"hq_admin" | undefined' and '"branch"' have no overlap.
+src/components/ic-transfer/shared/FulfillmentHandlerControl.tsx(89,7): error TS2367: This comparison appears to be unintentional because the types '"hq_admin" | undefined' and '"branch"' have no overlap.
+src/components/ic-transfer/shared/RateGroupBanner.tsx(5,42): error TS2305: Module '"@/lib/icTransfer/rateCalculations"' has no exported member 'getCurrencyUnitRate'.
+src/components/ic-transfer/shared/RateGroupBanner.tsx(18,70): error TS2339: Property 'conversionRate' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/shared/RateGroupBanner.tsx(19,31): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/shared/RateGroupBanner.tsx(32,75): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/shared/RateGroupBanner.tsx(39,39): error TS2339: Property 'conversionRate' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/shared/RateGroupBanner.tsx(66,81): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/shared/RateGroupBanner.tsx(72,40): error TS2339: Property 'currency' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/shared/RateGroupBanner.tsx(75,39): error TS2339: Property 'conversionRate' does not exist on type 'ICRateGroup'.
+src/components/ic-transfer/warehouse/ICTransferWarehouse.tsx(13,3): error TS2724: '"@/lib/icTransfer/branchPortalScope"' has no exported member named 'filterSalesForBranchPortal'. Did you mean 'filterSuppliersForBranchPortal'?
+src/components/ic-transfer/warehouse/ICTransferWarehouse.tsx(16,8): error TS2305: Module '"@/lib/icTransfer/branchPortalScope"' has no exported member 'ICTransferPortalMode'.
+src/components/ic-transfer/warehouse/ICTransferWarehouse.tsx(64,58): error TS2554: Expected 1 arguments, but got 2.
+src/components/ic-transfer/warehouse/ManageWarehousesSection.tsx(21,3): error TS2305: Module '"@/lib/icTransfer/branchPortalScope"' has no exported member 'getICTransferWarehouseDetailHref'.
+src/components/ic-transfer/warehouse/ManageWarehousesSection.tsx(22,8): error TS2305: Module '"@/lib/icTransfer/branchPortalScope"' has no exported member 'ICTransferPortalMode'.
+src/components/ic-transfer/warehouse/WarehouseDetailsClient.tsx(13,3): error TS2305: Module '"@/lib/icTransfer/branchPortalScope"' has no exported member 'getICTransferWarehouseBase'.
+src/components/ic-transfer/warehouse/WarehouseDetailsClient.tsx(14,8): error TS2305: Module '"@/lib/icTransfer/branchPortalScope"' has no exported member 'ICTransferPortalMode'.
+src/components/layout/Topbar.tsx(9,30): error TS2307: Cannot find module '@/components/ui/CurrencySwitcher' or its corresponding type declarations.
+src/components/users/UserModals.tsx(158,60): error TS2554: Expected 1 arguments, but got 2.
+src/lib/asic/nav.ts(214,53): error TS2366: Function lacks ending return statement and return type does not include 'undefined'.
+src/lib/asic/routing.ts(159,64): error TS2366: Function lacks ending return statement and return type does not include 'undefined'.
+src/lib/icFunds/customerStatementView.ts(2,45): error TS2307: Cannot find module '@/lib/icTransfer/saleFxProfit' or its corresponding type declarations.
+src/lib/icFunds/format.ts(2,32): error TS2307: Cannot find module '@/lib/icTransfer/saleFxProfit' or its corresponding type declarations.
+src/lib/icFunds/icTransferFundSync.ts(19,45): error TS2307: Cannot find module '@/lib/icTransfer/walletCredits.server' or its corresponding type declarations.
+src/lib/icFunds/kpiMetrics.ts(104,10): error TS2367: This comparison appears to be unintentional because the types 'ICFundAccountType' and '"collection_agent"' have no overlap.
+src/lib/icFunds/kpiMetrics.ts(629,10): error TS2678: Type '"collection_agent"' is not comparable to type 'ICFundAccountType'.
+src/lib/icTransfer/fulfillmentHandler.ts(9,10): error TS2367: This comparison appears to be unintentional because the types '"hq_admin" | undefined' and '"branch"' have no overlap.
+src/lib/icTransfer/rateCalculations.ts(69,17): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type 'ICRateGroupPricingConfig'.
+  No index signature with a parameter of type 'string' was found on type 'ICRateGroupPricingConfig'.
+src/lib/icTransfer/rateCalculations.ts(69,43): error TS2339: Property 'default' does not exist on type 'ICRateGroupPricingConfig'.
+src/lib/icTransfer/ratePricing.ts(23,63): error TS2344: Type '"saleRate" | "conversionRate"' does not satisfy the constraint 'keyof ICRateGroup'.
+  Type '"conversionRate"' is not assignable to type 'keyof ICRateGroup'.
+src/lib/icTransfer/ratePricing.ts(26,5): error TS2322: Type '{}' is not assignable to type 'number'.
+src/lib/icTransfer/ratePricing.ts(447,28): error TS2344: Type '"pricingConfig" | "saleRate" | "conversionRate"' does not satisfy the constraint 'keyof ICRateGroup'.
+  Type '"conversionRate"' is not assignable to type 'keyof ICRateGroup'.
+src/lib/icTransfer/ratePricing.ts(754,28): error TS2344: Type '"pricingConfig" | "saleRate" | "conversionRate"' does not satisfy the constraint 'keyof ICRateGroup'.
+  Type '"conversionRate"' is not assignable to type 'keyof ICRateGroup'.
+src/lib/icTransfer/saleChanges.ts(6,3): error TS2344: Type '"currency" | "bank" | "address" | "location" | "transactionType" | "units" | "aedAmount" | "district" | "imageUrl" | "serviceCharge" | "convertedAmount" | "conversionRate"' does not satisfy the constraint 'keyof ICSale'.
+  Type '"currency"' is not assignable to type 'keyof ICSale'.
+src/lib/icTransfer/saleChanges.ts(54,24): error TS2345: Argument of type 'unknown' is not assignable to parameter of type 'number | null | undefined'.
+src/lib/icTransfer/saleChanges.ts(54,59): error TS2345: Argument of type 'unknown' is not assignable to parameter of type 'number | null | undefined'.
+src/lib/icTransfer/useLinkedRateFields.ts(5,3): error TS2305: Module '"./rateCalculations"' has no exported member 'deriveConversionRate'.
+src/lib/icTransfer/useLinkedRateFields.ts(6,3): error TS2305: Module '"./rateCalculations"' has no exported member 'deriveConvertedRate'.
+src/lib/icTransferMappers.ts(120,5): error TS2322: Type '"hq_admin" | "branch"' is not assignable to type '"hq_admin" | undefined'.
+  Type '"branch"' is not assignable to type '"hq_admin"'.

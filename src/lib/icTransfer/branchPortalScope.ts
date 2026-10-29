@@ -1,5 +1,6 @@
 import type { Branch, ICPurchase, ICSale, ICRateGroup, ICWarehouse, User } from '@/types';
 import { HQ_IC_FUNDS_BRANCH_ID } from '@/lib/icFunds/hqBranch';
+import { warehouseShortSlug } from '@/lib/icTransfer/warehouseSlug';
 
 export type ICTransferPortalMode = 'admin' | 'branch';
 
@@ -81,9 +82,12 @@ export function mergeBranchPortalCustomerAssignments(
 
 export function getICTransferWarehouseBase(
   portal: ICTransferPortalMode = 'admin',
-  _slug?: string,
+  slug?: string,
 ): string {
-  return portal === 'branch' ? '/branch/ic-transfer/warehouse' : '/admin/ic-transfer/warehouse';
+  if (portal === 'branch' && slug) {
+    return `/${slug}/ic-transfer-admin/warehouse`;
+  }
+  return '/admin/warehouse';
 }
 
 export function getICTransferWarehouseDetailHref(
@@ -91,8 +95,11 @@ export function getICTransferWarehouseDetailHref(
   warehouseId: string,
   portal: ICTransferPortalMode = 'admin',
 ): string {
-  const base = getICTransferWarehouseBase(portal, slug);
-  return `${base}/${warehouseId}`;
+  const id = warehouseShortSlug(warehouseId);
+  if (portal === 'branch' && slug) {
+    return `/${slug}/ic-transfer-admin/warehouse/${id}`;
+  }
+  return `/admin/warehouse/${id}`;
 }
 
 export function resolvePortalBranchId(_branchSlug?: string | null): string {
@@ -108,7 +115,7 @@ export function mapBranchPortalUrl(_path: string): string {
 }
 
 export function branchPortalCustomersPath(_slug: string): string {
-  return '/admin/entities';
+  return '/admin/customers';
 }
 
 export function filterBranchesForUserManagement(branches: Branch[]): Branch[] {

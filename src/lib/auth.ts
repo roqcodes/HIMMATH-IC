@@ -20,6 +20,7 @@ export interface SessionPayload {
   name: string;
   branchId?: string;
   customerId?: string;
+  warehouseId?: string;
   permissions?: PagePermissionMap;
   dealPermissions?: DealPermissionMap;
   expiresAt: string;
@@ -156,6 +157,7 @@ async function getSessionUserUncached(branchSlug?: string): Promise<User | null>
     role: payload.role,
     branchId: payload.branchId,
     customerId: payload.customerId,
+    warehouseId: payload.warehouseId,
     permissions: payload.permissions,
     dealPermissions: payload.dealPermissions,
   };

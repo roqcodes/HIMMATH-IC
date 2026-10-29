@@ -225,6 +225,73 @@ export function getAdminStatusStyle(status?: string | null, transactionType?: st
   return ADMIN_STATUS_STYLES[s];
 }
 
+type OrderStatusPick = Pick<
+  ICSale,
+  'orderStatus' | 'deliveryAgentId' | 'aedAmount' | 'paymentStatus' | 'derivedFromSaleId' | 'transactionType'
+>;
+
+/** Delivery agent portal — wh_processing + agent means ready to deliver, not warehouse backlog. */
+export function getDeliveryAgentStatusLabel(order: OrderStatusPick): string {
+  const status = normalizeOrderStatus(order.orderStatus);
+  if (status === 'wh_processing') {
+    return order.deliveryAgentId ? 'Ready to deliver' : 'Awaiting assignment';
+  }
+  if (status === 'delivery_pending_admin') {
+    return 'Awaiting admin verification';
+  }
+  if (status === 'completed') {
+    return 'Delivered';
+  }
+  if (status === 'da_rejected') {
+    return ADMIN_STATUS_LABELS.da_rejected;
+  }
+  return getAdminStatusLabel(order.orderStatus, order.transactionType);
+}
+
+export function getDeliveryAgentStatusStyle(order: OrderStatusPick): string {
+  const status = normalizeOrderStatus(order.orderStatus);
+  if (status === 'wh_processing' && order.deliveryAgentId) {
+    return CUSTOMER_STATUS_STYLES['Order Dispatched'];
+  }
+  if (status === 'wh_processing') {
+    return ADMIN_STATUS_STYLES.wh_processing;
+  }
+  if (status === 'delivery_pending_admin') {
+    return ADMIN_STATUS_STYLES.delivery_pending_admin;
+  }
+  if (status === 'completed') {
+    return ADMIN_STATUS_STYLES.completed;
+  }
+  return getAdminStatusStyle(order.orderStatus, order.transactionType);
+}
+
+/** Warehouse portal when an agent is assigned — avoid "WH Processing" after dispatch. */
+export function getWarehousePortalStatusLabel(
+  order: Pick<ICSale, 'orderStatus' | 'deliveryAgentId'>,
+  options?: { directDelivery?: boolean },
+): string {
+  if (options?.directDelivery) return 'Direct delivery';
+  const status = normalizeOrderStatus(order.orderStatus);
+  if (status === 'wh_processing' && order.deliveryAgentId) {
+    return 'With delivery agent';
+  }
+  return getAdminStatusLabel(order.orderStatus);
+}
+
+export function getWarehousePortalStatusStyle(
+  order: Pick<ICSale, 'orderStatus' | 'deliveryAgentId'>,
+  options?: { directDelivery?: boolean },
+): string {
+  if (options?.directDelivery) {
+    return 'bg-teal-50 text-teal-700 border-teal-200';
+  }
+  const status = normalizeOrderStatus(order.orderStatus);
+  if (status === 'wh_processing' && order.deliveryAgentId) {
+    return CUSTOMER_STATUS_STYLES['Order Dispatched'];
+  }
+  return getAdminStatusStyle(order.orderStatus);
+}
+
 /** Admin may approve delivery proof submitted by a delivery agent. */
 export function canAdminVerifyDelivery(status?: string | null): boolean {
   return normalizeOrderStatus(status) === 'delivery_pending_admin';
@@ -242,6 +309,11 @@ export function canAdminAccept(status?: string | null): boolean {
 export function canAdminReject(status?: string | null): boolean {
   const s = normalizeOrderStatus(status);
   return s === 'pending' || s === 'wh_rejected' || s === 'da_rejected';
+}
+
+/** Admin table/modal: Accept + Reject together mean "Pending" badge is redundant. */
+export function isAdminAcceptRejectReviewStatus(status?: string | null): boolean {
+  return canAdminAccept(status) && canAdminReject(status);
 }
 
 export function canAdminReassignWarehouse(status?: string | null): boolean {

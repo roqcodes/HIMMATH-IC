@@ -1,5 +1,5 @@
-import { ICTransferFilterProvider } from '@/components/ic-transfer/shared/ICTransferFilterProvider';
+import { SlugPortalLayout } from '@/components/asic/AsicPortalLayout';
 
 export default function WarehousePortalLayout({ children }: { children: React.ReactNode }) {
-  return <ICTransferFilterProvider>{children}</ICTransferFilterProvider>;
+  return <SlugPortalLayout portal="warehouse">{children}</SlugPortalLayout>;
 }

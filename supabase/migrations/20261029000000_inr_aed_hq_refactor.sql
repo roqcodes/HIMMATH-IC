@@ -61,12 +61,23 @@ WHERE order_status IN ('pending_branch_review', 'branch_rejected')
 
 -- Deactivate collection-agent fund accounts (ledger history preserved)
 UPDATE public.ic_fund_accounts
-SET status = 'inactive', currency = 'AED'
+SET status = 'inactive'
 WHERE account_type = 'collection_agent';
 
-UPDATE public.ic_fund_accounts
-SET currency = 'AED'
-WHERE currency IS DISTINCT FROM 'AED';
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'ic_fund_accounts'
+      AND column_name = 'currency'
+  ) THEN
+    UPDATE public.ic_fund_accounts
+    SET currency = 'AED'
+    WHERE currency IS DISTINCT FROM 'AED';
+  END IF;
+END $$;
 
 UPDATE public.profiles
 SET collection_account_id = NULL

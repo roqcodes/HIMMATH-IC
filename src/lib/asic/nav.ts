@@ -4,7 +4,6 @@ import { RESERVED_BRANCH_SLUGS } from '@/lib/asic/routing';
 import { canReadSection, type AsicSectionId } from '@/lib/asic/pages';
 import { sectionLabel } from '@/lib/staffSectionPermissions';
 import {
-  IC_FUNDS_REPORTS,
   icFundsReportPath,
   isICFundsReportId,
   type ICFundsReportId,
@@ -48,8 +47,7 @@ export function adminSidebarGroupItemHref(
 
 export function adminMobileNavActiveId(section: AsicSectionId, reportView: string | null): string {
   if (section === 'reports') {
-    const view = isICFundsReportId(reportView) ? reportView : 'all-vouchers';
-    return `reports:${view}`;
+    return isICFundsReportId(reportView) ? `reports:${reportView}` : 'reports';
   }
   return section;
 }
@@ -75,17 +73,13 @@ export const ADMIN_SIDEBAR_NAV: AsicAdminSidebarEntry[] = [
       { id: 'journal', label: L('journal') },
     ],
   },
-  {
-    type: 'group',
-    id: 'reports',
-    label: L('reports'),
-    items: IC_FUNDS_REPORTS.map(r => ({ reportView: r.id, label: r.label })),
-  },
+  { type: 'link', id: 'reports', label: L('reports') },
   {
     type: 'group',
     id: 'settings',
     label: 'Settings',
     items: [
+      { id: 'customers', label: L('customers') },
       { id: 'suppliers', label: L('suppliers') },
       { id: 'users', label: L('users') },
       { id: 'backup', label: L('backup') },
@@ -176,7 +170,6 @@ export function getVisibleNav(
 ): AsicNavItem[] {
   return navForPortal(portal).filter(
     item =>
-      item.id !== 'customers' &&
       item.id !== 'accounts' &&
       item.id !== 'account' &&
       canReadSection(user, item.id, portal),
@@ -188,7 +181,6 @@ function canShowAdminNavSection(
   sectionId: AsicSectionId,
 ): boolean {
   return (
-    sectionId !== 'customers' &&
     sectionId !== 'account' &&
     canReadSection(user, sectionId, 'admin')
   );

@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
 import WarehouseUsersManagement from '@/components/ic-transfer/settings/WarehouseUsersManagement';
@@ -101,7 +100,9 @@ export default function WarehouseDetailsClient({
   const regionName = icRegions.find(r => r.id === warehouse.regionId)?.name || '—';
   const warehouseListHref = getICTransferWarehouseBase(portalMode, branchSlug);
   const deliveryProofLabel =
-    warehouse.sendDeliveryProofToCustomer === false ? 'Admin verifies' : 'Customer';
+    warehouse.sendDeliveryProofToCustomer === false
+      ? 'Admin verifies delivery'
+      : 'Customer verifies delivery';
 
   const handleSave = async (data: {
     id?: string;
@@ -129,19 +130,11 @@ export default function WarehouseDetailsClient({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="mb-2">
-        <Link href={warehouseListHref} className="text-xs font-medium text-slate-500 hover:text-accent">
-          ← Warehouses
-        </Link>
-      </div>
-
       <AsicPageHeader
-        title={warehouse.name}
-        meta={
-          <span className="inline-flex rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-600">
-            {deliveryProofLabel}
-          </span>
-        }
+        breadcrumbs={[
+          { label: 'Warehouses', href: warehouseListHref },
+          { label: warehouse.name },
+        ]}
         actions={
           <button
             type="button"

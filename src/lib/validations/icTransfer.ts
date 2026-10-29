@@ -132,10 +132,7 @@ export const addPurchaseSchema = z.object({
   units: z.number().positive(),
   paymentMethod: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
-  convertedTotal: z.number().optional().nullable(),
   aedTotal: z.number().optional().nullable(),
-  conversionRate: z.number().positive().optional().nullable(),
-  currency: z.string().optional().nullable(),
 });
 
 export const updatePurchaseSchema = addPurchaseSchema.partial();
@@ -150,17 +147,12 @@ export const addSaleSchema = z.object({
   transactionType: icSaleTransactionTypeSchema.optional().nullable(),
   units: z.number().positive(),
   unitRate: z.number().positive(),
-  adminUnitRate: z.number().positive().optional().nullable(),
-  adminConversionRate: z.number().positive().optional().nullable(),
-  convertedAmount: z.number().optional().nullable(),
   aedAmount: z.number().optional().nullable(),
   bank: z.string().optional().nullable(),
   address: z.string().optional().nullable(),
   location: z.string().optional().nullable(),
   district: z.string().optional().nullable(),
   imageUrl: z.string().optional().nullable(),
-  conversionRate: z.number().positive().default(1.0),
-  currency: z.string().default('AED'),
   serviceCharge: z.number().default(0.0),
   priority: z.enum(['High', 'Normal', 'Low']).default('Normal'),
   fulfillmentHandler: z.enum(['hq_admin', 'branch']).optional().default('hq_admin'),

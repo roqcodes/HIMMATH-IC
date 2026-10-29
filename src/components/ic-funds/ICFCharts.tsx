@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { fmtICAmount } from '@/lib/icFunds/format';
+import { fmtLedgerAed } from '@/lib/icFunds/format';
 import { icfCard, icfLabel } from '@/components/ic-funds/ui';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 
@@ -73,12 +73,12 @@ export function ICFTrendChart({
                 <div
                   className="w-1/2 max-w-[18px] rounded-t-sm bg-slate-900/90 transition-opacity group-hover:opacity-80"
                   style={{ height: `${Math.max((d.debit / maxVal) * 100, 2)}%` }}
-                  title={`${debitLabel}: ${fmtICAmount(d.debit)}`}
+                  title={`${debitLabel}: ${fmtLedgerAed(d.debit)}`}
                 />
                 <div
                   className="w-1/2 max-w-[18px] rounded-t-sm bg-emerald-500 transition-opacity group-hover:opacity-80"
                   style={{ height: `${Math.max((d.credit / maxVal) * 100, 2)}%` }}
-                  title={`${creditLabel}: ${fmtICAmount(d.credit)}`}
+                  title={`${creditLabel}: ${fmtLedgerAed(d.credit)}`}
                 />
               </div>
               <span
@@ -100,7 +100,7 @@ type SinglePoint = { label: string; value: number };
 export function ICFBarChart({
   data,
   title,
-  formatValue = fmtICAmount,
+  formatValue = fmtLedgerAed,
 }: {
   data: SinglePoint[];
   title: string;
@@ -164,7 +164,7 @@ export function ICFRankingList({
                     d.name
                   )}
                 </span>
-                <span className="shrink-0 font-mono tabular-nums">{fmtICAmount(d.amount)}</span>
+                <span className="shrink-0 font-mono tabular-nums">{fmtLedgerAed(d.amount)}</span>
               </div>
               <div className="h-1 w-full overflow-hidden rounded-full bg-slate-100">
                 <div className="h-full rounded-full bg-slate-800" style={{ width: `${Math.max(d.percentage, 2)}%` }} />

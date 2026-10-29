@@ -149,7 +149,7 @@ export default function ManageWarehousesSection({
           <table className={`${salesTableClass} min-w-[880px]`}>
             <thead>
               <tr className={salesTableTheadRowClass}>
-                {['Name', 'Region', 'Phone', 'Email', 'Delivery', 'Actions'].map(col => (
+                {['Name', 'Region', 'Phone', 'Email', 'Delivery proof', 'Actions'].map(col => (
                   <th key={col} className={salesTableThClass}>{col}</th>
                 ))}
               </tr>
@@ -183,7 +183,9 @@ export default function ManageWarehousesSection({
                       <td className={salesTableTdClass}>{warehouse.phone || '—'}</td>
                       <td className={salesTableTdClass}>{warehouse.email || '—'}</td>
                       <td className={salesTableTdClass}>
-                        {warehouse.sendDeliveryProofToCustomer === false ? 'Admin verifies' : 'Customer'}
+                        {warehouse.sendDeliveryProofToCustomer === false
+                          ? 'Admin verifies'
+                          : 'Customer verifies'}
                       </td>
                       <td className={salesTableTdClass}>
                         <div className="flex flex-wrap items-center gap-1">
@@ -195,7 +197,7 @@ export default function ManageWarehousesSection({
                               openUsers(warehouse.id);
                             }}
                           >
-                            View
+                            View & users
                           </button>
                           <button
                             type="button"

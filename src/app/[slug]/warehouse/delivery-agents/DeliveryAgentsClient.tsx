@@ -20,6 +20,7 @@ import CreateDeliveryAgentModal from './CreateDeliveryAgentModal';
 import EditDeliveryAgentModal from './EditDeliveryAgentModal';
 import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
 import { ConfirmModal, SkeletonRows } from '@/components/warehouse/shared';
+import { resolveWarehouseForUser } from '@/lib/userTopbarSubtitle';
 import type { DeliveryAgent } from '@/types/warehouse';
 
 type SortField = 'Name' | 'Account ID' | 'Email';
@@ -38,8 +39,10 @@ export default function DeliveryAgentsClient({ branchSlug }: { branchSlug: strin
   const [sortField, setSortField] = useState<SortField>('Name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
-  const rawRoleId   = (user?.role?.startsWith('warehouse_') || user?.role?.startsWith('delivery_')) ? user.role.split('_')[1] : null;
-  const warehouseId = rawRoleId ? icWarehouses.find((w: any) => w.id.startsWith(rawRoleId))?.id : null;
+  const warehouseId = useMemo(() => {
+    if (!user) return null;
+    return resolveWarehouseForUser(user, icWarehouses)?.id ?? null;
+  }, [user, icWarehouses]);
 
   const canManageAgents =
     user?.role?.startsWith('warehouse_') ||

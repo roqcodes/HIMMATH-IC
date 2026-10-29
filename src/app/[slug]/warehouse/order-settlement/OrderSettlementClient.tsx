@@ -19,7 +19,7 @@ import { getFormattedTxnId } from '@/lib/icTransferMappers';
 import OrderDetailsModal from '../settlement/OrderDetailsModal';
 import DateFilterBar from '@/components/ui/DateFilterBar';
 import { normalizeOrderStatus, isDeliveryAgentRejected } from '@/lib/icTransfer/orderStatus';
-import { WarehouseOrderStatusCard } from '@/components/warehouse/WarehouseOrderStatusCell';
+import { DeliveryAgentOrderStatusCard } from '@/components/warehouse/WarehouseOrderStatusCell';
 import { PriorityBadge, SkeletonRows } from '@/components/warehouse/shared';
 import { comparePriority, highPriorityRowClass, highPriorityCardClass } from '@/lib/icTransfer/orderPriority';
 import { formatUnits, getRemainingUnits, isSaleCompleted } from '@/lib/icTransfer/saleUnits';
@@ -172,7 +172,7 @@ export default function OrderSettlementClient({ branchSlug }: { branchSlug: stri
         <SalesTableShell
           tabs={[
             { id: 'All', label: 'All Orders', count: allCount },
-            { id: 'Pending', label: 'Pending', count: pendingCount },
+            { id: 'Pending', label: 'To deliver', count: pendingCount },
             { id: 'Completed', label: 'Completed', count: completedCount },
             { id: 'AwaitingAdmin', label: 'Awaiting Admin', count: awaitingAdminCount },
             { id: 'Rejected', label: 'Rejected', count: rejectedCount },
@@ -218,7 +218,7 @@ export default function OrderSettlementClient({ branchSlug }: { branchSlug: stri
                       </div>
                       <div className="flex items-center justify-between gap-3 border-t border-slate-50 pt-2">
                         <div className="min-w-0" onClick={e => e.stopPropagation()}>
-                          <WarehouseOrderStatusCard order={order} />
+                          <DeliveryAgentOrderStatusCard order={order} />
                         </div>
                         <button
                           type="button"
@@ -285,7 +285,7 @@ export default function OrderSettlementClient({ branchSlug }: { branchSlug: stri
                       <td className={`${salesTableTdClass} text-right font-semibold text-amber-600`}>{formatUnits(remaining)}</td>
                       <td className={`${salesTableTdClass} text-center`}><PriorityBadge priority={order.priority} /></td>
                       <td className={`${salesTableTdClass} text-center`} onClick={e => e.stopPropagation()}>
-                        <WarehouseOrderStatusCard order={order} />
+                        <DeliveryAgentOrderStatusCard order={order} />
                       </td>
                     </tr>
                   );

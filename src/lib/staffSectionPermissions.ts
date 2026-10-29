@@ -58,6 +58,7 @@ export const ADMIN_STAFF_PERMISSION_SECTIONS: AsicSectionId[] = [
   'suppliers',
   'agents',
   'commission',
+  'customers',
   'reconciliation',
   'audit-log',
   'users',
@@ -95,7 +96,7 @@ const ADMIN_STAFF_PERMISSION_GROUPS: StaffPermissionGroup[] = [
   {
     id: 'master',
     label: 'Master data',
-    sections: ['regions', 'suppliers', 'agents', 'commission', 'rates'],
+    sections: ['regions', 'suppliers', 'customers', 'agents', 'commission', 'rates'],
   },
   { id: 'administration', label: 'Administration', sections: ['users', 'global-settings', 'backup'] },
   { id: 'reports', label: 'Reports & audit', sections: ['reports', 'reconciliation', 'audit-log'] },
@@ -131,6 +132,7 @@ const SECTION_TO_LEGACY_KEYS: Partial<Record<AsicSectionId, BranchPageId[]>> = {
   entities: ['ic-funds'],
   reports: ['ic-funds'],
   rates: ['settings'],
+  customers: ['customers'],
 };
 
 const LEGACY_TO_SECTION: Partial<Record<BranchPageId, AsicSectionId>> = {
@@ -138,6 +140,7 @@ const LEGACY_TO_SECTION: Partial<Record<BranchPageId, AsicSectionId>> = {
   'ic-transfer-admin': 'sales',
   warehouse: 'warehouse',
   'ic-funds': 'payments',
+  customers: 'customers',
   settings: 'rates',
 };
 

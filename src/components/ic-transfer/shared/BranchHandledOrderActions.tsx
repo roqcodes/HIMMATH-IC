@@ -27,7 +27,8 @@ import {
   IconCheck,
   IconRefresh,
 } from './orderWorkflow';
-import { btnPrimary, btnSecondary, formSelect } from '@/lib/ui';
+import WarehouseAssignPicker, { initialWarehouseSelection } from './WarehouseAssignPicker';
+import { btnPrimary, btnSecondary } from '@/lib/ui';
 
 type Props = {
   sale: ICSale;
@@ -63,7 +64,7 @@ export default function BranchHandledOrderActions({
   onUpdated,
   compact = true,
 }: Props) {
-  const { icWarehouses, showToast, refetchData, currentSlug, user } = useApp();
+  const { icWarehouses, icRegions, showToast, refetchData, currentSlug, user } = useApp();
   const branchSlug = currentSlug !== 'superadmin' ? currentSlug : undefined;
 
   const [acceptOpen, setAcceptOpen] = useState(false);
@@ -75,6 +76,9 @@ export default function BranchHandledOrderActions({
     if (!branchId) return [];
     return filterWarehousesForBranchPortal(icWarehouses, branchId);
   }, [icWarehouses, branchId]);
+
+  const regionNameById = useMemo(() => new Map(icRegions.map(r => [r.id, r.name])), [icRegions]);
+  const getRegionLabel = (regionId?: string) => (regionId ? regionNameById.get(regionId) : undefined);
 
   if (!isBranchHandledSale(sale) || user?.role !== 'branch_manager') return null;
 
@@ -151,18 +155,16 @@ export default function BranchHandledOrderActions({
     }
   };
 
-  const warehouseSelect = (
-    <select
-      className={formSelect}
+  const warehousePicker = (radioName: string) => (
+    <WarehouseAssignPicker
+      name={radioName}
+      warehouses={branchWarehouses}
       value={warehouseId}
-      onChange={e => setWarehouseId(e.target.value)}
-      required
-    >
-      <option value="">Select branch warehouse…</option>
-      {branchWarehouses.map(w => (
-        <option key={w.id} value={w.id}>{w.name}</option>
-      ))}
-    </select>
+      onChange={setWarehouseId}
+      getRegionLabel={getRegionLabel}
+      currentWarehouseId={sale.warehouseId}
+      disabled={loading}
+    />
   );
 
   return (
@@ -173,7 +175,11 @@ export default function BranchHandledOrderActions({
             variant="success"
             icon={<IconCheck />}
             size={compact ? 'sm' : 'md'}
-            onClick={e => { e.stopPropagation(); setAcceptOpen(true); }}
+            onClick={e => {
+              e.stopPropagation();
+              setWarehouseId(initialWarehouseSelection(branchWarehouses));
+              setAcceptOpen(true);
+            }}
             disabled={loading}
           >
             Accept & Assign
@@ -184,7 +190,11 @@ export default function BranchHandledOrderActions({
             variant="secondary"
             icon={<IconRefresh />}
             size={compact ? 'sm' : 'md'}
-            onClick={e => { e.stopPropagation(); setReassignOpen(true); }}
+            onClick={e => {
+              e.stopPropagation();
+              setWarehouseId(initialWarehouseSelection(branchWarehouses, sale.warehouseId));
+              setReassignOpen(true);
+            }}
             disabled={loading}
           >
             Reassign WH
@@ -224,18 +234,23 @@ export default function BranchHandledOrderActions({
             <button type="button" className={btnSecondary} onClick={() => setAcceptOpen(false)} disabled={loading}>
               Cancel
             </button>
-            <button type="submit" form="branch-accept-form" className={btnPrimary} disabled={loading}>
+            <button type="submit" form="branch-accept-form" className={btnPrimary} disabled={loading || (branchWarehouses.length > 0 && !warehouseId)}>
               {loading ? 'Saving…' : 'Accept'}
             </button>
           </>
         }
       >
         <form id="branch-accept-form" onSubmit={handleAccept} className="space-y-4">
-          <p className="text-sm text-slate-600">Select a branch warehouse for this order.</p>
           {branchWarehouses.length === 0 ? (
             <p className="text-sm text-amber-700">No branch warehouses configured. Add one from IC Transfer → Warehouse.</p>
           ) : (
-            warehouseSelect
+            <fieldset className="min-w-0 space-y-2">
+              <legend className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                Branch warehouse
+              </legend>
+              <p className="-mt-1 mb-2 text-sm text-slate-600">Select a branch warehouse for this order.</p>
+              {warehousePicker('branch-accept-warehouse')}
+            </fieldset>
           )}
         </form>
       </Modal>
@@ -250,14 +265,19 @@ export default function BranchHandledOrderActions({
             <button type="button" className={btnSecondary} onClick={() => setReassignOpen(false)} disabled={loading}>
               Cancel
             </button>
-            <button type="submit" form="branch-reassign-form" className={btnPrimary} disabled={loading}>
+            <button type="submit" form="branch-reassign-form" className={btnPrimary} disabled={loading || (branchWarehouses.length > 0 && !warehouseId)}>
               {loading ? 'Saving…' : 'Reassign'}
             </button>
           </>
         }
       >
         <form id="branch-reassign-form" onSubmit={handleReassign} className="space-y-4">
-          {warehouseSelect}
+          <fieldset className="min-w-0 space-y-2">
+            <legend className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              Branch warehouse
+            </legend>
+            {warehousePicker('branch-reassign-warehouse')}
+          </fieldset>
         </form>
       </Modal>
     </>

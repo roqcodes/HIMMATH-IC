@@ -2,6 +2,7 @@
 
 import React from 'react';
 import ASICToolbar from '@/components/asic/ASICToolbar';
+import AdminAppShell from '@/components/asic/AdminAppShell';
 import type { AsicPortal } from '@/lib/asic/routing';
 import type { AsicSectionId } from '@/lib/asic/pages';
 
@@ -16,6 +17,14 @@ export default function AsicToolbarShell({
   section: AsicSectionId;
   children: React.ReactNode;
 }) {
+  if (portal === 'admin') {
+    return (
+      <AdminAppShell section={section} slug={slug}>
+        {children}
+      </AdminAppShell>
+    );
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="sticky top-14 z-40 -mx-1 border-b border-slate-200/80 bg-white/95 px-1 pb-1 backdrop-blur-sm sm:-mx-2 sm:px-2 dark:border-[var(--theme-border)] dark:bg-[var(--theme-surface)]/95">

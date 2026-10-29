@@ -21,7 +21,6 @@ export interface WarehouseOrder {
   units: number;
   collected_units: number | null;
   derived_from_sale_id: string | null;
-  converted_amount: number | null;
   unit_rate: number;
   aed_amount: number;
   order_status: ICOrderStatus | null;

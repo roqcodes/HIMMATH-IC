@@ -96,7 +96,7 @@ export function resolveMainNavItemHref(
       dashboard: '/admin/dashboard',
       'ic-transfer-admin': '/admin/sales',
       'ic-transfer': '/admin/sales',
-      customers: '/admin/entities',
+      customers: '/admin/customers',
       settings: '/admin/global-settings',
       users: '/admin/users',
       finance: '/admin/ic-finance',
@@ -112,7 +112,7 @@ export function resolveMainNavItemHref(
     'ic-transfer-admin': '/admin/sales',
     'ic-transfer': '/admin/sales',
     'ic-funds': '/admin/payments',
-    customers: '/admin/entities',
+    customers: '/admin/customers',
     settings: '/admin/rates',
     warehouse: `/warehouse/${currentSlug}/orders`,
   };

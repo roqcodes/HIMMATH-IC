@@ -121,8 +121,9 @@ export function buildCustomerStatementView(
   };
 }
 
-export function formatStatementAmount(amount: number, _currency: string): string {
-  return formatFxAmount(amount);
+export function formatStatementAmount(amount: number, currency: string): string {
+  const code = String(currency || IC_FUNDS_BASE_CURRENCY).trim().toUpperCase();
+  return `${formatFxAmount(amount)} ${code}`;
 }
 
 export function statementCsvFilename(customerName: string, currency: string): string {

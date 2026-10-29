@@ -5,7 +5,7 @@ import { resolveDateFilterRange } from '@/lib/dateFilterRange';
 import { resolveBranchTimeZone, todayInTimeZone } from '@/lib/businessTime';
 import { useDateFilterState } from '@/hooks/useDateFilterState';
 
-export function useICFundsDateFilter(branchTimezone?: string | null) {
+export function useICFundsDateFilter(branchTimezone?: string | null, defaultFilter = 'today') {
   const tz = resolveBranchTimeZone(branchTimezone);
   const today = useMemo(() => todayInTimeZone(tz), [tz]);
 
@@ -16,7 +16,7 @@ export function useICFundsDateFilter(branchTimezone?: string | null) {
     setCustomStartDate,
     customEndDate,
     setCustomEndDate,
-  } = useDateFilterState({ today });
+  } = useDateFilterState({ today, defaultFilter });
 
   const range = useMemo(
     () => resolveDateFilterRange(dateFilter, customStartDate, customEndDate, today),

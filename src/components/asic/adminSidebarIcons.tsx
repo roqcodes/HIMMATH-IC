@@ -50,6 +50,7 @@ export const ADMIN_SIDEBAR_ICONS: Record<string, (props: IconProps) => React.Rea
   reports: ({ className }) => sidebarIcon(ChartColumn, className),
   settings: ({ className }) => sidebarIcon(Settings, className),
   suppliers: ({ className }) => sidebarIcon(Truck, className),
+  customers: ({ className }) => sidebarIcon(Users, className),
   users: ({ className }) => sidebarIcon(Users, className),
   backup: ({ className }) => sidebarIcon(DatabaseBackup, className),
 };

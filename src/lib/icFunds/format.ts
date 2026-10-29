@@ -5,10 +5,27 @@ export function fmtICAmount(n: number): string {
   return formatAmount(n);
 }
 
-/** Ledger amounts (AED-only app — no currency suffix in UI). */
+/** Ledger / report amounts in HQ base currency (always suffixed for clarity). */
 export function fmtLedgerAed(n: number): string {
-  return fmtICAmount(n);
+  return `${fmtICAmount(n)} AED`;
 }
+
+export const icfLedgerColumnLabel = {
+  amount: 'Amount (AED)',
+  debit: 'Debit (AED)',
+  credit: 'Credit (AED)',
+  balance: 'Balance (AED)',
+  opening: 'Opening (AED)',
+  period: 'Period (AED)',
+  pendingDr: 'Pending Dr (AED)',
+  pendingCr: 'Pending Cr (AED)',
+  revenue: 'Revenue (AED)',
+  cogs: 'COGS (AED)',
+  grossProfit: 'Gross profit (AED)',
+  profit: 'Profit (AED)',
+  avgCost: 'Avg cost (AED)',
+  saleRate: 'Sale rate (AED)',
+} as const;
 
 /** Foreign amount with ISO currency code (wallet / FX layer). */
 export function fmtForeignAmount(n: number, currency: string): string {

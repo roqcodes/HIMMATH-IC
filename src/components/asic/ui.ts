@@ -1,5 +1,7 @@
 /** Dense ERP tokens — IC Funds density, used across Himmath IC. */
 
+import { tableCellAlignClass, type TableCellAlign } from '@/lib/tableCellAlign';
+
 export const asicLabel =
   'mb-0.5 block text-[11px] font-medium leading-none text-slate-500 dark:text-[var(--theme-text-secondary)]';
 
@@ -27,8 +29,18 @@ export const asicTable = 'w-full border-collapse text-left text-sm';
 export const asicTheadRow =
   'border-b border-slate-200 bg-slate-50/80 dark:border-[var(--theme-border)] dark:bg-[var(--theme-surface-muted)]';
 
-export const asicTh =
-  'px-2.5 py-2 text-left text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-[var(--theme-text-secondary)]';
+const asicThBase =
+  'px-2.5 py-2 text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-[var(--theme-text-secondary)]';
+
+export function asicThAlign(align: TableCellAlign = 'left') {
+  return `${asicThBase} ${tableCellAlignClass[align]}`;
+}
+
+export const asicTh = asicThAlign('left');
+
+export function asicTdAlign(align: TableCellAlign = 'left') {
+  return `px-2.5 py-2.5 text-sm text-slate-800 dark:text-[var(--theme-text)] ${tableCellAlignClass[align]}`;
+}
 
 export const asicTr =
   'border-b border-[var(--theme-border-subtle)] hover:bg-slate-50/80 dark:hover:bg-[var(--theme-surface-hover)]';

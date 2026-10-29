@@ -18,7 +18,6 @@ export default function ICSaleAmountCards({ units, inrTotal, aedNetTotal }: Prop
         <span className="mt-1.5 font-mono text-base font-bold text-slate-800 sm:text-lg">
           {formatAmount(units, 4)}
         </span>
-        <span className="mt-1 text-[10px] text-slate-400">1 unit = 1 lakh INR</span>
       </div>
       <div className="flex flex-col justify-center rounded-xl border border-slate-100 bg-white p-3 text-center shadow-sm">
         <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Amount (INR)</span>

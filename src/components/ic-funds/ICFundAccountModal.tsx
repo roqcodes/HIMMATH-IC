@@ -26,6 +26,8 @@ interface ICFundAccountModalProps {
   account?: ICFundAccount | null;
   onClose: () => void;
   onSave: () => void;
+  /** HQ entity ledger: no personal/customer accounts. */
+  entityLedgerMode?: boolean;
 }
 
 function ModalSection({
@@ -58,6 +60,7 @@ export default function ICFundAccountModal({
   account,
   onClose,
   onSave,
+  entityLedgerMode = false,
 }: ICFundAccountModalProps) {
   const [formData, setFormData] = useState({
     name: '',
@@ -73,6 +76,11 @@ export default function ICFundAccountModal({
   const [isSaving, setIsSaving] = useState(false);
   const [showResetPassword, setShowResetPassword] = useState(false);
   const isNew = !account;
+  const typeOptions = entityLedgerMode
+    ? IC_FUND_ACCOUNT_TYPE_OPTIONS.filter(o => o.value !== 'personal')
+    : IC_FUND_ACCOUNT_TYPE_OPTIONS;
+  const entityLabel = entityLedgerMode ? 'entity' : 'account';
+  const entityLabelCap = entityLedgerMode ? 'Entity' : 'Account';
   const hasPortalLogin = Boolean(account?.hasPortalLogin);
   const enablingPortalOnEdit = !isNew && formData.requireSignIn && !hasPortalLogin;
 
@@ -92,7 +100,7 @@ export default function ICFundAccountModal({
     } else {
       setFormData({
         name: '',
-        accountType: 'personal',
+        accountType: entityLedgerMode ? 'bank' : 'personal',
         openingBalance: '0',
         notes: '',
         status: 'active',
@@ -102,7 +110,7 @@ export default function ICFundAccountModal({
         requireSignIn: false,
       });
     }
-  }, [account, open]);
+  }, [account, open, entityLedgerMode]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -134,7 +142,7 @@ export default function ICFundAccountModal({
 
   const handleSave = async () => {
     if (!formData.name.trim()) {
-      alert('Account name is required');
+      alert(`${entityLabelCap} name is required`);
       return;
     }
     if (formData.requireSignIn && !hasPortalLogin && !formData.email.trim()) {
@@ -168,7 +176,7 @@ export default function ICFundAccountModal({
           }),
         );
         if (!res.success) {
-          alert('Failed to create account: ' + res.error);
+          alert(`Failed to create ${entityLabel}: ` + res.error);
           return;
         }
       } else if (account) {
@@ -188,7 +196,7 @@ export default function ICFundAccountModal({
           }),
         );
         if (!res.success) {
-          alert('Failed to update account: ' + res.error);
+          alert(`Failed to update ${entityLabel}: ` + res.error);
           return;
         }
       }
@@ -219,7 +227,7 @@ export default function ICFundAccountModal({
       <Modal
         open={open}
         onClose={onClose}
-        title={account ? 'Edit account' : 'New account'}
+        title={account ? `Edit ${entityLabel}` : `New ${entityLabel}`}
         maxWidth="max-w-4xl w-[95vw]"
         footer={
           <>
@@ -232,21 +240,21 @@ export default function ICFundAccountModal({
               disabled={isSaving || !canSubmit}
               className={`${btnPrimary} ${isSaving || !canSubmit ? 'cursor-not-allowed opacity-50' : ''}`}
             >
-              {isSaving ? 'Saving...' : account ? 'Save changes' : 'Create account'}
+              {isSaving ? 'Saving...' : account ? 'Save changes' : `Create ${entityLabel}`}
             </button>
           </>
         }
       >
         <div className="space-y-4">
           <ModalSection
-            title="Account details"
+            title={`${entityLabelCap} details`}
             description={
               isNew
-                ? 'Core ledger fields for this IC Funds account on the HQ ledger.'
-                : 'Update name, type, balance, and notes for this account.'
+                ? `Core ledger fields for this ${entityLabel} on the HQ ledger.`
+                : `Update name, type, balance, and notes for this ${entityLabel}.`
             }
           >
-            <AsicFormField label="Account name *" htmlFor="icf-account-name" colSpan={6}>
+            <AsicFormField label={`${entityLabelCap} name *`} htmlFor="icf-account-name" colSpan={6}>
               <input
                 id="icf-account-name"
                 type="text"
@@ -270,7 +278,7 @@ export default function ICFundAccountModal({
               />
             </AsicFormField>
 
-            <AsicFormField label="Account type *" htmlFor="icf-account-type" colSpan={6}>
+            <AsicFormField label={`${entityLabelCap} type *`} htmlFor="icf-account-type" colSpan={6}>
               <select
                 id="icf-account-type"
                 name="accountType"
@@ -278,7 +286,7 @@ export default function ICFundAccountModal({
                 onChange={handleChange}
                 className={asicInput}
               >
-                {IC_FUND_ACCOUNT_TYPE_OPTIONS.map(opt => (
+                {typeOptions.map(opt => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
                   </option>
@@ -325,7 +333,7 @@ export default function ICFundAccountModal({
             </AsicFormField>
           </ModalSection>
 
-          {formData.accountType === 'personal' ? (
+          {formData.accountType === 'personal' && !entityLedgerMode ? (
             <ModalSection
               title="Customer portal"
               description="Optional login for this customer to place orders and view balances."

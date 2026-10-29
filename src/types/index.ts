@@ -31,6 +31,8 @@ export interface User {
   customerId?: string;
   /** Linked investors record — present for investor-role users after sign-in. */
   investorId?: string;
+  /** IC warehouse scope for warehouse_* / delivery_* portal users. */
+  warehouseId?: string;
 }
 
 export interface Branch {
@@ -834,10 +836,18 @@ export interface ICFundTrialBalanceLine {
   accountId: string;
   accountName: string;
   accountType: ICFundAccountType;
+  /** Closing debit (posted) */
   debit: number;
+  /** Closing credit (posted) */
   credit: number;
   pendingDebit?: number;
   pendingCredit?: number;
+  openingDebit?: number;
+  openingCredit?: number;
+  periodDebit?: number;
+  periodCredit?: number;
+  closingDebit?: number;
+  closingCredit?: number;
 }
 
 export interface ICFundStatementLine {

@@ -9,6 +9,13 @@ export function warehouseShortSlug(warehouseId: string): string {
   return warehouseId.replace(/-/g, '').slice(0, 8).toLowerCase();
 }
 
+/** Warehouse id suffix embedded in `warehouse_*` / `delivery_*` profile roles. */
+export function warehouseShortFromOpsRole(role: string): string | null {
+  if (role.startsWith('warehouse_')) return role.slice('warehouse_'.length);
+  if (role.startsWith('delivery_')) return role.slice('delivery_'.length);
+  return null;
+}
+
 /** Login slug for HQ-owned warehouses and delivery agents (no branch assignment). */
 export const HQ_OPERATIONS_PORTAL_SLUG = 'hq';
 

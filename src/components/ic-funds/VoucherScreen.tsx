@@ -13,10 +13,10 @@ import { VOUCHER_LIST_PAGE_SIZE } from '@/lib/icFunds/voucherQueries';
 import { ActionError, logClientActionError } from '@/lib/errors/actionError';
 import { trackLoading } from '@/lib/loadingBar';
 import { allowedAccountTypesForVoucher, voucherFieldLabels } from '@/lib/icFunds/voucherRules';
-import { fmtICAmount, fmtICDate, fmtLedgerAed } from '@/lib/icFunds/format';
+import { fmtICDate, fmtLedgerAed, icfLedgerColumnLabel } from '@/lib/icFunds/format';
 import { parseFormAmount } from '@/lib/parseFormAmount';
 import { validateVoucherCurrencyPolicy } from '@/lib/icFunds/currencyPolicy';
-import { icfBtnGhost, icfBtnPrimary, icfCard, icfInput, icfLabel, icfTable, icfTableWrap, icfTd, icfTh, icfTheadRow } from '@/components/ic-funds/ui';
+import { icfBtnGhost, icfBtnPrimary, icfCard, icfInput, icfLabel, icfTable, icfTableWrap, icfTd, icfTh, icfThAlign, icfTheadRow } from '@/components/ic-funds/ui';
 import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
 import { computeVoucherKpis } from '@/lib/icFunds/kpiMetrics';
 import { ASICTableRowsSkeleton } from '@/components/asic/ASICTableSkeleton';
@@ -355,7 +355,7 @@ export default function VoucherScreen({
                   <th className={icfTh}>{voucherType === 'contra' ? 'From bank' : 'Account'}</th>
                 </>
               )}
-              <th className={`${icfTh} text-right`}>Amount</th>
+              <th className={icfThAlign('right')}>{icfLedgerColumnLabel.amount}</th>
               <th className={icfTh}>User</th>
               <th className={icfTh}>Notes</th>
               <th className={icfTh} />

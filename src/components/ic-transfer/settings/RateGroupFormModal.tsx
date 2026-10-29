@@ -85,7 +85,7 @@ export default function RateGroupFormModal({
 
         {!isEdit ? (
           <p className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
-            Sale rates are in AED per unit (1 unit = 1 lakh INR). Configure rates via bulk update and assign customers
+            Sale rates are in AED per unit. Configure rates via bulk update and assign customers
             using Manage Users.
           </p>
         ) : null}

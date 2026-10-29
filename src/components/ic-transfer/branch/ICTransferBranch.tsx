@@ -14,6 +14,7 @@ import {
   PageShell,
   useICTransferFilters,
   AddButton,
+  icTdClass,
 } from '../ui';
 import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
 import AddICBranchOrderModal from './AddICBranchOrderModal';
@@ -30,8 +31,6 @@ import { resolveDateFilterRange } from '@/lib/dateFilterRange';
 import { canEditOrder } from '@/lib/icTransfer/customerOrderReview';
 import { getCustomerPortalSubCustomerName, getCustomerPortalDisplayName } from '@/lib/icTransfer/customerPortalScope';
 import { getBranchPortalDisplayName } from '@/lib/icTransfer/branchPortalScope';
-
-const icCompactTd = (align: 'left' | 'center' | 'right') => `p-3 text-sm whitespace-nowrap text-${align}`;
 
 const fmt = (n: number) => `AED ${n.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`;
 
@@ -445,16 +444,16 @@ export default function ICTransferBranch() {
       >
         {filteredSales.map((s) => (
           <tr key={s.id} onClick={() => handleView(s)} className="cursor-pointer hover:bg-slate-50/50 transition-colors border-b border-slate-100 last:border-0 group">
-            <td className={icCompactTd('left')}>{new Date(s.createdAt || '').toLocaleDateString()}</td>
-            <td className={icCompactTd('left')}><span className="font-mono text-slate-500">{getFormattedTxnId(s.id, 'sale', s, branches, branchName)}</span></td>
-            <td className={icCompactTd('left')}><span className="font-semibold text-slate-900">{getOrderCustomer(s)}</span></td>
-            <td className={icCompactTd('left')}>{s.address || '—'}</td>
-            <td className={icCompactTd('right')}>{s.units.toLocaleString()}</td>
-            <td className={icCompactTd('right')}><span className="font-bold text-slate-900">{(s.aedAmount || 0).toLocaleString()}</span></td>
-            <td className={icCompactTd('center')} onClick={e => e.stopPropagation()}>
+            <td className={icTdClass('left')}>{new Date(s.createdAt || '').toLocaleDateString()}</td>
+            <td className={icTdClass('left')}><span className="font-mono text-slate-500">{getFormattedTxnId(s.id, 'sale', s, branches, branchName)}</span></td>
+            <td className={icTdClass('left')}><span className="font-semibold text-slate-900">{getOrderCustomer(s)}</span></td>
+            <td className={icTdClass('left')}>{s.address || '—'}</td>
+            <td className={icTdClass('right')}>{s.units.toLocaleString()}</td>
+            <td className={icTdClass('right')}><span className="font-bold text-slate-900">{(s.aedAmount || 0).toLocaleString()}</span></td>
+            <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
               <BranchOrderStatusCell sale={s} />
             </td>
-            <td className={icCompactTd('center')} onClick={e => e.stopPropagation()}>
+            <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
               <BranchOrderWorkflowActions
                 sale={s}
                 inline

@@ -47,6 +47,7 @@ export async function authenticateWithSupabase(email: string, password: string):
     role,
     branchId: profile?.branch_id || undefined,
     customerId: profile?.customer_id || undefined,
+    warehouseId: profile?.warehouse_id ? String(profile.warehouse_id) : undefined,
   };
 }
 

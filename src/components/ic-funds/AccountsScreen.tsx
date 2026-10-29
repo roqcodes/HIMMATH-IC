@@ -37,7 +37,7 @@ import {
 import { resolveAccountDetailHref } from '@/lib/icFunds/accountNavigation';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import { BalanceWithPending } from '@/components/ic-funds/BalanceWithPending';
-import { fmtICAmount } from '@/lib/icFunds/format';
+import { fmtLedgerAed } from '@/lib/icFunds/format';
 import { HQ_IC_FUNDS_BRANCH_ID } from '@/lib/icFunds/hqBranch';
 import { useWriteAccess } from '@/context/RbacWriteContext';
 import { useApp } from '@/context/AppContext';
@@ -144,8 +144,18 @@ export default function AccountsScreen({
 
   const sortMark = (field: SortField) => (sortField === field ? (sortDirection === 'asc' ? ' ↑' : ' ↓') : '');
 
+  const entityAccountTypeOptions = useMemo(
+    () => IC_FUND_ACCOUNT_TYPE_OPTIONS.filter(opt => opt.value !== 'personal'),
+    [],
+  );
+
+  const ledgerAccounts = useMemo(
+    () => accounts.filter(a => a.accountType !== 'personal'),
+    [accounts],
+  );
+
   const filteredAndSorted = useMemo(() => {
-    let result = [...accounts];
+    let result = [...ledgerAccounts];
 
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase();
@@ -193,9 +203,12 @@ export default function AccountsScreen({
     });
 
     return result;
-  }, [accounts, searchTerm, filterStatus, filterType, sortField, sortDirection]);
+  }, [ledgerAccounts, searchTerm, filterStatus, filterType, sortField, sortDirection]);
 
-  const kpiMetrics = useMemo(() => computeAccountsKpis(accounts, hqMode), [accounts, hqMode]);
+  const kpiMetrics = useMemo(
+    () => computeAccountsKpis(ledgerAccounts, hqMode, true),
+    [ledgerAccounts, hqMode],
+  );
 
   return (
     <>
@@ -212,7 +225,7 @@ export default function AccountsScreen({
               setIsModalOpen(true);
             }}
           >
-            New account
+            New entity
           </button>
         }
       />
@@ -237,7 +250,7 @@ export default function AccountsScreen({
                 <label className={icfLabel} htmlFor="icf-accounts-type">Type</label>
                 <select id="icf-accounts-type" className={icfInput} value={filterType} onChange={e => setFilterType(e.target.value)}>
                   <option value="">All types</option>
-                  {IC_FUND_ACCOUNT_TYPE_OPTIONS.map(opt => (
+                  {entityAccountTypeOptions.map(opt => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
                 </select>
@@ -251,7 +264,7 @@ export default function AccountsScreen({
                 </select>
               </div>
               <div className="flex items-end lg:col-span-1">
-                <span className="pb-1 text-[11px] text-slate-500">{filteredAndSorted.length} accounts</span>
+                <span className="pb-1 text-[11px] text-slate-500">{filteredAndSorted.length} entities</span>
               </div>
             </div>
           </div>
@@ -277,10 +290,10 @@ export default function AccountsScreen({
                   className={`${icfTh} cursor-pointer select-none text-right`}
                   onClick={() => handleSort('openingBalance')}
                 >
-                  Opening{sortMark('openingBalance')}
+                  Opening (AED){sortMark('openingBalance')}
                 </th>
                 <th className={`${icfTh} cursor-pointer select-none text-right`} onClick={() => handleSort('balance')}>
-                  Balance{sortMark('balance')}
+                  Balance (AED){sortMark('balance')}
                 </th>
                 <th className={`${icfTh} cursor-pointer select-none`} onClick={() => handleSort('status')}>
                   Status{sortMark('status')}
@@ -294,7 +307,7 @@ export default function AccountsScreen({
               ) : filteredAndSorted.length === 0 ? (
                 <tr>
                   <td colSpan={8} className={`${icfTd} py-6 text-center text-slate-500`}>
-                    {accounts.length === 0 ? 'No accounts yet.' : 'No rows match the filters.'}
+                    {ledgerAccounts.length === 0 ? 'No entities yet.' : 'No rows match the filters.'}
                   </td>
                 </tr>
               ) : (
@@ -316,7 +329,7 @@ export default function AccountsScreen({
                     <td className={`${icfTd} text-slate-500`}>{account.phone || '—'}</td>
                     <td className={`${icfTd} max-w-[12rem] truncate text-slate-500`}>{account.email || '—'}</td>
                     <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                      {fmtICAmount(account.openingBalance)}
+                      {fmtLedgerAed(account.openingBalance)}
                     </td>
                     <td className={`${icfTd} text-right`}>
                       <BalanceWithPending balance={account.balance} pendingBalance={account.pendingBalance} />
@@ -348,7 +361,7 @@ export default function AccountsScreen({
             <MobileCardSkeleton rows={6} />
           ) : filteredAndSorted.length === 0 ? (
             <MobileEmptyState>
-              {accounts.length === 0 ? 'No accounts yet.' : 'No rows match the filters.'}
+              {ledgerAccounts.length === 0 ? 'No entities yet.' : 'No rows match the filters.'}
             </MobileEmptyState>
           ) : (
             <MobileCardList>
@@ -400,6 +413,7 @@ export default function AccountsScreen({
           account={editingAccount}
           onClose={handleModalClose}
           onSave={handleSave}
+          entityLedgerMode
         />
       ) : null}
     </>

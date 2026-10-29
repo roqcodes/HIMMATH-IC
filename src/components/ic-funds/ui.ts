@@ -1,5 +1,7 @@
 /** Dense shadcn-inspired tokens scoped to IC Funds. */
 
+import { tableCellAlignClass, type TableCellAlign } from '@/lib/tableCellAlign';
+
 export const icfLabel =
   'mb-1 block text-[11px] font-medium leading-none text-slate-500 dark:text-[var(--theme-text-secondary)]';
 
@@ -23,8 +25,19 @@ export const icfTable = 'w-full border-collapse text-left text-sm';
 export const icfTheadRow =
   'border-b border-[var(--theme-border)] bg-slate-50/80 dark:bg-[var(--theme-surface-muted)]';
 
-export const icfTh =
-  'px-2.5 py-2 text-left text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-[var(--theme-text-secondary)]';
+const icfThBase =
+  'px-2.5 py-2 text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-[var(--theme-text-secondary)]';
+
+export function icfThAlign(align: TableCellAlign = 'left') {
+  return `${icfThBase} ${tableCellAlignClass[align]}`;
+}
+
+/** Default left-aligned header cell. */
+export const icfTh = icfThAlign('left');
+
+export function icfTdAlign(align: TableCellAlign = 'left') {
+  return `px-2.5 py-2.5 text-sm text-slate-800 dark:text-[var(--theme-text)] ${tableCellAlignClass[align]}`;
+}
 
 export const icfTr =
   'border-b border-[var(--theme-border-subtle)] hover:bg-slate-50/80 dark:hover:bg-[var(--theme-surface-hover)]';

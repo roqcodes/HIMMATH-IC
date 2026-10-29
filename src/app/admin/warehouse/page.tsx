@@ -1,7 +1,7 @@
-import ASICApp from '@/components/asic/ASICApp';
+import AsicSectionPage from '@/components/asic/AsicSectionPage';
 import { requirePortalUser } from '@/lib/asic/guards';
 
 export default async function AdminWarehousePage() {
   await requirePortalUser('admin');
-  return <ASICApp portal="admin" section="warehouse" />;
+  return <AsicSectionPage portal="admin" section="warehouse" />;
 }

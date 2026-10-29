@@ -83,6 +83,11 @@ export function normalizeAsicPath(pathname: string): string {
     return mapLegacyIcAdminTail(tail);
   }
 
+  if (clean === '/admin/ic-transfer/warehouse' || clean.startsWith('/admin/ic-transfer/warehouse/')) {
+    const suffix = clean.slice('/admin/ic-transfer/warehouse'.length);
+    return suffix ? `/admin/warehouse${suffix}` : '/admin/warehouse';
+  }
+
   if (clean === '/warehouse/admin' || clean.startsWith('/warehouse/admin/')) {
     const suffix = clean.slice('/warehouse/admin'.length);
     return suffix ? `/admin/warehouse${suffix}` : '/admin/warehouse';
@@ -106,7 +111,7 @@ export function normalizeAsicPath(pathname: string): string {
 
   const legacyCustomers = clean.match(/^\/([^/]+)\/customers\/?$/);
   if (legacyCustomers && !RESERVED_BRANCH_SLUGS.has(legacyCustomers[1])) {
-    return `/admin/entities`;
+    return `/admin/customers`;
   }
 
   return clean;

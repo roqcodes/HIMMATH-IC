@@ -5,8 +5,8 @@ import { useApp } from '@/context/AppContext';
 import AsicPageHeader from '@/components/asic/AsicPageHeader';
 import VoucherScreen from '@/components/ic-funds/VoucherScreen';
 import AccountsScreen from '@/components/ic-funds/AccountsScreen';
-import ICFundsBooksSection from '@/components/ic-funds/ICFundsBooksSection';
 import PLScreen from '@/components/ic-funds/PLScreen';
+import ICFundsBooksSection from '@/components/ic-funds/ICFundsBooksSection';
 import { IC_FUNDS_NAV, type ICFundsReportId, type ICFundsSectionId } from '@/lib/icFunds/nav';
 import type { ICFundVoucherType } from '@/lib/icFunds/constants';
 import type { AsicPortal } from '@/lib/asic/routing';
@@ -146,7 +146,7 @@ export default function ICFundsApp({
 
   return (
     <div>
-      {section !== 'accounts' ? (
+      {section !== 'accounts' && section !== 'reports' ? (
         <AsicPageHeader title={sectionLabel(section)} meta={ledgerPicker} />
       ) : null}
       {voucherType ? (
@@ -170,6 +170,7 @@ export default function ICFundsApp({
           slug={fundSlug}
           reportView={reportView}
           portal={fundsPortal}
+          headerMeta={ledgerPicker}
         />
       )}
     </div>

@@ -139,6 +139,14 @@ export async function createDeliveryAgent(data: {
     const user = await getSessionUser(parsed.branchSlug || undefined);
     if (!user) throw new Error('Unauthorized');
 
+    if (user.role.startsWith('warehouse_')) {
+      const { warehouseShortSlug } = await import('@/lib/icTransfer/warehouseSlug');
+      const scopedShort = user.role.slice('warehouse_'.length);
+      if (warehouseShortSlug(parsed.warehouse_id) !== scopedShort) {
+        throw new Error('Access denied.');
+      }
+    }
+
     const whRes = await query(
       `SELECT branch_id FROM ic_warehouses WHERE id = $1 LIMIT 1`,
       [parsed.warehouse_id],
@@ -147,10 +155,13 @@ export async function createDeliveryAgent(data: {
       ? String(whRes.rows[0].branch_id)
       : user.branchId || '';
 
+    const { warehouseShortSlug } = await import('@/lib/icTransfer/warehouseSlug');
+    const deliveryRole = `delivery_${warehouseShortSlug(parsed.warehouse_id)}`;
+
     const cognitoResult = await createCognitoUserAction(
       parsed.email,
       parsed.name,
-      `delivery_${parsed.warehouse_id.slice(0, 8)}`,
+      deliveryRole,
       warehouseBranchId,
       parsed.password || 'Aibak123!',
       parsed.branchSlug || undefined,
@@ -190,6 +201,14 @@ export async function createDeliveryAgent(data: {
       );
       return insertRes.rows[0];
     });
+
+    await query(
+      `UPDATE profiles
+       SET warehouse_id = $1, delivery_agent_id = $2, role = $3
+       WHERE lower(email) = lower($4)`,
+      [parsed.warehouse_id, result.id, deliveryRole, parsed.email],
+    );
+
     return { success: true, data: result };
   } catch (err: unknown) {
     logger.error({ err, data }, 'Validation error in createDeliveryAgent');

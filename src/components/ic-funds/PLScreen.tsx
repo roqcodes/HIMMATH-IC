@@ -8,10 +8,10 @@ import {
   IC_FUND_VOUCHER_LABELS,
   isPLAccountType,
 } from '@/lib/icFunds/constants';
-import { fmtICAmount, fmtICDate, fmtLedgerAed } from '@/lib/icFunds/format';
+import { fmtICAmount, fmtICDate, fmtLedgerAed, icfLedgerColumnLabel } from '@/lib/icFunds/format';
 import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
 import { computePlKpis } from '@/lib/icFunds/kpiMetrics';
-import { icfCard, icfInput, icfLabel, icfTableWrap, icfTd, icfTh, icfTheadRow, icfAccountLink } from '@/components/ic-funds/ui';
+import { icfCard, icfInput, icfLabel, icfTableWrap, icfTd, icfTh, icfThAlign, icfTheadRow, icfAccountLink } from '@/components/ic-funds/ui';
 import { ASICPageSkeleton, ASICTableRowsSkeleton, ASICTableSkeleton } from '@/components/asic/ASICTableSkeleton';
 import ICFundsDateFilterBar from '@/components/ic-funds/ICFundsDateFilterBar';
 import { useICFundsDateFilter } from '@/components/ic-funds/useICFundsDateFilter';
@@ -168,8 +168,8 @@ export default function PLScreen({
                   <tr className={icfTheadRow}>
                     <th className={icfTh}>Account</th>
                     <th className={icfTh}>Type</th>
-                    <th className={`${icfTh} text-right`}>Opening</th>
-                    <th className={`${icfTh} text-right`}>Period</th>
+                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.opening}</th>
+                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.period}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -241,7 +241,7 @@ export default function PLScreen({
                     <th className={icfTh}>P&L account</th>
                     <th className={icfTh}>Debit</th>
                     <th className={icfTh}>Credit</th>
-                    <th className={`${icfTh} text-right`}>Amount</th>
+                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.amount}</th>
                     <th className={icfTh}>User</th>
                     <th className={icfTh}>Notes</th>
                   </tr>
@@ -295,7 +295,7 @@ export default function PLScreen({
                             accounts={bundle.accounts}
                           />
                         </td>
-                        <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtICAmount(row.amount)}</td>
+                        <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(row.amount)}</td>
                         <td className={icfTd}>
                           <VoucherUserCell voucher={row} />
                         </td>

@@ -9,4 +9,4 @@ export { default as SearchInput } from './SearchInput';
 export { default as DataTableSection } from './DataTableSection';
 export { default as ChartCard } from './ChartCard';
 export { useICTransferFilters } from './useICTransferFilters';
-export { icTheadRow, icThClass, icThSortableClass, icSectionCardClass, icRowLabelClass } from './tableStyles';
+export { icTheadRow, icThClass, icThSortableClass, icSectionCardClass, icRowLabelClass, icTdClass, inferTableColumnAlign, inferTableColumnAligns } from './tableStyles';

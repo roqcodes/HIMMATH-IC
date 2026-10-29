@@ -35,8 +35,8 @@ const securityHeaders = [
   },
 ];
 
-/** Legacy branch slug — must not match HQ `/admin/*` ASIC routes. */
-const legacyBranchSlug = ':slug((?!admin$)[^/]+)';
+/** Legacy branch slug — must not match HQ `/admin/*` (see redirects below). */
+const legacyBranchSlug = ':slug((?!admin$)(?!superadmin$)[^/]+)';
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
@@ -102,8 +102,7 @@ const nextConfig: NextConfig = {
       { source: `/${legacyBranchSlug}/physical-deals/:path*`, destination: '/branch/:slug/orders', permanent: false },
       { source: `/${legacyBranchSlug}/usdt/:path*`, destination: '/branch/:slug/orders', permanent: false },
       { source: `/${legacyBranchSlug}/currency/:path*`, destination: '/branch/:slug/orders', permanent: false },
-      { source: `/${legacyBranchSlug}/investors/:path*`, destination: '/branch/:slug/accounts', permanent: false },
-      { source: `/${legacyBranchSlug}/customers`, destination: '/branch/:slug/accounts', permanent: false },
+      { source: `/${legacyBranchSlug}/investors/:path*`, destination: '/admin/users', permanent: false },
       { source: `/${legacyBranchSlug}/products/:path*`, destination: '/branch/:slug/orders', permanent: false },
       { source: `/${legacyBranchSlug}/finance/:path*`, destination: '/branch/:slug/reports', permanent: false },
       { source: `/${legacyBranchSlug}/settings`, destination: '/branch/:slug/rates', permanent: false },

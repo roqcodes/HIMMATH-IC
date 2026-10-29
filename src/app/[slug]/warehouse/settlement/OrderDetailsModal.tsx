@@ -13,9 +13,16 @@ import { canDeliveryAgentAct } from '@/lib/icTransfer/orderStatus';
 import { PriorityBadge } from '@/components/warehouse/shared';
 import { formatUnits, getRemainingUnits, isDeliveryAgentFinished } from '@/lib/icTransfer/saleUnits';
 import { AdminOrderStatusBadge } from '@/components/ic-transfer/shared/OrderStatusBadge';
-import { btnDangerOutline, btnPrimary, btnSecondary, formHint, formInput, formLabel } from '@/lib/ui';
+import {
+  getDeliveryAgentStatusLabel,
+  getDeliveryAgentStatusStyle,
+} from '@/lib/icTransfer/orderStatus';
+import { warehouseOrderToStatusPick } from '@/lib/warehouse/orderStatusPick';
+import { asicBtnOutline } from '@/components/asic/ui';
+import { btnDangerOutline, btnPrimary, btnSecondary, formHint, formInput } from '@/lib/ui';
 import { uploadImageToCloudinary, deleteCloudinaryImageByToken } from '@/lib/cloudinary';
 import type { WarehouseOrder } from '@/types/warehouse';
+import { ModalRecordedOnValue } from '@/components/ic-transfer/shared/modalDetailUi';
 
 type Props = {
   order: WarehouseOrder;
@@ -116,6 +123,8 @@ export default function OrderDetailsModal({
     ? getFormattedTxnId(order.derived_from_sale_id, 'sale', null, branches)
     : null;
 
+  const statusPick = warehouseOrderToStatusPick(order);
+
   const handleImageUpload = async (file: File) => {
     setIsUploading(true);
     try {
@@ -191,232 +200,381 @@ export default function OrderDetailsModal({
         title={
           <div className="min-w-0 pr-2">
             <p className="text-sm font-semibold text-slate-900 sm:text-base">
-              {isEditable ? 'Record Delivery' : 'Order Details'}
+              {isEditable ? 'Record delivery' : 'Order details'}
             </p>
             <p className="mt-0.5 truncate font-mono text-[11px] font-normal text-slate-500 sm:text-xs">{formattedId}</p>
           </div>
         }
-        maxWidth="max-w-2xl"
+        maxWidth={isEditable ? 'max-w-4xl' : 'max-w-3xl'}
         footer={
           isEditable ? (
-            <>
+            <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <button
                 type="button"
                 onClick={() => setRejectOpen(true)}
                 disabled={loading}
-                className={`${btnDangerOutline} w-full sm:mr-auto sm:w-auto`}
+                className={`${btnDangerOutline} w-full sm:w-auto`}
               >
                 Reject order
               </button>
-              <button type="button" className={`${btnSecondary} w-full sm:w-auto`} onClick={onClose} disabled={loading}>
-                Cancel
-              </button>
-              <button
-                type="submit"
-                form="complete-order-form"
-                disabled={loading || isUploading || !canSubmitDelivery}
-                className={`${btnPrimary} w-full sm:w-auto`}
-                title={!canSubmitDelivery ? 'Enter delivered units greater than 0' : undefined}
-              >
-                {loading ? 'Processing…' : 'Complete delivery'}
-              </button>
-            </>
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  className={`${asicBtnOutline} w-full sm:w-auto`}
+                  onClick={onClose}
+                  disabled={loading}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  form="complete-order-form"
+                  disabled={loading || isUploading || !canSubmitDelivery}
+                  className={`${btnPrimary} w-full sm:w-auto`}
+                  title={!canSubmitDelivery ? 'Enter delivered units greater than 0' : undefined}
+                >
+                  {loading ? 'Processing…' : 'Complete delivery'}
+                </button>
+              </div>
+            </div>
           ) : (
-            <button type="button" className={`${btnSecondary} w-full sm:w-auto`} onClick={onClose}>
-              Close
-            </button>
+            <div className="flex w-full justify-end">
+              <button type="button" className={`${asicBtnOutline} w-full sm:w-auto`} onClick={onClose}>
+                Close
+              </button>
+            </div>
           )
         }
       >
-        <div className="space-y-4 sm:space-y-5">
-          <section className="overflow-hidden rounded-lg border border-slate-200/90 bg-white">
-            <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 sm:flex-row sm:items-start sm:justify-between sm:px-5 sm:py-4">
-              <div className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Created</p>
-                <p className="mt-1 text-sm text-slate-700">{new Date(order.created_at).toLocaleString()}</p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <PriorityBadge priority={order.priority} />
-                <AdminOrderStatusBadge status={order.order_status} />
-              </div>
-            </div>
-
-            {parentId ? (
-              <div className="border-b border-indigo-100 bg-indigo-50/60 px-4 py-2.5 text-xs text-indigo-800 sm:px-5">
-                <span className="font-semibold">Split order</span>
-                <span className="text-indigo-600"> · remainder from </span>
-                <span className="font-mono font-medium">{parentId}</span>
-              </div>
-            ) : null}
-
-            <div className="px-4 py-4 sm:px-5">
-              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Delivery progress</p>
-              <div className="mt-3 grid grid-cols-3 divide-x divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-slate-50/70">
-                <MetricTile label="Total" value={formatUnits(totalUnits)} />
-                <MetricTile label="Delivered" value={formatUnits(deliveredUnits)} tone="success" />
-                <MetricTile
-                  label="Remaining"
-                  value={formatUnits(remainingUnits)}
-                  tone={remainingUnits > 0 ? 'warning' : 'default'}
-                />
-              </div>
-
-              <div className="mt-4">
-                <div className="mb-1.5 flex items-center justify-between gap-2 text-[11px] font-medium text-slate-500">
-                  <span>Progress</span>
-                  <span className="tabular-nums">{deliveryPct}%</span>
-                </div>
-                <div
-                  className="relative h-2 overflow-hidden rounded-full bg-slate-200/80"
-                  role="progressbar"
-                  aria-valuenow={deliveryPct}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-label="Share of order units delivered"
-                >
-                  <div
-                    className="absolute inset-y-0 left-0 rounded-full bg-emerald-500 transition-[width] duration-300 ease-out"
-                    style={{ width: `${deliveryPct}%` }}
-                  />
-                </div>
-                <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
-                  {formatUnits(deliveredUnits)} delivered
-                  {remainingUnits > 0
-                    ? ` · ${formatUnits(remainingUnits)} will move to a linked order`
-                    : ' · full delivery'}
-                </p>
-              </div>
-            </div>
-          </section>
-
-          {isEditable ? (
-            <SectionCard
-              title="Complete delivery"
-              description="Enter how many units were delivered and attach payment proof if available."
-            >
-              <form id="complete-order-form" onSubmit={handleUpdateOrder} className="grid gap-5 lg:grid-cols-2 lg:gap-6">
-                <div className="space-y-3">
-                  <div>
-                    <label htmlFor="delivered-units" className={formLabel}>
-                      Delivered units
-                    </label>
-                    <div className="mt-1.5 flex flex-col gap-2 sm:flex-row sm:items-stretch">
-                      <input
-                        id="delivered-units"
-                        type="number"
-                        inputMode="decimal"
-                        step="0.01"
-                        min="0.01"
-                        max={totalUnits}
-                        required
-                        value={collectedUnits}
-                        onChange={e => setCollectedUnits(e.target.value)}
-                        className={`${formInput} text-right text-lg font-semibold tabular-nums sm:flex-1 sm:text-xl`}
-                        placeholder="0"
-                        aria-describedby="delivered-units-hint"
-                      />
-                      <button
-                        type="button"
-                        className={`${btnSecondary} shrink-0 whitespace-nowrap`}
-                        onClick={() => setCollectedUnits(String(totalUnits))}
-                      >
-                        Deliver all ({formatUnits(totalUnits)})
-                      </button>
-                    </div>
-                    <p id="delivered-units-hint" className={formHint}>
-                      Max {formatUnits(totalUnits)} units for this order
-                    </p>
-                    {remainingUnits > 0 && collectedUnits ? (
-                      <p className="mt-2 rounded-lg border border-amber-100 bg-amber-50/80 px-3 py-2 text-xs leading-relaxed text-amber-800">
-                        {formatUnits(remainingUnits)} units will stay on a new linked order after you complete this
-                        delivery.
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-
+        {isEditable ? (
+          <form
+            id="complete-order-form"
+            onSubmit={handleUpdateOrder}
+            className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2 lg:gap-8"
+          >
+            {/* Left: order context + units */}
+            <div className="flex min-w-0 flex-col gap-5">
+              <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                 <div className="min-w-0">
-                  <p className={formLabel}>Payment proof</p>
-                  <div className="mt-1.5">
-                    <ImageDropZone
-                      imageUrl={deliveryImageUrl}
-                      onUpload={handleImageUpload}
-                      onClear={handleDeleteImage}
-                      isUploading={isUploading}
-                      showCapture
-                      emptyLabel="Tap to add payment proof"
-                    />
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Recorded on</p>
+                  <div className="mt-0.5 text-sm font-medium text-slate-700">
+                    <ModalRecordedOnValue iso={order.created_at} />
                   </div>
                 </div>
-              </form>
-            </SectionCard>
-          ) : null}
+                <div className="flex flex-wrap items-center justify-start gap-2 sm:justify-end">
+                  <PriorityBadge priority={order.priority} />
+                  {isDeliveryView ? (
+                    <span
+                      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-bold tracking-wide ${getDeliveryAgentStatusStyle(statusPick)}`}
+                    >
+                      {getDeliveryAgentStatusLabel(statusPick)}
+                    </span>
+                  ) : (
+                    <AdminOrderStatusBadge status={order.order_status} />
+                  )}
+                </div>
+              </div>
 
-          <SectionCard title="Delivery address">
-            {order.address?.trim() ? (
-              <div className="space-y-3">
-                <p className="whitespace-pre-wrap rounded-xl border border-slate-100 bg-slate-50 px-3 py-3 text-sm leading-relaxed text-slate-700">
-                  {order.address}
+              {parentId ? (
+                <div className="rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2.5 text-xs text-indigo-800">
+                  <span className="font-semibold">Split order</span>
+                  <span className="text-indigo-600"> · remainder from </span>
+                  <span className="font-mono font-medium">{parentId}</span>
+                </div>
+              ) : null}
+
+              <div className="rounded-lg border border-slate-200/90 bg-white p-4 sm:p-5">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Delivery progress</p>
+                <div className="mt-3 grid grid-cols-3 divide-x divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-slate-50/70">
+                  <MetricTile label="Total" value={formatUnits(totalUnits)} />
+                  <MetricTile label="Delivered" value={formatUnits(deliveredUnits)} tone="success" />
+                  <MetricTile
+                    label="Remaining"
+                    value={formatUnits(remainingUnits)}
+                    tone={remainingUnits > 0 ? 'warning' : 'default'}
+                  />
+                </div>
+                <div className="mt-4">
+                  <div className="mb-1.5 flex items-center justify-between gap-2 text-[11px] font-medium text-slate-500">
+                    <span>Progress</span>
+                    <span className="tabular-nums">{deliveryPct}%</span>
+                  </div>
+                  <div
+                    className="relative h-2 overflow-hidden rounded-full bg-slate-200/80"
+                    role="progressbar"
+                    aria-valuenow={deliveryPct}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label="Share of order units delivered"
+                  >
+                    <div
+                      className="absolute inset-y-0 left-0 rounded-full bg-emerald-500 transition-[width] duration-300 ease-out"
+                      style={{ width: `${deliveryPct}%` }}
+                    />
+                  </div>
+                  <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+                    {formatUnits(deliveredUnits)} delivered
+                    {remainingUnits > 0
+                      ? ` · ${formatUnits(remainingUnits)} will move to a linked order`
+                      : ' · full delivery'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200/90 bg-white p-4 sm:p-5">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Delivery address</p>
+                {order.address?.trim() ? (
+                  <div className="mt-3 space-y-3">
+                    <p className="whitespace-pre-wrap rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2.5 text-sm leading-relaxed text-slate-700">
+                      {order.address}
+                    </p>
+                    <CopyOrderDetailsButton
+                      address={order.address}
+                      units={totalUnits}
+                      enableShare
+                      onCopySuccess={() => showToast('Address details copied')}
+                      onCopyError={msg => showToast(msg, 'error')}
+                      onShareError={msg => showToast(msg, 'error')}
+                    />
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm font-medium text-slate-500">Not provided</p>
+                )}
+              </div>
+
+              <div className="rounded-lg border border-slate-200/90 bg-white p-4 sm:p-5">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Delivered units</p>
+                <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                  Enter how many units you delivered for this stop.
                 </p>
-                <CopyOrderDetailsButton
-                  address={order.address}
-                  units={totalUnits}
-                  enableShare
-                  onCopySuccess={() => showToast('Address details copied')}
-                  onCopyError={msg => showToast(msg, 'error')}
-                  onShareError={msg => showToast(msg, 'error')}
-                />
-              </div>
-            ) : (
-              <div className="flex min-h-[7rem] items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50 px-4 text-center text-xs font-medium text-slate-400">
-                No address text provided
-              </div>
-            )}
-          </SectionCard>
-
-          <section className="grid gap-4 sm:grid-cols-2">
-            <div className="min-w-0 rounded-lg border border-slate-200/90 bg-white p-4 sm:p-5">
-              <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Original order</p>
-              {order.image_url ? (
-                <div className="space-y-2">
-                  <div className="relative aspect-[4/3] overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={order.image_url}
-                      alt="Original order"
-                      className="absolute inset-0 h-full w-full object-contain"
+                <div className="mt-3">
+                  <label htmlFor="delivered-units" className="sr-only">
+                    Delivered units
+                  </label>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                    <input
+                      id="delivered-units"
+                      type="number"
+                      inputMode="decimal"
+                      step="0.01"
+                      min="0.01"
+                      max={totalUnits}
+                      required
+                      value={collectedUnits}
+                      onChange={e => setCollectedUnits(e.target.value)}
+                      className={`${formInput} text-right text-lg font-semibold tabular-nums sm:flex-1 sm:text-xl`}
+                      placeholder="0"
+                      aria-describedby="delivered-units-hint"
                     />
+                    <button
+                      type="button"
+                      className={`${btnSecondary} shrink-0 whitespace-nowrap`}
+                      onClick={() => setCollectedUnits(String(totalUnits))}
+                    >
+                      Deliver all ({formatUnits(totalUnits)})
+                    </button>
                   </div>
-                  <ProofImageActions
-                    imageUrl={order.image_url}
-                    downloadFilename={`order-${formattedId}`}
-                    enableShare
-                    shareTitle="Original order image"
-                    shareText={`Original order image for ${formattedId}`}
-                    onCopySuccess={() => showToast('Image copied')}
-                    onCopyError={msg => showToast(msg, 'error')}
-                    onDownloadError={msg => showToast(msg, 'error')}
-                    onShareError={msg => showToast(msg, 'error')}
-                  />
+                  <p id="delivered-units-hint" className={formHint}>
+                    Max {formatUnits(totalUnits)} units for this order
+                  </p>
+                  {remainingUnits > 0 && collectedUnits ? (
+                    <p className="mt-2 rounded-lg border border-amber-100 bg-amber-50/80 px-3 py-2 text-xs leading-relaxed text-amber-800">
+                      {formatUnits(remainingUnits)} units will stay on a new linked order after you complete this
+                      delivery.
+                    </p>
+                  ) : null}
                 </div>
-              ) : (
-                <div className="flex aspect-[4/3] flex-col items-center justify-center gap-3 rounded-xl border border-slate-200 bg-slate-50/50 p-4 text-center text-xs font-medium text-slate-400">
-                  <span>No original image</span>
-                  <CopyOrderDetailsButton
-                    address={order.address ?? undefined}
-                    units={totalUnits}
-                    enableShare
-                    onCopySuccess={() => showToast('Details copied')}
-                    onCopyError={msg => showToast(msg, 'error')}
-                    onShareError={msg => showToast(msg, 'error')}
-                  />
-                </div>
-              )}
+              </div>
             </div>
 
-            {!isEditable ? (
+            {/* Right: proof + reference image */}
+            <div className="flex min-w-0 flex-col gap-5 lg:border-l lg:border-slate-100 lg:pl-8">
+              <div className="flex h-full min-h-0 flex-col rounded-lg border border-slate-200/90 bg-white p-4 sm:p-5">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Payment proof</p>
+                <p className="mt-1 text-xs leading-relaxed text-slate-500">Attach proof of payment if available.</p>
+                <div className="mt-3 flex flex-1 flex-col justify-center">
+                  <ImageDropZone
+                    imageUrl={deliveryImageUrl}
+                    onUpload={handleImageUpload}
+                    onClear={handleDeleteImage}
+                    isUploading={isUploading}
+                    showCapture
+                    emptyLabel="Tap to add payment proof"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200/90 bg-white p-4 sm:p-5">
+                <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">Original order image</p>
+                {order.image_url ? (
+                  <div className="space-y-2">
+                    <div className="relative aspect-[4/3] w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={order.image_url}
+                        alt="Original order"
+                        className="absolute inset-0 h-full w-full object-contain"
+                      />
+                    </div>
+                    <ProofImageActions
+                      imageUrl={order.image_url}
+                      downloadFilename={`order-${formattedId}`}
+                      enableShare
+                      shareTitle="Original order image"
+                      shareText={`Original order image for ${formattedId}`}
+                      onCopySuccess={() => showToast('Image copied')}
+                      onCopyError={msg => showToast(msg, 'error')}
+                      onDownloadError={msg => showToast(msg, 'error')}
+                      onShareError={msg => showToast(msg, 'error')}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex aspect-[4/3] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-4 text-center text-xs font-medium text-slate-400">
+                    <span>No original image</span>
+                    <CopyOrderDetailsButton
+                      address={order.address ?? undefined}
+                      units={totalUnits}
+                      enableShare
+                      onCopySuccess={() => showToast('Details copied')}
+                      onCopyError={msg => showToast(msg, 'error')}
+                      onShareError={msg => showToast(msg, 'error')}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          </form>
+        ) : (
+          <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2 lg:gap-8">
+            <div className="flex min-w-0 flex-col gap-5">
+              <div className="overflow-hidden rounded-lg border border-slate-200/90 bg-white">
+                <div className="flex flex-col justify-between gap-3 border-b border-slate-100 px-4 py-3 sm:flex-row sm:items-start sm:px-5 sm:py-4">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Recorded on</p>
+                    <div className="mt-0.5 text-sm font-medium text-slate-700">
+                      <ModalRecordedOnValue iso={order.created_at} />
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                    <PriorityBadge priority={order.priority} />
+                    {isDeliveryView ? (
+                      <span
+                        className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-bold tracking-wide ${getDeliveryAgentStatusStyle(statusPick)}`}
+                      >
+                        {getDeliveryAgentStatusLabel(statusPick)}
+                      </span>
+                    ) : (
+                      <AdminOrderStatusBadge status={order.order_status} />
+                    )}
+                  </div>
+                </div>
+
+                {parentId ? (
+                  <div className="border-b border-indigo-100 bg-indigo-50/60 px-4 py-2.5 text-xs text-indigo-800 sm:px-5">
+                    <span className="font-semibold">Split order</span>
+                    <span className="text-indigo-600"> · remainder from </span>
+                    <span className="font-mono font-medium">{parentId}</span>
+                  </div>
+                ) : null}
+
+                <div className="px-4 py-4 sm:px-5">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Delivery progress</p>
+                  <div className="mt-3 grid grid-cols-3 divide-x divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-slate-50/70">
+                    <MetricTile label="Total" value={formatUnits(totalUnits)} />
+                    <MetricTile label="Delivered" value={formatUnits(deliveredUnits)} tone="success" />
+                    <MetricTile
+                      label="Remaining"
+                      value={formatUnits(remainingUnits)}
+                      tone={remainingUnits > 0 ? 'warning' : 'default'}
+                    />
+                  </div>
+                  <div className="mt-4">
+                    <div className="mb-1.5 flex items-center justify-between gap-2 text-[11px] font-medium text-slate-500">
+                      <span>Progress</span>
+                      <span className="tabular-nums">{deliveryPct}%</span>
+                    </div>
+                    <div
+                      className="relative h-2 overflow-hidden rounded-full bg-slate-200/80"
+                      role="progressbar"
+                      aria-valuenow={deliveryPct}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-label="Share of order units delivered"
+                    >
+                      <div
+                        className="absolute inset-y-0 left-0 rounded-full bg-emerald-500 transition-[width] duration-300 ease-out"
+                        style={{ width: `${deliveryPct}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <SectionCard title="Delivery address">
+                {order.address?.trim() ? (
+                  <div className="space-y-3">
+                    <p className="whitespace-pre-wrap rounded-xl border border-slate-100 bg-slate-50 px-3 py-3 text-sm leading-relaxed text-slate-700">
+                      {order.address}
+                    </p>
+                    <CopyOrderDetailsButton
+                      address={order.address}
+                      units={totalUnits}
+                      enableShare
+                      onCopySuccess={() => showToast('Address details copied')}
+                      onCopyError={msg => showToast(msg, 'error')}
+                      onShareError={msg => showToast(msg, 'error')}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex min-h-[7rem] items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50 px-4 text-center text-xs font-medium text-slate-400">
+                    No address text provided
+                  </div>
+                )}
+              </SectionCard>
+            </div>
+
+            <div className="flex min-w-0 flex-col gap-5 lg:border-l lg:border-slate-100 lg:pl-8">
               <div className="min-w-0 rounded-lg border border-slate-200/90 bg-white p-4 sm:p-5">
-                <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Payment proof</p>
+                <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">Original order image</p>
+                {order.image_url ? (
+                  <div className="space-y-2">
+                    <div className="relative aspect-[4/3] overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={order.image_url}
+                        alt="Original order"
+                        className="absolute inset-0 h-full w-full object-contain"
+                      />
+                    </div>
+                    <ProofImageActions
+                      imageUrl={order.image_url}
+                      downloadFilename={`order-${formattedId}`}
+                      enableShare
+                      shareTitle="Original order image"
+                      shareText={`Original order image for ${formattedId}`}
+                      onCopySuccess={() => showToast('Image copied')}
+                      onCopyError={msg => showToast(msg, 'error')}
+                      onDownloadError={msg => showToast(msg, 'error')}
+                      onShareError={msg => showToast(msg, 'error')}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex aspect-[4/3] flex-col items-center justify-center gap-3 rounded-xl border border-slate-200 bg-slate-50/50 p-4 text-center text-xs font-medium text-slate-400">
+                    <span>No original image</span>
+                    <CopyOrderDetailsButton
+                      address={order.address ?? undefined}
+                      units={totalUnits}
+                      enableShare
+                      onCopySuccess={() => showToast('Details copied')}
+                      onCopyError={msg => showToast(msg, 'error')}
+                      onShareError={msg => showToast(msg, 'error')}
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="min-w-0 rounded-lg border border-slate-200/90 bg-white p-4 sm:p-5">
+                <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">Payment proof</p>
                 {deliveryImageUrl ? (
                   <div className="space-y-2">
                     <div className="relative aspect-[4/3] overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
@@ -445,9 +603,9 @@ export default function OrderDetailsModal({
                   </div>
                 )}
               </div>
-            ) : null}
-          </section>
-        </div>
+            </div>
+          </div>
+        )}
       </Modal>
 
       <RejectRemarkModal

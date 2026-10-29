@@ -144,7 +144,6 @@ const PURCHASE_COLUMNS: Record<string, string> = {
   units: 'units',
   paymentMethod: 'payment_method',
   notes: 'notes',
-  convertedTotal: 'converted_total',
   aedTotal: 'aed_total',
   paymentStatus: 'payment_status',
 };
@@ -159,15 +158,12 @@ const SALE_COLUMNS: Record<string, string> = {
   transactionType: 'transaction_type',
   units: 'units',
   unitRate: 'unit_rate',
-  convertedAmount: 'converted_amount',
   aedAmount: 'aed_amount',
   bank: 'bank',
   address: 'address',
   location: 'location',
   district: 'district',
   imageUrl: 'image_url',
-  conversionRate: 'conversion_rate',
-  currency: 'currency',
   serviceCharge: 'service_charge',
   collectedUnits: 'collected_units',
   priority: 'priority',
@@ -682,8 +678,8 @@ export async function dbAddICPurchaseAction(
 
     const row = await withTransaction(async (client) => {
       const res = await client.query(
-        `INSERT INTO ic_purchases (supplier_id, location_id, warehouse_id, unit_rate, units, payment_method, notes, converted_total, aed_total)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+        `INSERT INTO ic_purchases (supplier_id, location_id, warehouse_id, unit_rate, units, payment_method, notes, aed_total)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
         [
           parsed.supplierId || null,
           parsed.locationId || null,
@@ -692,7 +688,6 @@ export async function dbAddICPurchaseAction(
           parsed.units,
           parsed.paymentMethod || null,
           parsed.notes || null,
-          parsed.convertedTotal || null,
           parsed.aedTotal || null
         ]
       );
@@ -811,9 +806,9 @@ export async function dbAddICSaleAction(
       const res = await client.query(
         `INSERT INTO ic_sales (
           customer_name, order_customer_name, order_customer_id, sub_customer_id, sub_customer_name,
-          warehouse_id, transaction_type, units, unit_rate, converted_amount, aed_amount,
-          entered_by, entered_by_name, entered_by_user_id, address, location, district, image_url, service_charge, order_status, priority, bank, conversion_rate, currency, fulfillment_handler, admin_unit_rate, admin_conversion_rate
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27) RETURNING *`,
+          warehouse_id, transaction_type, units, unit_rate, aed_amount,
+          entered_by, entered_by_name, entered_by_user_id, address, location, district, image_url, service_charge, order_status, priority, bank, fulfillment_handler
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22) RETURNING *`,
         [
           salePayload.customerName,
           salePayload.orderCustomerName || null,
@@ -824,7 +819,6 @@ export async function dbAddICSaleAction(
           salePayload.transactionType || null,
           salePayload.units,
           salePayload.unitRate,
-          salePayload.convertedAmount || null,
           salePayload.aedAmount || null,
           enteredBy,
           enteredByName,
@@ -837,11 +831,7 @@ export async function dbAddICSaleAction(
           initialOrderStatus,
           salePayload.priority || 'Normal',
           salePayload.bank || null,
-          salePayload.conversionRate ?? 1.0,
-          salePayload.currency || 'AED',
           fulfillmentHandler,
-          salePayload.adminUnitRate ?? null,
-          salePayload.adminConversionRate ?? null,
         ],
       );
       return res.rows[0];
@@ -1625,26 +1615,22 @@ export async function branchResubmitICSaleAction(
         `UPDATE ic_sales
          SET transaction_type = $1,
              units = $2,
-             converted_amount = $3,
-             aed_amount = $4,
-             address = $5,
-             location = $6,
-             district = $7,
-             image_url = $8,
-             service_charge = $9,
-             bank = $10,
-             conversion_rate = $11,
-             currency = $12,
-             order_status = $13,
+             aed_amount = $3,
+             address = $4,
+             location = $5,
+             district = $6,
+             image_url = $7,
+             service_charge = $8,
+             bank = $9,
+             order_status = $10,
              status_updated_at = CURRENT_TIMESTAMP,
-             status_updated_by = $14
+             status_updated_by = $11
              ${clearOnResubmit}
-         WHERE id = $15 AND order_status = $16
+         WHERE id = $12 AND order_status = $13
          RETURNING id`,
         [
           parsedUpdates.transactionType || null,
           parsedUpdates.units,
-          parsedUpdates.convertedAmount ?? null,
           parsedUpdates.aedAmount ?? null,
           parsedUpdates.address || null,
           parsedUpdates.location || null,
@@ -1652,8 +1638,6 @@ export async function branchResubmitICSaleAction(
           parsedUpdates.imageUrl || null,
           parsedUpdates.serviceCharge ?? 0,
           resubmitBank,
-          parsedUpdates.conversionRate ?? 1.0,
-          parsedUpdates.currency || 'AED',
           targetStatus,
           updatedBy,
           parsedId,

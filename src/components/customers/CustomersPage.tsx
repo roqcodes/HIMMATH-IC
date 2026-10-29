@@ -9,7 +9,7 @@ import { formatMoneyValue } from '@/lib/format';
 import AsicPageHeader from '@/components/asic/AsicPageHeader';
 import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
 import { ASICTableSkeleton } from '@/components/asic/ASICTableSkeleton';
-import { asicBtnPrimary, asicTable, asicTd, asicTh, asicTheadRow, asicTr } from '@/components/asic/ui';
+import { asicBtnPrimary, asicTable, asicTd, asicTh, asicThAlign, asicTheadRow, asicTr } from '@/components/asic/ui';
 import { icfInput, icfTableWrap } from '@/components/ic-funds/ui';
 import CustomerModal from './CustomerModal';
 import { useWriteAccess } from '@/context/RbacWriteContext';
@@ -76,7 +76,11 @@ export default function CustomersPage() {
   }, [branchSlug, isHqAdmin]);
 
   const handleRowClick = (customer: CustomerRow) => {
-    if (isHqAdmin || !branchSlug) {
+    if (isHqAdmin) {
+      router.push(`/admin/customers/${customer.id}`);
+      return;
+    }
+    if (!branchSlug) {
       handleEdit(customer);
       return;
     }
@@ -188,7 +192,7 @@ export default function CustomersPage() {
   };
 
   const getThClass = (align: 'left' | 'center' | 'right') =>
-    `${asicTh} cursor-pointer select-none text-${align} hover:text-slate-800`;
+    `${asicThAlign(align)} cursor-pointer select-none hover:text-slate-800`;
 
   const getStatusColor = (status: string) => {
     switch (status) {

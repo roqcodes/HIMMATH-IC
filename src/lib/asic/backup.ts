@@ -199,7 +199,7 @@ export const BACKUP_TABLES: readonly BackupTableDef[] = [
     pk: ['id'],
     columns: [
       'id', 'supplier_id', 'location_id', 'warehouse_id', 'unit_rate', 'units', 'payment_method',
-      'notes', 'converted_total', 'aed_total', 'payment_status', 'created_at',
+      'notes', 'aed_total', 'payment_status', 'created_at',
     ],
   },
   {
@@ -214,9 +214,9 @@ export const BACKUP_TABLES: readonly BackupTableDef[] = [
     columns: [
       'id', 'customer_name', 'order_customer_name', 'order_customer_id', 'sub_customer_id',
       'sub_customer_name', 'entered_by', 'entered_by_name', 'entered_by_user_id', 'warehouse_id',
-      'delivery_agent_id', 'transaction_type', 'units', 'unit_rate', 'admin_unit_rate',
-      'admin_conversion_rate', 'converted_amount', 'aed_amount', 'bank', 'address', 'location',
-      'district', 'image_url', 'conversion_rate', 'currency', 'service_charge', 'collected_units',
+      'delivery_agent_id', 'transaction_type', 'units', 'unit_rate',
+      'aed_amount', 'bank', 'address', 'location',
+      'district', 'image_url', 'service_charge', 'collected_units',
       'priority', 'payment_status', 'order_status', 'rejection_remarks', 'status_updated_at',
       'status_updated_by', 'delivery_image_url', 'derived_from_sale_id', 'fulfillment_handler',
       'version', 'idempotency_key', 'updated_at', 'created_at',

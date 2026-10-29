@@ -6,7 +6,10 @@ import {
   canAdminAccept,
   canAdminReject,
   canAdminReassignWarehouse,
+  isAdminAcceptRejectReviewStatus,
 } from '@/lib/icTransfer/orderStatus';
+import { useApp } from '@/context/AppContext';
+import { canPerformICTransferAdminActions } from '@/lib/rbac';
 import { AdminOrderStatusCard, AdminOrderWorkflowActions } from './AdminOrderWorkflowPanel';
 import { BranchOrderStatusCard, BranchOrderWorkflowActions } from './BranchOrderStatusCell';
 import { ByHandAdminNotice } from './ByHandAdminActions';
@@ -38,9 +41,15 @@ function hasAdminActions(sale: ICSale) {
 
 /** Status card + workflow actions for sale detail modals. */
 export default function SaleOrderWorkflowSection({ sale, variant, branchId, onUpdated, onResubmit }: Props) {
+  const { user } = useApp();
   const actionKey = `${sale.id}-${sale.orderStatus}-${sale.rejectionRemarks ?? ''}-${sale.fulfillmentHandler ?? 'hq_admin'}`;
   const branchHandled = isBranchHandledSale(sale);
   const needsBranchReview = variant === 'branch' && canBranchReviewCustomerOrder(sale);
+  const hideAdminStatusBadge =
+    variant === 'admin' &&
+    canPerformICTransferAdminActions(user) &&
+    !branchHandled &&
+    isAdminAcceptRejectReviewStatus(sale.orderStatus);
 
   return (
     <div
@@ -51,7 +60,7 @@ export default function SaleOrderWorkflowSection({ sale, variant, branchId, onUp
 
       <div className="flex w-full flex-col gap-3">
         {variant === 'admin' ? (
-          <AdminOrderStatusCard sale={sale} compact={false} />
+          hideAdminStatusBadge ? null : <AdminOrderStatusCard sale={sale} compact={false} />
         ) : (
           <BranchOrderStatusCard sale={sale} compact={false} />
         )}

@@ -19,7 +19,7 @@ type Props = {
 
 export default function ICTransferSuppliersPage({ portalMode = 'admin', branchId }: Props) {
   const isBranchPortal = portalMode === 'branch' && !!branchId;
-  const { icRegions, icSuppliers, addICSupplier, updateICSupplier, deleteICSupplier } = useApp();
+  const { icSuppliers, addICSupplier, updateICSupplier, deleteICSupplier } = useApp();
   const [supplierModalOpen, setSupplierModalOpen] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<ICSupplier | null>(null);
 
@@ -93,7 +93,7 @@ export default function ICTransferSuppliersPage({ portalMode = 'admin', branchId
           setEditingSupplier(null);
         }}
         title={editingSupplier ? 'Edit Supplier' : 'Add Supplier'}
-        regions={icRegions}
+        showRegion={false}
         showCommission={false}
         showRate={false}
         showPassword={false}

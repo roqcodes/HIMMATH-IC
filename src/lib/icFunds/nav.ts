@@ -33,15 +33,15 @@ export const IC_FUNDS_NAV: readonly ICFundsNavItem[] = [
 ];
 
 export const IC_FUNDS_REPORTS: ReadonlyArray<{ id: ICFundsReportId; label: string }> = [
-  { id: 'all-vouchers', label: 'All Vouchers' },
-  { id: 'cash-bank', label: 'Cash & Bank' },
-  { id: 'statement', label: 'Account Statement' },
-  { id: 'd-expenses', label: 'Direct Expenses' },
-  { id: 'receivables', label: 'Receivables & Payables' },
-  { id: 'profit-loss', label: 'Profit & Loss' },
-  { id: 'warehouse-pl', label: 'Warehouse Profit & Loss' },
-  { id: 'balance-sheet', label: 'Balance Sheet' },
-  { id: 'trial-balance', label: 'Trial Balance' },
+  { id: 'all-vouchers', label: 'Day book' },
+  { id: 'cash-bank', label: 'Cash & bank book' },
+  { id: 'statement', label: 'Account ledger' },
+  { id: 'd-expenses', label: 'Direct costs register' },
+  { id: 'receivables', label: 'Receivables & payables' },
+  { id: 'profit-loss', label: 'Profit & loss' },
+  { id: 'warehouse-pl', label: 'Warehouse gross profit' },
+  { id: 'balance-sheet', label: 'Balance sheet' },
+  { id: 'trial-balance', label: 'Trial balance' },
 ];
 
 const SECTION_IDS = new Set(IC_FUNDS_NAV.map(item => item.id));

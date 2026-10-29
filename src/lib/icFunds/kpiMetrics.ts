@@ -7,6 +7,8 @@ import type { ICFundsReportId } from '@/lib/icFunds/nav';
 import type { ICWarehousePLReport } from '@/lib/icFunds/warehouseProfit';
 import type { ICFundAccount, ICFundTrialBalanceLine } from '@/types';
 
+import type { PlStatement } from '@/lib/icFunds/reportPresentation';
+
 type ProfitLossSummary = {
   income: number;
   profit: number;
@@ -14,6 +16,39 @@ type ProfitLossSummary = {
   dExpense: number;
   net: number;
 };
+
+function computePlKpisFromStatement(statement: PlStatement, voucherCount?: number): AsicKpiMetric[] {
+  const metrics: AsicKpiMetric[] = [
+    {
+      label: 'Sales',
+      value: fmtLedgerAed(statement.salesTotal),
+      hint: 'Income plus transfers to reserve',
+      tone: statement.salesTotal > 0 ? 'emerald' : 'slate',
+    },
+    {
+      label: 'Direct costs',
+      value: fmtLedgerAed(statement.directCostsTotal),
+      hint: 'Purchase & direct deal costs',
+      tone: statement.directCostsTotal > 0 ? 'red' : 'slate',
+    },
+    {
+      label: 'Gross result',
+      value: fmtLedgerAed(statement.grossResult),
+      hint: 'Sales less direct costs',
+      tone: statement.grossResult >= 0 ? 'emerald' : 'red',
+    },
+    {
+      label: 'Net result',
+      value: fmtLedgerAed(statement.netForPeriod),
+      hint:
+        voucherCount != null
+          ? `${voucherCount} P&L ${voucherCount === 1 ? 'voucher' : 'vouchers'} in period`
+          : 'After operating expenses',
+      tone: statement.netForPeriod >= 0 ? 'emerald' : 'red',
+    },
+  ];
+  return metrics;
+}
 
 type BalanceSheetSummary = {
   bank: number;
@@ -24,6 +59,7 @@ type BalanceSheetSummary = {
   totalAssets: number;
   totalLiabilitiesEquity: number;
   balanced: boolean;
+  outOfBalance?: number;
 };
 
 function sumAbsPending(accounts: ICFundAccount[]): { total: number; count: number } {
@@ -89,7 +125,11 @@ const VOUCHER_TOTAL_LABELS: Record<
   },
 };
 
-export function computeAccountsKpis(accounts: ICFundAccount[], _hqMode?: boolean): AsicKpiMetric[] {
+export function computeAccountsKpis(
+  accounts: ICFundAccount[],
+  _hqMode?: boolean,
+  entityLedger = false,
+): AsicKpiMetric[] {
   const active = accounts.filter(a => a.status === 'active');
   const inactive = accounts.length - active.length;
   const bankAccounts = accounts.filter(a => a.accountType === 'bank');
@@ -101,24 +141,32 @@ export function computeAccountsKpis(accounts: ICFundAccount[], _hqMode?: boolean
   const payables = payableRows.reduce((sum, a) => sum + Math.abs(a.balance), 0);
   const pending = sumAbsPending(accounts);
 
-  return [
+  const metrics: AsicKpiMetric[] = [
     {
       label: 'Cash & bank',
       value: fmtLedgerAed(cashBank),
       hint: `${bankAccounts.length} tills & wallets`,
       tone: cashBank < 0 ? 'red' : 'emerald',
     },
-    {
-      label: 'Receivables',
-      value: fmtLedgerAed(receivables),
-      hint: `${receivableRows.length} customers owe us`,
-    },
-    {
-      label: 'Payables',
-      value: fmtLedgerAed(payables),
-      hint: `${payableRows.length} balances we owe`,
-      tone: payables > 0 ? 'amber' : 'slate',
-    },
+  ];
+
+  if (!entityLedger) {
+    metrics.push(
+      {
+        label: 'Receivables',
+        value: fmtLedgerAed(receivables),
+        hint: `${receivableRows.length} customers owe us`,
+      },
+      {
+        label: 'Payables',
+        value: fmtLedgerAed(payables),
+        hint: `${payableRows.length} balances we owe`,
+        tone: payables > 0 ? 'amber' : 'slate',
+      },
+    );
+  }
+
+  metrics.push(
     pending.count > 0
       ? {
           label: 'Pending approval',
@@ -127,12 +175,18 @@ export function computeAccountsKpis(accounts: ICFundAccount[], _hqMode?: boolean
           tone: 'amber',
         }
       : {
-          label: 'Active accounts',
+          label: entityLedger ? 'Active entities' : 'Active accounts',
           value: active.length.toLocaleString(),
-          hint: inactive > 0 ? `${inactive} inactive` : 'All accounts active',
+          hint: inactive > 0
+            ? `${inactive} inactive`
+            : entityLedger
+              ? 'All entities active'
+              : 'All accounts active',
           tone: 'slate',
         },
-  ];
+  );
+
+  return metrics;
 }
 
 export function computeVoucherKpis(
@@ -215,6 +269,7 @@ export function computePlKpis(summary: ProfitLossSummary, voucherCount?: number)
 export function computeBooksKpis(input: {
   reportView: ICFundsReportId;
   profitLoss?: ProfitLossSummary;
+  plStatement?: PlStatement;
   balanceSheet?: BalanceSheetSummary;
   trialBalance?: ICFundTrialBalanceLine[];
   vouchers?: ICFundVoucher[];
@@ -227,6 +282,7 @@ export function computeBooksKpis(input: {
   const {
     reportView,
     profitLoss,
+    plStatement,
     balanceSheet,
     trialBalance = [],
     vouchers = [],
@@ -237,11 +293,16 @@ export function computeBooksKpis(input: {
     statement,
   } = input;
 
+  if (reportView === 'profit-loss' && plStatement) {
+    return computePlKpisFromStatement(plStatement, vouchers.length);
+  }
+
   if (reportView === 'profit-loss' && profitLoss) {
     return computePlKpis(profitLoss, vouchers.length);
   }
 
   if (reportView === 'balance-sheet' && balanceSheet) {
+    const ob = balanceSheet.outOfBalance ?? 0;
     return [
       {
         label: 'Total assets',
@@ -252,20 +313,20 @@ export function computeBooksKpis(input: {
       {
         label: 'Liabilities',
         value: fmtLedgerAed(balanceSheet.payables),
-        hint: 'Outstanding payables',
+        hint: 'Trade payables',
         tone: balanceSheet.payables > 0 ? 'amber' : 'slate',
       },
       {
         label: 'Equity',
-        value: fmtLedgerAed(balanceSheet.equity),
-        hint: `Reserve + accumulated P&L`,
+        value: fmtLedgerAed(balanceSheet.totalLiabilitiesEquity - balanceSheet.payables),
+        hint: 'Reserve + current period',
         tone: 'indigo',
       },
       {
-        label: 'Balanced',
-        value: balanceSheet.balanced ? 'Yes' : 'No',
+        label: balanceSheet.balanced ? 'Balanced' : 'Out of balance',
+        value: balanceSheet.balanced ? 'Yes' : fmtLedgerAed(Math.abs(ob)),
         hint: balanceSheet.balanced
-          ? 'Assets equal liabilities + equity'
+          ? 'Assets = liabilities + equity'
           : 'Review opening balances or journals',
         tone: balanceSheet.balanced ? 'emerald' : 'red',
       },
@@ -273,8 +334,8 @@ export function computeBooksKpis(input: {
   }
 
   if (reportView === 'trial-balance') {
-    const debit = trialBalance.reduce((sum, line) => sum + line.debit, 0);
-    const credit = trialBalance.reduce((sum, line) => sum + line.credit, 0);
+    const debit = trialBalance.reduce((sum, line) => sum + (line.closingDebit ?? line.debit), 0);
+    const credit = trialBalance.reduce((sum, line) => sum + (line.closingCredit ?? line.credit), 0);
     const pendingDr = trialBalance.reduce((sum, line) => sum + (line.pendingDebit ?? 0), 0);
     const pendingCr = trialBalance.reduce((sum, line) => sum + (line.pendingCredit ?? 0), 0);
     const diff = Math.abs(debit - credit);

@@ -8,6 +8,7 @@ import {
   ICSubCustomer,
   ICWarehouseTransaction,
 } from '@/types';
+import { getSaleInrAmount } from '@/lib/icTransfer/saleUnits';
 
 export function mapICRegionRow(row: any): ICRegion {
   return {
@@ -67,16 +68,17 @@ export function mapICRateGroupRow(row: any): ICRateGroup {
 }
 
 export function mapICPurchaseRow(row: any): ICPurchase {
+  const units = parseFloat(row.units);
   return {
     id: row.id,
     supplierId: row.supplier_id,
     locationId: row.location_id,
     warehouseId: row.warehouse_id,
     unitRate: parseFloat(row.unit_rate),
-    units: parseFloat(row.units),
+    units,
     paymentMethod: row.payment_method,
     notes: row.notes,
-    convertedTotal: row.converted_total ? parseFloat(row.converted_total) : undefined,
+    convertedTotal: getSaleInrAmount(units),
     aedTotal: row.aed_total ? parseFloat(row.aed_total) : undefined,
     paymentStatus: row.payment_status || 'pending',
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : undefined,

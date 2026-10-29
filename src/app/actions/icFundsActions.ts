@@ -19,9 +19,20 @@ import {
   accountMovementJoinSql,
   accountPendingBalanceSql,
   accountPendingMovementJoinSql,
-  trialBalanceSplit,
   VOUCHER_LEDGER_STATUS_SQL,
 } from '@/lib/icFunds/accountBalance';
+import {
+  accountPeriodBalanceSelectSql,
+  mapRowToPeriodLedger,
+  toTrialBalanceRow,
+  type AccountPeriodLedger,
+} from '@/lib/icFunds/accountPeriodBalance';
+import {
+  buildBalanceSheetPresentation,
+  buildPlStatement,
+  type BalanceSheetPresentation,
+  type PlStatement,
+} from '@/lib/icFunds/reportPresentation';
 import {
   purchaseAedTotal,
   remainingStockWac,
@@ -180,6 +191,7 @@ function accountBalanceSelectSql(opts?: {
     ${movementJoin}
     ${pendingJoin}
     LEFT JOIN customers c ON c.id = a.customer_id
+    LEFT JOIN profiles p ON p.id = c.auth_user_id
     LEFT JOIN branches b ON b.id = a.branch_id`;
 }
 
@@ -196,6 +208,74 @@ async function fetchAccountsWithBalances(
   const params = asOfDate ? [branchId, asOfDate] : [branchId];
   const res = await query(sql, params);
   return res.rows.map(r => mapAccount(r as Record<string, unknown>));
+}
+
+async function fetchAccountPeriodLedgers(
+  branchId: string,
+  startDate?: string | null,
+  endDate?: string | null,
+): Promise<AccountPeriodLedger[]> {
+  const branchParam = '$1';
+  let startParam: string | null = null;
+  let endParam: string | null = null;
+  const params: unknown[] = [branchId];
+  if (startDate) {
+    params.push(startDate);
+    startParam = '$2';
+  }
+  if (endDate) {
+    params.push(endDate);
+    endParam = startDate ? '$3' : '$2';
+  }
+
+  const pendingJoinOpts = endParam
+    ? { asOfParam: endParam, branchParam: branchParam }
+    : { branchParam: branchParam };
+
+  const pendingJoin = accountPendingMovementJoinSql(pendingJoinOpts);
+  const periodCols = accountPeriodBalanceSelectSql({ branchParam, startParam, endParam });
+
+  const res = await query(
+    `SELECT a.id, a.name, a.account_type, ${periodCols},
+      ${accountPendingBalanceSql()} AS pending_balance
+     FROM ic_fund_accounts a
+     ${pendingJoin}
+     WHERE a.branch_id = $1
+     ORDER BY a.account_type, LOWER(a.name)`,
+    params,
+  );
+  return res.rows.map(r => mapRowToPeriodLedger(r as Record<string, unknown>));
+}
+
+async function listICFundVouchersForReport(params: {
+  branchId: string;
+  startDate?: string;
+  endDate?: string;
+}): Promise<{ vouchers: ICFundVoucher[]; truncated: boolean }> {
+  const pageSize = VOUCHER_REPORT_MAX;
+  const maxRows = 50_000;
+  let offset = 0;
+  const all: ICFundVoucher[] = [];
+  let truncated = false;
+
+  for (;;) {
+    const batch = await listICFundVouchersAction({
+      branchId: params.branchId,
+      startDate: params.startDate,
+      endDate: params.endDate,
+      limit: pageSize,
+      offset,
+    });
+    all.push(...batch);
+    if (batch.length < pageSize) break;
+    offset += pageSize;
+    if (all.length >= maxRows) {
+      truncated = true;
+      break;
+    }
+  }
+
+  return { vouchers: all, truncated };
 }
 
 type ProfitLossTotals = {
@@ -1271,13 +1351,17 @@ export async function getICFundAccountDetailAction(params: {
 export async function getICFundReportBundleAction(params: unknown): Promise<
   ActionResult<{
     accounts: ICFundAccount[];
+    accountLedgers: AccountPeriodLedger[];
     cashBank: ICFundAccount[];
     allVouchers: ICFundVoucher[];
+    dayBookTruncated: boolean;
     dExpenses: ICFundVoucher[];
     receivables: ICFundAccount[];
     payables: ICFundAccount[];
     trialBalance: ICFundTrialBalanceLine[];
     asOfDate: string | null;
+    startDate: string | null;
+    endDate: string | null;
     profitLoss: {
       income: number;
       profit: number;
@@ -1285,6 +1369,7 @@ export async function getICFundReportBundleAction(params: unknown): Promise<
       dExpense: number;
       net: number;
     };
+    plStatement: PlStatement;
     balanceSheet: {
       bank: number;
       receivables: number;
@@ -1294,7 +1379,9 @@ export async function getICFundReportBundleAction(params: unknown): Promise<
       totalAssets: number;
       totalLiabilitiesEquity: number;
       balanced: boolean;
+      outOfBalance: number;
     };
+    balanceSheetDetail: BalanceSheetPresentation;
   }>
 > {
   const parsed = icFundsDateRangeSchema.safeParse(params);
@@ -1305,25 +1392,47 @@ export async function getICFundReportBundleAction(params: unknown): Promise<
 
   try {
     const asOfDate = parsed.data.endDate ?? null;
-    const accounts = await fetchAccountsWithBalances(parsed.data.branchId, asOfDate);
-    const periodVouchers = await listICFundVouchersAction({
-      branchId: parsed.data.branchId,
-      voucherType: undefined,
-      startDate: parsed.data.startDate,
-      endDate: parsed.data.endDate,
-      limit: VOUCHER_REPORT_MAX,
-      offset: 0,
+    const startDate = parsed.data.startDate ?? null;
+    const endDate = parsed.data.endDate ?? null;
+
+    const accountLedgers = await fetchAccountPeriodLedgers(
+      parsed.data.branchId,
+      startDate,
+      endDate,
+    );
+
+    const fullAccounts = await fetchAccountsWithBalances(parsed.data.branchId, asOfDate);
+    const ledgerById = new Map(accountLedgers.map(l => [l.accountId, l]));
+    const accounts: ICFundAccount[] = fullAccounts.map(a => {
+      const ledger = ledgerById.get(a.id);
+      if (!ledger) return a;
+      return {
+        ...a,
+        balance: ledger.closing,
+        pendingBalance: ledger.pendingBalance,
+      };
     });
+
+    const { vouchers: periodVouchers, truncated: dayBookTruncated } =
+      await listICFundVouchersForReport({
+        branchId: parsed.data.branchId,
+        startDate: parsed.data.startDate,
+        endDate: parsed.data.endDate,
+      });
+
     const periodPL = await queryProfitLossTotals(parsed.data.branchId, {
       startDate: parsed.data.startDate,
       endDate: parsed.data.endDate,
     });
-    const cumulativePL = asOfDate
-      ? await queryProfitLossTotals(parsed.data.branchId, { endDate: asOfDate })
-      : null;
 
-    const { income, profit, expense, dExpense } = periodPL;
-    const accumulatedTotals = cumulativePL ?? periodPL;
+    const plStatement = buildPlStatement(accountLedgers, periodVouchers, periodPL);
+    const balanceSheetDetail = buildBalanceSheetPresentation(
+      accountLedgers,
+      plStatement.netForPeriod,
+    );
+    const accumulatedTotals = asOfDate
+      ? await queryProfitLossTotals(parsed.data.branchId, { endDate: asOfDate })
+      : periodPL;
     const accumulatedPL =
       accumulatedTotals.income - accumulatedTotals.expense - accumulatedTotals.dExpense;
 
@@ -1332,43 +1441,54 @@ export async function getICFundReportBundleAction(params: unknown): Promise<
     const receivables = personal.filter(a => a.balance > 0 || (a.pendingBalance ?? 0) > 0);
     const payables = personal.filter(a => a.balance < 0 || (a.pendingBalance ?? 0) < 0);
 
-    const bankTotal = cashBank.reduce((s, a) => s + a.balance, 0);
-    const ar = receivables.reduce((s, a) => s + a.balance, 0);
-    const ap = payables.reduce((s, a) => s + Math.abs(a.balance), 0);
-    const profitReserve = accounts
+    const bankTotal = balanceSheetDetail.assets
+      .filter(l => l.accountId && cashBank.some(c => c.id === l.accountId))
+      .reduce((s, l) => s + l.amount, 0);
+    const ar = receivables.reduce((s, a) => s + Math.max(0, a.balance), 0);
+    const ap = payables.reduce((s, a) => s + Math.abs(Math.min(0, a.balance)), 0);
+    const profitReserve = accountLedgers
       .filter(a => a.accountType === 'profit')
-      .reduce((s, a) => s + -a.balance, 0);
-    const equity = profitReserve + accumulatedPL;
-    const totalAssets = bankTotal + ar;
-    const totalLiabilitiesEquity = ap + equity;
+      .reduce((s, a) => s + -a.closing, 0);
 
-    const trialBalance: ICFundTrialBalanceLine[] = accounts
-      .filter(a => a.balance !== 0 || (a.pendingBalance ?? 0) !== 0)
+    const trialBalance: ICFundTrialBalanceLine[] = accountLedgers
+      .filter(a => a.closing !== 0 || a.opening !== 0 || a.periodDebit !== 0 || a.periodCredit !== 0 || Math.abs(a.pendingBalance) > 0.005)
       .map(a => {
-        const split = trialBalanceSplit(a.balance);
-        const pendingSplit = trialBalanceSplit(a.pendingBalance ?? 0);
+        const row = toTrialBalanceRow(a);
         return {
-          accountId: a.id,
-          accountName: a.name,
-          accountType: a.accountType,
-          debit: Number(split.debit.toFixed(2)),
-          credit: Number(split.credit.toFixed(2)),
-          pendingDebit: Number(pendingSplit.debit.toFixed(2)),
-          pendingCredit: Number(pendingSplit.credit.toFixed(2)),
+          accountId: row.accountId,
+          accountName: row.accountName,
+          accountType: row.accountType,
+          debit: row.debit,
+          credit: row.credit,
+          pendingDebit: row.pendingDebit,
+          pendingCredit: row.pendingCredit,
+          openingDebit: row.openingDebit,
+          openingCredit: row.openingCredit,
+          periodDebit: row.periodDebit,
+          periodCredit: row.periodCredit,
+          closingDebit: row.closingDebit,
+          closingCredit: row.closingCredit,
         };
       })
-      .sort((a, b) => a.accountType.localeCompare(b.accountType) || a.accountName.localeCompare(b.accountName));
+      .sort(
+        (a, b) =>
+          a.accountType.localeCompare(b.accountType) || a.accountName.localeCompare(b.accountName),
+      );
 
-    const trialDebit = trialBalance.reduce((s, l) => s + l.debit, 0);
-    const trialCredit = trialBalance.reduce((s, l) => s + l.credit, 0);
-    const balanced = Math.abs(trialDebit - trialCredit) < 0.01;
+    const trialDebit = trialBalance.reduce((s, l) => s + (l.closingDebit ?? l.debit), 0);
+    const trialCredit = trialBalance.reduce((s, l) => s + (l.closingCredit ?? l.credit), 0);
+    const tbBalanced = Math.abs(trialDebit - trialCredit) < 0.01;
+
+    const { income, profit, expense, dExpense } = periodPL;
 
     return {
       success: true,
       data: {
         accounts,
+        accountLedgers,
         cashBank,
         allVouchers: periodVouchers,
+        dayBookTruncated,
         dExpenses: periodVouchers.filter(
           v => v.debitAccountType === 'd_expense' || v.creditAccountType === 'd_expense',
         ),
@@ -1376,6 +1496,8 @@ export async function getICFundReportBundleAction(params: unknown): Promise<
         payables,
         trialBalance,
         asOfDate,
+        startDate,
+        endDate,
         profitLoss: {
           income: Number(income.toFixed(2)),
           profit: Number(profit.toFixed(2)),
@@ -1383,16 +1505,19 @@ export async function getICFundReportBundleAction(params: unknown): Promise<
           dExpense: Number(dExpense.toFixed(2)),
           net: Number((income + profit - expense - dExpense).toFixed(2)),
         },
+        plStatement,
         balanceSheet: {
           bank: Number(bankTotal.toFixed(2)),
           receivables: Number(ar.toFixed(2)),
           payables: Number(ap.toFixed(2)),
           equity: Number(profitReserve.toFixed(2)),
           accumulatedPL: Number(accumulatedPL.toFixed(2)),
-          totalAssets: Number(totalAssets.toFixed(2)),
-          totalLiabilitiesEquity: Number(totalLiabilitiesEquity.toFixed(2)),
-          balanced,
+          totalAssets: balanceSheetDetail.totalAssets,
+          totalLiabilitiesEquity: balanceSheetDetail.totalLiabilitiesEquity,
+          balanced: balanceSheetDetail.balanced && tbBalanced,
+          outOfBalance: balanceSheetDetail.outOfBalance,
         },
+        balanceSheetDetail,
       },
     };
   } catch (err) {

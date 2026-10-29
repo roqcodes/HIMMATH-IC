@@ -8,11 +8,10 @@ import { isBranchHandledSale } from '@/lib/icTransfer/fulfillmentHandler';
 import { canAdminAccept, getAdminRowAccentClass } from '@/lib/icTransfer/orderStatus';
 import { highPriorityRowClass } from '@/lib/icTransfer/orderPriority';
 import { getDeliveredUnits, getRemainingUnits } from '@/lib/icTransfer/saleUnits';
-import { AdminOrderStatusCard, AdminOrderWorkflowActions } from '../shared/AdminOrderWorkflowPanel';
-import FulfillmentHandlerControl, { FulfillmentHandlerBadge } from '../shared/FulfillmentHandlerControl';
-import SalePriorityControl from '../shared/SalePriorityControl';
+import { AdminOrderStatusCell } from '../shared/AdminOrderWorkflowPanel';
 import AsicTabBar from '@/components/asic/AsicTabBar';
 import { SortIcon } from '@/components/ic-transfer/sales/sales-icons';
+import { fmtLedgerAed } from '@/lib/icFunds/format';
 
 export type SalesTab = 'needs_action' | 'all' | 'awaiting_verification';
 
@@ -20,13 +19,11 @@ type ColumnId =
   | 'select'
   | 'date'
   | 'customer'
-  | 'handling'
   | 'units'
   | 'totalAed'
   | 'delivered'
   | 'remaining'
   | 'warehouse'
-  | 'priority'
   | 'status'
   | 'actions';
 
@@ -35,19 +32,15 @@ type ColumnVisibility = Record<Exclude<ColumnId, 'select' | 'actions'>, boolean>
 const DEFAULT_VISIBILITY: ColumnVisibility = {
   date: true,
   customer: true,
-  handling: true,
   units: true,
   totalAed: true,
   delivered: true,
   remaining: true,
   warehouse: true,
-  priority: true,
   status: true,
 };
 
 const HIDEABLE_COLUMNS: { id: keyof ColumnVisibility; label: string }[] = [
-  { id: 'handling', label: 'Handling' },
-  { id: 'priority', label: 'Priority' },
   { id: 'delivered', label: 'Delivered' },
   { id: 'remaining', label: 'Remaining' },
 ];
@@ -265,7 +258,7 @@ export default function SalesDataTable(props: SalesDataTableProps) {
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
-        <table className="w-full min-w-[960px] border-collapse text-left text-sm">
+        <table className="w-full min-w-[820px] border-collapse text-left text-sm">
           <thead className="sticky top-0 z-10">
             <tr className="border-b border-slate-200 bg-slate-50/80">
               {isVerificationTab && (
@@ -288,9 +281,6 @@ export default function SalesDataTable(props: SalesDataTableProps) {
                 <th className="px-2.5 py-2">
                   <SortHeader label="Customer" field="Customer" sortField={sortField} sortOrder={sortOrder} onSort={onSort} />
                 </th>
-              )}
-              {columnVisibility.handling && (
-                <th className="px-2.5 py-2 text-[11px] font-medium uppercase tracking-wide text-slate-500">Handling</th>
               )}
               {columnVisibility.units && (
                 <th className="px-2.5 py-2">
@@ -315,11 +305,6 @@ export default function SalesDataTable(props: SalesDataTableProps) {
               {columnVisibility.warehouse && (
                 <th className="px-2.5 py-2">
                   <SortHeader label="Warehouse" field="Warehouse" sortField={sortField} sortOrder={sortOrder} onSort={onSort} />
-                </th>
-              )}
-              {columnVisibility.priority && (
-                <th className="px-2.5 py-2">
-                  <SortHeader label="Priority" field="Priority" sortField={sortField} sortOrder={sortOrder} onSort={onSort} align="center" />
                 </th>
               )}
               {columnVisibility.status && (
@@ -439,7 +424,6 @@ function SaleRow({
           <div className="min-w-[120px]">
             <span className="text-sm font-medium text-slate-900">{customerLabel}</span>
             <div className="mt-0.5 flex flex-wrap items-center gap-1">
-              <FulfillmentHandlerBadge sale={s} />
               {s.transactionType === 'by_hand' && <OutlineBadge tone="violet">By Hand</OutlineBadge>}
               {s.derivedFromSaleId && (
                 <OutlineBadge tone="indigo">
@@ -450,11 +434,6 @@ function SaleRow({
           </div>
         </td>
       )}
-      {columnVisibility.handling && (
-        <td className="px-2.5 py-2.5" onClick={e => e.stopPropagation()}>
-          <FulfillmentHandlerControl sale={s} />
-        </td>
-      )}
       {columnVisibility.units && (
         <td className="px-2.5 py-2.5 text-right">
           <span className="font-mono text-sm text-slate-700">{s.units.toLocaleString()}</span>
@@ -463,7 +442,7 @@ function SaleRow({
       {columnVisibility.totalAed && (
         <td className="px-2.5 py-2.5 text-right">
           <span className="font-mono text-sm font-medium text-slate-900">
-            {(s.aedAmount || 0).toLocaleString()}
+            {fmtLedgerAed(s.aedAmount || 0)}
           </span>
         </td>
       )}
@@ -484,23 +463,13 @@ function SaleRow({
           <WarehouseCell sale={s} getWarehouseName={getWarehouseName} onEdit={onEdit} />
         </td>
       )}
-      {columnVisibility.priority && (
-        <td className="px-2.5 py-2.5 text-center" onClick={e => e.stopPropagation()}>
-          {branchHandled ? (
-            <span className="text-xs text-slate-500">{s.priority || 'Normal'}</span>
-          ) : (
-            <SalePriorityControl saleId={s.id} priority={s.priority} compact />
-          )}
-        </td>
-      )}
       {columnVisibility.status && (
-        <td className="px-2.5 py-2.5 text-center" onClick={e => e.stopPropagation()}>
-          <AdminOrderStatusCard sale={s} />
+        <td className="px-2.5 py-2.5 text-center">
+          <AdminOrderStatusCell sale={s} />
         </td>
       )}
       <td className="px-2.5 py-2.5" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-end gap-0.5">
-          {!branchHandled && <AdminOrderWorkflowActions sale={s} />}
           <RowIconButton title="View" onClick={() => onView(s)}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />

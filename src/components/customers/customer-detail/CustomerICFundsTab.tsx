@@ -16,10 +16,10 @@ import {
   statementCsvFilename,
 } from '@/lib/icFunds/customerStatementView';
 import { IC_FUNDS_BASE_CURRENCY } from '@/lib/icFunds/currencyPolicy';
-import { fmtICAmount, fmtICDate } from '@/lib/icFunds/format';
+import { fmtICDate, fmtLedgerAed, icfLedgerColumnLabel } from '@/lib/icFunds/format';
 import { icFundsReportPath } from '@/lib/icFunds/nav';
 import StatementParticularsCell from '@/components/ic-funds/StatementParticularsCell';
-import { asicBtnPrimary, asicCard, asicTable, asicTd, asicTh, asicTheadRow, asicTr, asicTableWrap } from '@/components/asic/ui';
+import { asicBtnPrimary, asicCard, asicTable, asicTd, asicTh, asicThAlign, asicTheadRow, asicTr, asicTableWrap } from '@/components/asic/ui';
 import { btnGhost, btnSecondary } from '@/lib/ui';
 import type { Customer, ICFundAccount, ICFundStatementLine } from '@/types';
 import { ASICTableSkeleton } from '@/components/asic/ASICTableSkeleton';
@@ -38,7 +38,7 @@ function AmountCell({ n, danger }: { n: number; danger?: boolean }) {
     <td
       className={`${asicTd} text-right font-mono tabular-nums ${danger || n < 0 ? 'text-red-600 dark:text-red-400' : ''}`}
     >
-      {n === 0 ? '—' : fmtICAmount(n)}
+      {n === 0 ? '—' : fmtLedgerAed(n)}
     </td>
   );
 }
@@ -188,10 +188,10 @@ export default function CustomerICFundsTab({
         : 'Settled';
   const pendingHint =
     account.pendingBalance && account.pendingBalance !== 0
-      ? `${fmtICAmount(account.pendingBalance)} pending`
+      ? `${fmtLedgerAed(account.pendingBalance)} pending`
       : ledgerHint;
   const statementClosing =
-    statementView != null ? fmtICAmount(statementView.closing) : '—';
+    statementView != null ? fmtLedgerAed(statementView.closing) : '—';
 
   return (
     <div className="space-y-3">
@@ -199,10 +199,10 @@ export default function CustomerICFundsTab({
         <div className="grid grid-cols-2 divide-x divide-y divide-[var(--theme-border-subtle)] sm:grid-cols-4">
           <SummaryMetric
             label="Ledger balance"
-            value={fmtICAmount(account.balance)}
+            value={fmtLedgerAed(account.balance)}
             hint={pendingHint}
           />
-          <SummaryMetric label="Opening" value={fmtICAmount(account.openingBalance)} />
+          <SummaryMetric label="Opening" value={fmtLedgerAed(account.openingBalance)} />
           <SummaryMetric
             label="Statement"
             value={statementClosing}
@@ -261,9 +261,9 @@ export default function CustomerICFundsTab({
                 <th className={asicTh}>#</th>
                 <th className={asicTh}>Type</th>
                 <th className={asicTh}>Particulars</th>
-                <th className={`${asicTh} text-right`}>Debit</th>
-                <th className={`${asicTh} text-right`}>Credit</th>
-                <th className={`${asicTh} text-right`}>Balance</th>
+                <th className={asicThAlign('right')}>{icfLedgerColumnLabel.debit}</th>
+                <th className={asicThAlign('right')}>{icfLedgerColumnLabel.credit}</th>
+                <th className={asicThAlign('right')}>{icfLedgerColumnLabel.balance}</th>
                 <th className={asicTh}>User</th>
                 <th className={asicTh}>Remark</th>
               </tr>
@@ -297,7 +297,7 @@ export default function CustomerICFundsTab({
                   <AmountCell n={line.debit} />
                   <AmountCell n={line.credit} danger />
                   <td className={`${asicTd} text-right font-mono tabular-nums`}>
-                    {fmtICAmount(line.balance)}
+                    {fmtLedgerAed(line.balance)}
                   </td>
                   <td className={asicTd}>
                     <VoucherUserCell
@@ -317,13 +317,13 @@ export default function CustomerICFundsTab({
               <tr className="border-t border-[var(--theme-border)] bg-slate-50/80 font-medium dark:bg-[var(--theme-surface-muted)]">
                 <td className={asicTd} colSpan={4}>Totals</td>
                 <td className={`${asicTd} text-right font-mono tabular-nums`}>
-                  {fmtICAmount(totalDr)}
+                  {fmtLedgerAed(totalDr)}
                 </td>
                 <td className={`${asicTd} text-right font-mono tabular-nums text-red-600 dark:text-red-400`}>
-                  {fmtICAmount(totalCr)}
+                  {fmtLedgerAed(totalCr)}
                 </td>
                 <td className={`${asicTd} text-right font-mono tabular-nums`}>
-                  {statementView ? fmtICAmount(statementView.closing) : '—'}
+                  {statementView ? fmtLedgerAed(statementView.closing) : '—'}
                 </td>
                 <td className={asicTd} colSpan={2} />
               </tr>

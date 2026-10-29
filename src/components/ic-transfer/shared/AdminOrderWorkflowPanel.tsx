@@ -19,6 +19,7 @@ import {
   canAdminVerifyDelivery,
   getAdminStatusLabel,
   getAdminStatusStyle,
+  isAdminAcceptRejectReviewStatus,
   normalizeOrderStatus,
 } from '@/lib/icTransfer/orderStatus';
 import { canAdminResolveBranchCancellation, canAdminResolveCustomerCancellation } from '@/lib/icTransfer/orderWorkflowRules';
@@ -40,7 +41,8 @@ import { isByHandSale } from '@/lib/icTransfer/byHand';
 import { isBranchHandledSale } from '@/lib/icTransfer/fulfillmentHandler';
 import { canPerformICTransferAdminActions } from '@/lib/rbac';
 import { filterWarehousesForAssignableUser } from '@/lib/icTransfer/branchPortalScope';
-import { btnPrimary, btnSecondary, formSelect } from '@/lib/ui';
+import WarehouseAssignPicker, { initialWarehouseSelection } from './WarehouseAssignPicker';
+import { btnPrimary, btnSecondary } from '@/lib/ui';
 
 type SharedProps = {
   sale: ICSale;
@@ -79,14 +81,16 @@ export function AdminOrderStatusCard({
   );
 }
 
-/** Workflow action buttons + modals for the Actions column or detail panels. */
+/** Workflow action buttons + modals for the Status column or detail panels. */
 export function AdminOrderWorkflowActions({ sale, onUpdated, compact = true }: SharedProps & { compact?: boolean }) {
-  const { icWarehouses, showToast, refetchData, currentSlug, user } = useApp();
+  const { icWarehouses, icRegions, showToast, refetchData, currentSlug, user } = useApp();
   const branchSlug = currentSlug !== 'superadmin' ? currentSlug : undefined;
   const assignableWarehouses = useMemo(
     () => filterWarehousesForAssignableUser(icWarehouses, user),
     [icWarehouses, user],
   );
+  const regionNameById = useMemo(() => new Map(icRegions.map(r => [r.id, r.name])), [icRegions]);
+  const getRegionLabel = (regionId?: string) => (regionId ? regionNameById.get(regionId) : undefined);
   const [acceptOpen, setAcceptOpen] = useState(false);
   const [reassignOpen, setReassignOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -210,7 +214,11 @@ export function AdminOrderWorkflowActions({ sale, onUpdated, compact = true }: S
             variant="success"
             icon={<IconCheck />}
             size={compact ? 'sm' : 'md'}
-            onClick={e => { e.stopPropagation(); setWarehouseId(''); setAcceptOpen(true); }}
+            onClick={e => {
+              e.stopPropagation();
+              setWarehouseId(initialWarehouseSelection(assignableWarehouses));
+              setAcceptOpen(true);
+            }}
           >
             Accept
           </WorkflowActionButton>
@@ -220,7 +228,11 @@ export function AdminOrderWorkflowActions({ sale, onUpdated, compact = true }: S
             variant="secondary"
             icon={<IconRefresh />}
             size={compact ? 'sm' : 'md'}
-            onClick={e => { e.stopPropagation(); setWarehouseId(''); setReassignOpen(true); }}
+            onClick={e => {
+              e.stopPropagation();
+              setWarehouseId(initialWarehouseSelection(assignableWarehouses, sale.warehouseId));
+              setReassignOpen(true);
+            }}
           >
             Reassign WH
           </WorkflowActionButton>
@@ -278,38 +290,44 @@ export function AdminOrderWorkflowActions({ sale, onUpdated, compact = true }: S
         open={acceptOpen}
         onClose={() => setAcceptOpen(false)}
         title="Accept Order & Assign Warehouse"
-        maxWidth="max-w-sm"
+        maxWidth="max-w-md"
         footer={
           <div className="flex w-full justify-end gap-3">
             <button type="button" className={btnSecondary} onClick={() => setAcceptOpen(false)} disabled={loading}>Cancel</button>
-            <button type="submit" form="accept-order-form" className={btnPrimary} disabled={loading}>
+            <button
+              type="submit"
+              form="accept-order-form"
+              className={btnPrimary}
+              disabled={loading || (assignableWarehouses.length > 0 && !warehouseId)}
+            >
               {loading ? 'Processing...' : 'Accept Order'}
             </button>
           </div>
         }
       >
         <form id="accept-order-form" onSubmit={handleAccept} className="space-y-4">
-          {isByHandSale(sale) ? (
-            <ByHandAdminNotice sale={sale} />
-          ) : (
-            <p className="text-sm text-slate-600">Select a warehouse to process this order.</p>
-          )}
+          {isByHandSale(sale) ? <ByHandAdminNotice sale={sale} /> : null}
           {assignableWarehouses.length === 0 ? (
             <p className="text-sm text-amber-700">
               No warehouses configured for your scope. Add one from IC Transfer → Warehouse.
             </p>
           ) : (
-            <select
-              value={warehouseId}
-              onChange={e => setWarehouseId(e.target.value)}
-              className={formSelect}
-              required
-            >
-              <option value="">Select warehouse...</option>
-              {assignableWarehouses.map(w => (
-                <option key={w.id} value={w.id}>{w.name}</option>
-              ))}
-            </select>
+            <fieldset className="min-w-0 space-y-2">
+              <legend className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-[var(--theme-text-muted)]">
+                Warehouse
+              </legend>
+              <p className="-mt-1 mb-2 text-sm text-slate-600 dark:text-[var(--theme-text-secondary)]">
+                Choose a warehouse to fulfill this order.
+              </p>
+              <WarehouseAssignPicker
+                name="accept-order-warehouse"
+                warehouses={assignableWarehouses}
+                value={warehouseId}
+                onChange={setWarehouseId}
+                getRegionLabel={getRegionLabel}
+                disabled={loading}
+              />
+            </fieldset>
           )}
         </form>
       </Modal>
@@ -318,11 +336,16 @@ export function AdminOrderWorkflowActions({ sale, onUpdated, compact = true }: S
         open={reassignOpen}
         onClose={() => setReassignOpen(false)}
         title="Reassign Warehouse"
-        maxWidth="max-w-sm"
+        maxWidth="max-w-md"
         footer={
           <div className="flex w-full justify-end gap-3">
             <button type="button" className={btnSecondary} onClick={() => setReassignOpen(false)} disabled={loading}>Cancel</button>
-            <button type="submit" form="reassign-order-form" className={btnPrimary} disabled={loading}>
+            <button
+              type="submit"
+              form="reassign-order-form"
+              className={btnPrimary}
+              disabled={loading || (assignableWarehouses.length > 0 && !warehouseId)}
+            >
               {loading ? 'Processing...' : 'Reassign'}
             </button>
           </div>
@@ -334,23 +357,28 @@ export function AdminOrderWorkflowActions({ sale, onUpdated, compact = true }: S
               {sale.rejectionRemarks}
             </WorkflowNotice>
           )}
-          <p className="text-sm text-slate-600">Assign a new warehouse to continue processing.</p>
           {assignableWarehouses.length === 0 ? (
             <p className="text-sm text-amber-700">
               No warehouses configured for your scope. Add one from IC Transfer → Warehouse.
             </p>
           ) : (
-            <select
-              value={warehouseId}
-              onChange={e => setWarehouseId(e.target.value)}
-              className={formSelect}
-              required
-            >
-              <option value="">Select warehouse...</option>
-              {assignableWarehouses.map(w => (
-                <option key={w.id} value={w.id}>{w.name}</option>
-              ))}
-            </select>
+            <fieldset className="min-w-0 space-y-2">
+              <legend className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-[var(--theme-text-muted)]">
+                Warehouse
+              </legend>
+              <p className="-mt-1 mb-2 text-sm text-slate-600 dark:text-[var(--theme-text-secondary)]">
+                Select a different warehouse to continue processing.
+              </p>
+              <WarehouseAssignPicker
+                name="reassign-order-warehouse"
+                warehouses={assignableWarehouses}
+                value={warehouseId}
+                onChange={setWarehouseId}
+                getRegionLabel={getRegionLabel}
+                currentWarehouseId={sale.warehouseId}
+                disabled={loading}
+              />
+            </fieldset>
           )}
         </form>
       </Modal>
@@ -393,12 +421,33 @@ type PanelProps = SharedProps & {
   compact?: boolean;
 };
 
-/** Full status panel for modals — card + actions stacked. */
-export default function AdminOrderWorkflowPanel({ sale, onUpdated, compact = false }: PanelProps) {
+function AdminOrderStatusStack({ sale, onUpdated, compact = true }: PanelProps) {
+  const { user } = useApp();
+  const hideStatusBadge =
+    canPerformICTransferAdminActions(user) &&
+    !isBranchHandledSale(sale) &&
+    isAdminAcceptRejectReviewStatus(sale.orderStatus);
+
   return (
-    <div className={`flex flex-col items-stretch ${compact ? 'gap-1.5' : 'gap-3'}`} onClick={e => e.stopPropagation()}>
-      <AdminOrderStatusCard sale={sale} compact={compact} />
+    <div
+      className={[
+        'flex flex-col',
+        compact ? 'items-center gap-1.5' : 'items-stretch gap-3',
+      ].join(' ')}
+      onClick={e => e.stopPropagation()}
+    >
+      {!hideStatusBadge ? <AdminOrderStatusCard sale={sale} compact={compact} /> : null}
       <AdminOrderWorkflowActions sale={sale} onUpdated={onUpdated} compact={compact} />
     </div>
   );
+}
+
+/** Status badge + accept/reject (etc.) for the sales table Status column. */
+export function AdminOrderStatusCell(props: PanelProps) {
+  return <AdminOrderStatusStack {...props} compact={props.compact ?? true} />;
+}
+
+/** Full status panel for modals — card + actions stacked. */
+export default function AdminOrderWorkflowPanel({ sale, onUpdated, compact = false }: PanelProps) {
+  return <AdminOrderStatusStack sale={sale} onUpdated={onUpdated} compact={compact} />;
 }

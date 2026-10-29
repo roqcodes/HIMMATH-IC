@@ -10,6 +10,7 @@ import ThemeToggle from '@/components/ui/ThemeToggle';
 import { parseAsicPath } from '@/lib/asic/routing';
 import { adminShellHeader } from '@/components/layout/adminShell';
 import { iconBtn, uiShadowOverlay } from '@/lib/ui';
+import { getUserTopbarSubtitle } from '@/lib/userTopbarSubtitle';
 
 type SearchFieldProps = {
   searchWrapRef: React.RefObject<HTMLDivElement | null>;
@@ -93,6 +94,7 @@ function SearchField({
 
 type TopbarActionsProps = {
   user: ReturnType<typeof useApp>['user'];
+  userSubtitle: string;
   logout: () => void;
   isRefreshing: boolean;
   onRefresh: () => void;
@@ -103,6 +105,7 @@ type TopbarActionsProps = {
 
 function TopbarActions({
   user,
+  userSubtitle,
   logout,
   isRefreshing,
   onRefresh,
@@ -172,7 +175,7 @@ function TopbarActions({
             </div>
             <div className="hidden min-w-0 text-left md:block">
               <div className="truncate text-sm font-semibold text-slate-900">{user.name || 'User'}</div>
-              <div className="truncate text-[11px] font-medium capitalize text-slate-500">{(user.role || '').replace('_', ' ')}</div>
+              <div className="truncate text-[11px] font-medium text-slate-500">{userSubtitle}</div>
             </div>
           </button>
 
@@ -234,7 +237,8 @@ function TopbarActions({
 
 export default function Topbar({ variant = 'default' }: { variant?: 'default' | 'admin-column' }) {
   const pathname = usePathname();
-  const { logout, user, refreshAppData, compactPortalHome } = useApp();
+  const { logout, user, refreshAppData, compactPortalHome, icWarehouses, branches } = useApp();
+  const userSubtitle = user ? getUserTopbarSubtitle(user, icWarehouses, branches) : '';
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -312,6 +316,7 @@ export default function Topbar({ variant = 'default' }: { variant?: 'default' | 
 
   const actionsProps = {
     user,
+    userSubtitle,
     logout,
     isRefreshing,
     onRefresh: handleRefresh,
