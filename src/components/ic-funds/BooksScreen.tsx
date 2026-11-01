@@ -6,6 +6,7 @@ import Link from 'next/link';
 import {
   getICFundReportBundleAction,
   getICFundStatementAction,
+  getICSettlementTradeReportAction,
   getICWarehousePLReportAction,
   listICFundAccountsLiteAction,
 } from '@/app/actions/icFundsActions';
@@ -19,6 +20,7 @@ import ProfitLossReport from '@/components/ic-funds/reports/ProfitLossReport';
 import BalanceSheetReport from '@/components/ic-funds/reports/BalanceSheetReport';
 import DayBookReport from '@/components/ic-funds/reports/DayBookReport';
 import CashBankBookReport from '@/components/ic-funds/reports/CashBankBookReport';
+import SettlementTradeReport from '@/components/ic-funds/reports/SettlementTradeReport';
 import { icFundsReportPath, type ICFundsReportId } from '@/lib/icFunds/nav';
 import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
 import { computeBooksKpis } from '@/lib/icFunds/kpiMetrics';
@@ -36,6 +38,7 @@ import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { logClientActionError } from '@/lib/errors/actionError';
 import { trackLoading } from '@/lib/loadingBar';
 import type { ICWarehousePLReport } from '@/lib/icFunds/warehouseProfit';
+import type { ICSettlementTradeReport } from '@/lib/icFunds/settlementTradeReport';
 import type { ICFundAccount, ICFundStatementLine, ICFundVoucher } from '@/types';
 
 type ReportBundle = NonNullable<
@@ -76,6 +79,7 @@ export default function BooksScreen({
   } = useICFundsDateFilter(branch?.timezone, 'this-month');
   const [bundle, setBundle] = useState<ReportBundle | null>(null);
   const [warehousePl, setWarehousePl] = useState<ICWarehousePLReport | null>(null);
+  const [settlementTradeReport, setSettlementTradeReport] = useState<ICSettlementTradeReport | null>(null);
   const [accounts, setAccounts] = useState<ICFundAccount[]>([]);
   const [accountId, setAccountId] = useState('');
   const [statement, setStatement] = useState<{
@@ -112,6 +116,22 @@ export default function BooksScreen({
     }
     setLoading(false);
   }, [branchId, endDate, showLoadError, startDate]);
+
+  const loadSettlementTradeReport = useCallback(async () => {
+    const mode = reportView === 'metal-trades' ? 'metal' : 'cash';
+    setLoading(true);
+    setError(null);
+    const result = await trackLoading(() =>
+      getICSettlementTradeReportAction({ branchId, startDate, endDate, settlementMode: mode }),
+    );
+    if (!result.success) {
+      await showLoadError('BooksScreen.loadSettlementTradeReport', result.error);
+      setSettlementTradeReport(null);
+    } else {
+      setSettlementTradeReport(result.data);
+    }
+    setLoading(false);
+  }, [branchId, endDate, reportView, showLoadError, startDate]);
 
   const loadBundle = useCallback(async () => {
     setLoading(true);
@@ -159,8 +179,12 @@ export default function BooksScreen({
       void loadWarehousePl();
       return;
     }
+    if (reportView === 'fund-trades' || reportView === 'metal-trades') {
+      void loadSettlementTradeReport();
+      return;
+    }
     void loadBundle();
-  }, [loadBundle, loadStatement, loadWarehousePl, reportView]);
+  }, [loadBundle, loadStatement, loadSettlementTradeReport, loadWarehousePl, reportView]);
 
   const { periodLabel, asAtLabel } = formatReportPeriodCaption({
     startDate: bundle?.startDate ?? startDate,
@@ -175,6 +199,8 @@ export default function BooksScreen({
       if (!statement) return [];
     } else if (reportView === 'warehouse-pl') {
       if (!warehousePl) return [];
+    } else if (reportView === 'fund-trades' || reportView === 'metal-trades') {
+      if (!settlementTradeReport) return [];
     } else if (!bundle) {
       return [];
     }
@@ -195,9 +221,10 @@ export default function BooksScreen({
       receivables: bundle?.receivables,
       payables: bundle?.payables,
       warehousePl,
+      settlementTradeReport,
       statement,
     });
-  }, [reportView, bundle, warehousePl, statement]);
+  }, [reportView, bundle, warehousePl, settlementTradeReport, statement]);
 
   const ledgerById = useMemo(
     () => new Map((bundle?.accountLedgers ?? []).map(l => [l.accountId, l])),
@@ -205,6 +232,62 @@ export default function BooksScreen({
   );
 
   const handleExportCsv = useCallback(() => {
+    if (reportView === 'fund-trades' || reportView === 'metal-trades') {
+      if (!settlementTradeReport) return;
+      const isMetal = settlementTradeReport.settlementMode === 'metal';
+      const headers = isMetal
+        ? [
+            'Type',
+            'Date',
+            'Reference',
+            'Counterparty',
+            'Warehouse',
+            'Fine weight (g)',
+            'INR/g',
+            'AED/g',
+            'INR value',
+            'Units',
+            'Rate (AED)',
+            'Amount (AED)',
+            'Status',
+          ]
+        : ['Type', 'Date', 'Reference', 'Counterparty', 'Warehouse', 'Units', 'Rate (AED)', 'Amount (AED)', 'Status'];
+      const rows = [...settlementTradeReport.purchases, ...settlementTradeReport.sales].map(r => {
+        const status =
+          r.txnKind === 'purchase' ? r.paymentStatus || r.paymentMethod || '' : r.orderStatus || r.paymentStatus || '';
+        if (isMetal) {
+          return [
+            r.txnKind,
+            r.date.slice(0, 10),
+            r.reference,
+            r.counterparty,
+            r.warehouseName || '',
+            r.metalWeightG ?? '',
+            r.metalRateInrPerG ?? '',
+            r.metalRateAedPerG ?? '',
+            r.inrTotal ?? '',
+            r.units,
+            r.unitRateAed,
+            r.aedTotal,
+            status,
+          ];
+        }
+        return [
+          r.txnKind,
+          r.date.slice(0, 10),
+          r.reference,
+          r.counterparty,
+          r.warehouseName || '',
+          r.units,
+          r.unitRateAed,
+          r.aedTotal,
+          status,
+        ];
+      });
+      const name = reportView === 'metal-trades' ? 'metal-purchase-sales.csv' : 'fund-purchase-sales.csv';
+      downloadCsv(name, headers, rows);
+      return;
+    }
     if (!bundle) return;
     if (reportView === 'trial-balance') {
       downloadCsv(
@@ -233,10 +316,11 @@ export default function BooksScreen({
         ['Net for period', s.netForPeriod],
       ]);
     }
-  }, [bundle, reportView]);
+  }, [bundle, reportView, settlementTradeReport]);
 
   const showCsvExport =
-    (reportView === 'trial-balance' || reportView === 'profit-loss') && Boolean(bundle);
+    ((reportView === 'trial-balance' || reportView === 'profit-loss') && Boolean(bundle)) ||
+    ((reportView === 'fund-trades' || reportView === 'metal-trades') && Boolean(settlementTradeReport));
 
   const headerToolbar = useMemo(
     () => (
@@ -390,6 +474,9 @@ export default function BooksScreen({
         {loading && reportView === 'warehouse-pl' && !warehousePl ? (
           <ASICTableSkeleton framed={false} cols={9} rows={8} />
         ) : null}
+        {loading && (reportView === 'fund-trades' || reportView === 'metal-trades') && !settlementTradeReport ? (
+          <ASICTableSkeleton framed={false} cols={10} rows={10} />
+        ) : null}
 
         {reportView === 'statement' ? (
           !accountId ? (
@@ -506,9 +593,9 @@ export default function BooksScreen({
         {warehousePl && reportView === 'warehouse-pl' ? (
           <div>
             <p className="border-b border-slate-200 px-2.5 py-1 text-[11px] text-slate-500">
-              Gross profit on completed deliveries: sale revenue minus COGS using weighted-average
-              cost on remaining stock in that warehouse (purchases add stock; completed sales deplete at current avg).
-              Matching journals post to IC Sales Profit on completion.
+              Gross profit on completed deliveries (cash and metal settlement): sale revenue minus COGS using
+              weighted-average cost on remaining stock in that warehouse. HQ journals post WAC COGS and profit reserve
+              on completion.
             </p>
             <div className={icfTableWrap}>
               <table className="w-full min-w-[720px] text-left text-sm">
@@ -615,6 +702,9 @@ export default function BooksScreen({
               </table>
             </div>
           </div>
+        ) : null}
+        {settlementTradeReport && (reportView === 'fund-trades' || reportView === 'metal-trades') ? (
+          <SettlementTradeReport report={settlementTradeReport} periodLabel={periodLabel} />
         ) : null}
         {bundle && reportView === 'balance-sheet' && bundle.balanceSheetDetail ? (
           <BalanceSheetReport

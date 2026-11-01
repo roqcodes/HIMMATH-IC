@@ -6,15 +6,18 @@ import {
   fetchICTransferSettingsAction,
   updateICTransferAutoRateResetAction,
   updateICTransferSalesEnabledAction,
+  updateICTransferWarehouseFulfillmentAction,
 } from '@/app/actions/icTransferSettingsActions';
 import AsicPageHeader from '@/components/asic/AsicPageHeader';
 import { asicCard, asicBtnPrimary } from '@/components/asic/ui';
 import { ASICFormSkeleton } from '@/components/asic/ASICTableSkeleton';
 import { useWriteAccess } from '@/context/RbacWriteContext';
+import { useApp } from '@/context/AppContext';
 
 export default function GlobalSettingsScreen() {
   const qc = useQueryClient();
   const { canWrite } = useWriteAccess();
+  const { refetchData } = useApp();
   const [error, setError] = useState('');
   const query = useQuery({
     queryKey: ['admin', 'global-settings'],
@@ -41,6 +44,15 @@ export default function GlobalSettingsScreen() {
     },
   });
 
+  const fulfillmentMut = useMutation({
+    mutationFn: (enabled: boolean) => updateICTransferWarehouseFulfillmentAction(enabled),
+    onSuccess: async res => {
+      if (!res.success) setError(res.error || 'Update failed');
+      qc.invalidateQueries({ queryKey: ['admin', 'global-settings'] });
+      await refetchData();
+    },
+  });
+
   if (query.isLoading) return <ASICFormSkeleton fields={4} />;
   if (query.error) return <p className="text-sm text-red-600">{(query.error as Error).message}</p>;
   const settings = query.data;
@@ -59,6 +71,19 @@ export default function GlobalSettingsScreen() {
             onChange={e => canWrite && salesMut.mutate(e.target.checked)}
           />
         </label>
+        <label className="mb-3 flex items-center justify-between gap-4">
+          <span>Warehouse portal &amp; delivery workflow</span>
+          <input
+            type="checkbox"
+            checked={!!settings?.warehouseFulfillmentEnabled}
+            disabled={!canWrite}
+            onChange={e => canWrite && fulfillmentMut.mutate(e.target.checked)}
+          />
+        </label>
+        <p className="mb-3 text-[11px] text-slate-500">
+          Off: admin sales save as completed entries (no accept / assign / deliver steps). Purchases and
+          sales still require a warehouse for stock and HQ ledger COGS.
+        </p>
         <label className="mb-4 flex items-center justify-between gap-4">
           <span>Auto rate reset (5pm Dubai)</span>
           <input

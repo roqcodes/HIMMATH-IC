@@ -18,7 +18,7 @@ import ViewSaleModal from './ViewSaleModal';
 import { ICSale } from '@/types';
 import { ConfirmModal } from '@/components/warehouse/shared';
 import { isBranchHandledSale } from '@/lib/icTransfer/fulfillmentHandler';
-import { IC_ORDER_STATUSES, getAdminStatusLabel, normalizeOrderStatus, getCustomerOrderStatus } from '@/lib/icTransfer/orderStatus';
+import { normalizeOrderStatus, getCustomerOrderStatus } from '@/lib/icTransfer/orderStatus';
 import { hasAdminWorkflowActions } from '@/lib/icTransfer/orderWorkflowRules';
 import { comparePriority } from '@/lib/icTransfer/orderPriority';
 import { getDeliveredUnits, getRemainingUnits } from '@/lib/icTransfer/saleUnits';
@@ -49,16 +49,18 @@ export default function ICTransferSales() {
   const branchSlug = currentSlug !== 'superadmin' ? currentSlug : undefined;
   const canManageGlobalSettings = canManageICTransferGlobalSettings(user);
   const salesPaused = !icTransferSettings.salesEnabled;
+  const warehouseFulfillmentEnabled = icTransferSettings.warehouseFulfillmentEnabled;
   const [isTogglingSales, setIsTogglingSales] = useState(false);
   const { selectedRegionIds } = useICTransferRegionFilter();
   const [modalOpen, setModalOpen] = useState(false);
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [selectedSale, setSelectedSale] = useState<ICSale | null>(null);
   const [search, setSearch] = useState('');
-  const [filterStatus, setFilterStatus] = useState('All');
+  const [filterCustomer, setFilterCustomer] = useState('All');
   const [filterWarehouse, setFilterWarehouse] = useState('All');
+  const [filterSettlement, setFilterSettlement] = useState<'All' | 'cash' | 'metal'>('All');
   const [tab, setTab] = useState<SalesTab>('all');
-  const [sortField, setSortField] = useState('Priority');
+  const [sortField, setSortField] = useState('Date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -117,6 +119,20 @@ export default function ICTransferSales() {
     );
   }, [icSales, isBranchAdminView, branchName, branchCustomerIds, branchCustomerNames, allBranches]);
 
+  const customerFilterOptions = useMemo(() => {
+    const byKey = new Map<string, string>();
+    for (const s of scopedSales) {
+      const key = s.orderCustomerId
+        ? s.orderCustomerId
+        : `name:${getAdminSaleCustomerName(s, branchName, branches).trim().toLowerCase()}`;
+      const label = getAdminSaleCustomerName(s, branchName, branches);
+      if (!byKey.has(key)) byKey.set(key, label);
+    }
+    return [...byKey.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [scopedSales, branchName, branches]);
+
   const baseFilteredSales = useMemo<ICSale[]>(() => {
     const range = resolveDateFilterRange(dateFilter, customStartDate, customEndDate);
 
@@ -125,16 +141,21 @@ export default function ICTransferSales() {
       if (search && !saleMatchesSearchQuery(s, search, branches, branchName)) return false;
       if (!matchesSaleRegionFilter(s, icWarehouses, selectedRegionIds)) return false;
 
-      if (filterStatus !== 'All') {
-        if (filterStatus === 'paid') return s.paymentStatus === 'paid';
-        if (filterStatus === 'Partial') return getCustomerOrderStatus(s) === 'Partial';
-        if (IC_ORDER_STATUSES.includes(filterStatus as (typeof IC_ORDER_STATUSES)[number])) {
-          return normalizeOrderStatus(s.orderStatus) === filterStatus;
-        }
+      if (filterCustomer !== 'All') {
+        const key = s.orderCustomerId
+          ? s.orderCustomerId
+          : `name:${getAdminSaleCustomerName(s, branchName, branches).trim().toLowerCase()}`;
+        if (key !== filterCustomer) return false;
       }
+
       if (filterWarehouse !== 'All') {
         if (filterWarehouse === 'None') return !s.warehouseId;
-        return s.warehouseId === filterWarehouse;
+        if (s.warehouseId !== filterWarehouse) return false;
+      }
+
+      if (filterSettlement !== 'All') {
+        const mode = s.settlementMode === 'metal' ? 'metal' : 'cash';
+        if (mode !== filterSettlement) return false;
       }
       return true;
     });
@@ -143,8 +164,9 @@ export default function ICTransferSales() {
     search,
     selectedRegionIds,
     icWarehouses,
-    filterStatus,
+    filterCustomer,
     filterWarehouse,
+    filterSettlement,
     dateFilter,
     customStartDate,
     customEndDate,
@@ -154,7 +176,7 @@ export default function ICTransferSales() {
 
   const tabCounts = useMemo(
     () => ({
-      needsAction: baseFilteredSales.filter(s => hasAdminWorkflowActions(s)).length,
+      needsAction: baseFilteredSales.filter(s => hasAdminWorkflowActions(s, { warehouseFulfillmentEnabled })).length,
       all: baseFilteredSales.length,
       awaitingVerification: baseFilteredSales.filter(
         s => normalizeOrderStatus(s.orderStatus) === 'delivery_pending_admin',
@@ -165,7 +187,7 @@ export default function ICTransferSales() {
 
   const filteredSales = useMemo<ICSale[]>(() => {
     if (tab === 'needs_action') {
-      return baseFilteredSales.filter(s => hasAdminWorkflowActions(s));
+      return baseFilteredSales.filter(s => hasAdminWorkflowActions(s, { warehouseFulfillmentEnabled }));
     }
     if (tab === 'awaiting_verification') {
       return baseFilteredSales.filter(
@@ -188,7 +210,7 @@ export default function ICTransferSales() {
     const sorted = [...filteredSales];
     sorted.sort((a, b) => {
       if (tab === 'all') {
-        const actionDiff = Number(hasAdminWorkflowActions(b)) - Number(hasAdminWorkflowActions(a));
+        const actionDiff = Number(hasAdminWorkflowActions(b, { warehouseFulfillmentEnabled })) - Number(hasAdminWorkflowActions(a, { warehouseFulfillmentEnabled }));
         if (actionDiff !== 0) return actionDiff;
       }
 
@@ -267,15 +289,6 @@ export default function ICTransferSales() {
     };
   }, [filteredSales]);
 
-  const statusOptions = useMemo(
-    () => [
-      ...IC_ORDER_STATUSES.map(st => ({ value: st, label: getAdminStatusLabel(st) })),
-      { value: 'paid', label: 'Fully Paid' },
-      { value: 'Partial', label: 'Partial Delivered' },
-    ],
-    [],
-  );
-
   useEffect(() => {
     if (!viewModalOpen || !selectedSale) return;
     const fresh = icSales.find(s => s.id === selectedSale.id);
@@ -353,11 +366,13 @@ export default function ICTransferSales() {
         sales={sortedSales}
         search={search}
         onSearchChange={setSearch}
-        filterStatus={filterStatus}
-        onFilterStatusChange={setFilterStatus}
+        filterCustomer={filterCustomer}
+        onFilterCustomerChange={setFilterCustomer}
+        customerOptions={customerFilterOptions}
         filterWarehouse={filterWarehouse}
         onFilterWarehouseChange={setFilterWarehouse}
-        statusOptions={statusOptions}
+        filterSettlement={filterSettlement}
+        onFilterSettlementChange={setFilterSettlement}
         warehouses={icWarehouses}
         sortField={sortField}
         sortOrder={sortOrder}
@@ -395,6 +410,7 @@ export default function ICTransferSales() {
         branchName={branchName}
         branches={branches}
         txnBranchName={txnBranchName}
+        warehouseFulfillmentEnabled={warehouseFulfillmentEnabled}
         />
       </div>
 

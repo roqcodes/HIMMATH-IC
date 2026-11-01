@@ -24,6 +24,9 @@ type Props = {
   modalTitle?: string;
   showCommission?: boolean;
   showRate?: boolean;
+  showCountryColumn?: boolean;
+  showSubdivisionColumn?: boolean;
+  showLocalityColumn?: boolean;
   nameColumn?: string;
   actions?: React.ReactNode;
   children?: React.ReactNode;
@@ -40,6 +43,9 @@ export default function ICTransferSettingsUsersPage({
   modalTitle = 'Add Setting',
   showCommission = false,
   showRate = true,
+  showCountryColumn = false,
+  showSubdivisionColumn = false,
+  showLocalityColumn = false,
   nameColumn = 'Name',
   actions,
   children,
@@ -51,11 +57,14 @@ export default function ICTransferSettingsUsersPage({
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
 
-  const columns = ['#', 'ID', nameColumn, 'Phone Number', ...(showRate || showCommission ? [showRate ? 'Rate' : 'Commission'] : []), 'Status', 'Action'];
+  const columns = ['#', 'ID', nameColumn, ...(showCountryColumn ? ['Country'] : []), ...(showSubdivisionColumn ? ['Province'] : []), ...(showLocalityColumn ? ['City / area'] : []), 'Phone Number', ...(showRate || showCommission ? [showRate ? 'Rate' : 'Commission'] : []), 'Status', 'Action'];
 
   const filtered = data.filter((item) => 
     item.name?.toLowerCase().includes(search.toLowerCase()) || 
-    item.id?.toLowerCase().includes(search.toLowerCase())
+    item.id?.toLowerCase().includes(search.toLowerCase()) ||
+    (showCountryColumn && item.country?.toLowerCase().includes(search.toLowerCase())) ||
+    (showSubdivisionColumn && item.subdivision?.toLowerCase().includes(search.toLowerCase())) ||
+    (showLocalityColumn && item.locality?.toLowerCase().includes(search.toLowerCase()))
   );
 
   const kpi = {
@@ -119,6 +128,15 @@ export default function ICTransferSettingsUsersPage({
                       <div className="text-[11px] text-slate-400">Registered: {new Date(user.createdAt || Date.now()).toLocaleDateString()}</div>
                     </td>
                     <td className={`${asicTd} font-medium text-slate-900`}>{user.name}</td>
+                    {showCountryColumn ? (
+                      <td className={`${asicTd} text-slate-600`}>{user.country || '—'}</td>
+                    ) : null}
+                    {showSubdivisionColumn ? (
+                      <td className={`${asicTd} text-slate-600`}>{user.subdivision || '—'}</td>
+                    ) : null}
+                    {showLocalityColumn ? (
+                      <td className={`${asicTd} text-slate-600`}>{user.locality || '—'}</td>
+                    ) : null}
                     <td className={`${asicTd} text-slate-600`}>{user.phone || '—'}</td>
                     {(showRate || showCommission) && (
                       <td className={`${asicTd} font-mono`}>{user.rate || user.commission || '—'}</td>

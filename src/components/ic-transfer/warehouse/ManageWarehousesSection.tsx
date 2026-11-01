@@ -4,16 +4,12 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, usePathname, useRouter } from 'next/navigation';
 import { asicBtnGhost } from '@/components/asic/ui';
-import SalesTableShell, {
-  salesTableClass,
-  salesTableEmptyClass,
-  salesTableRowInteractiveClass,
-  salesTableTdClass,
-  salesTableTdLabelClass,
-  salesTableThClass,
-  salesTableTheadRowClass,
-} from '@/components/ic-transfer/shared/SalesTableShell';
-import AddUserModal from '@/components/ic-transfer/settings/AddUserModal';
+import ICTransferDataTableShell, {
+  ICTransferTableFilterSelect,
+  icTdClass,
+  type ICTransferTableColumn,
+} from '@/components/ic-transfer/shared/ICTransferDataTableShell';
+import WarehouseModal from '@/components/ic-transfer/settings/WarehouseModal';
 import { useApp } from '@/context/AppContext';
 import type { ICWarehouse } from '@/types';
 import { ConfirmModal } from '@/components/warehouse/shared';
@@ -22,6 +18,14 @@ import {
   type ICTransferPortalMode,
 } from '@/lib/icTransfer/branchPortalScope';
 import { parseAsicPath } from '@/lib/asic/routing';
+
+const WAREHOUSE_TABLE_COLUMNS: ICTransferTableColumn[] = [
+  { id: 'Name', label: 'Name', align: 'left' },
+  { id: 'Location', label: 'Location (India)', align: 'left' },
+  { id: 'Phone', label: 'Phone', align: 'left' },
+  { id: 'Email', label: 'Email', align: 'left' },
+  { id: 'Actions', label: 'Actions', align: 'center', sortable: false },
+];
 
 type Props = {
   portalMode?: ICTransferPortalMode;
@@ -36,7 +40,7 @@ export default function ManageWarehousesSection({
   warehouses,
   registerOpenAdd,
 }: Props) {
-  const { icRegions, addICWarehouse, updateICWarehouse, deleteICWarehouse } = useApp();
+  const { deleteICWarehouse } = useApp();
   const router = useRouter();
   const pathname = usePathname();
   const params = useParams();
@@ -45,6 +49,11 @@ export default function ManageWarehousesSection({
   const [editingWarehouse, setEditingWarehouse] = useState<ICWarehouse | null>(null);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [search, setSearch] = useState('');
+  const [filterState, setFilterState] = useState('All');
+  const [filterHasEmail, setFilterHasEmail] = useState<'All' | 'yes' | 'no'>('All');
+  const [sortField, setSortField] = useState('Name');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   const workspace = useMemo(() => {
     const parsed = parseAsicPath(pathname);
@@ -58,13 +67,83 @@ export default function ManageWarehousesSection({
     return { mode: portalMode, slug: legacySlug };
   }, [pathname, params.slug, portalMode]);
 
-  const sortedWarehouses = useMemo(
-    () => [...warehouses].sort((a, b) => a.name.localeCompare(b.name)),
-    [warehouses],
-  );
+  const formatIndiaLocation = (warehouse: ICWarehouse) => {
+    const parts = [warehouse.indiaCity, warehouse.indiaState].filter(Boolean);
+    return parts.length > 0 ? parts.join(', ') : '—';
+  };
 
-  const regionName = (regionId?: string) =>
-    icRegions.find(r => r.id === regionId)?.name ?? '—';
+  const stateOptions = useMemo(() => {
+    const states = new Set<string>();
+    for (const w of warehouses) {
+      const s = w.indiaState?.trim();
+      if (s) states.add(s);
+    }
+    return [...states].sort((a, b) => a.localeCompare(b));
+  }, [warehouses]);
+
+  const filteredWarehouses = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return warehouses.filter(w => {
+      if (filterState !== 'All') {
+        const state = w.indiaState?.trim() || '';
+        if (state !== filterState) return false;
+      }
+      if (filterHasEmail === 'yes' && !w.email?.trim()) return false;
+      if (filterHasEmail === 'no' && w.email?.trim()) return false;
+      if (!q) return true;
+      const haystack = [
+        w.name,
+        w.phone,
+        w.email,
+        w.indiaCity,
+        w.indiaState,
+        formatIndiaLocation(w),
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [warehouses, search, filterState, filterHasEmail]);
+
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder('asc');
+    }
+  };
+
+  const sortedWarehouses = useMemo(() => {
+    const sorted = [...filteredWarehouses];
+    sorted.sort((a, b) => {
+      let valA: string;
+      let valB: string;
+      switch (sortField) {
+        case 'Location':
+          valA = formatIndiaLocation(a);
+          valB = formatIndiaLocation(b);
+          break;
+        case 'Phone':
+          valA = a.phone || '';
+          valB = b.phone || '';
+          break;
+        case 'Email':
+          valA = a.email || '';
+          valB = b.email || '';
+          break;
+        case 'Name':
+        default:
+          valA = a.name;
+          valB = b.name;
+          break;
+      }
+      const cmp = valA.localeCompare(valB, undefined, { sensitivity: 'base' });
+      return sortOrder === 'asc' ? cmp : -cmp;
+    });
+    return sorted;
+  }, [filteredWarehouses, sortField, sortOrder]);
 
   const openAdd = useCallback(() => {
     setEditingWarehouse(null);
@@ -81,39 +160,7 @@ export default function ManageWarehousesSection({
     setFormOpen(true);
   };
 
-  const handleSave = async (data: {
-    id?: string;
-    name: string;
-    phone: string;
-    commission: number | null;
-    regionId: string;
-    email: string;
-    address: string;
-    sendDeliveryProofToCustomer?: boolean;
-  }) => {
-    if (data.id) {
-      await updateICWarehouse(
-        data.id,
-        data.name,
-        data.phone,
-        data.commission,
-        '',
-        data.email,
-        data.address,
-        data.sendDeliveryProofToCustomer,
-      );
-    } else {
-      await addICWarehouse(
-        data.name,
-        data.phone,
-        data.commission,
-        '',
-        data.email,
-        data.address,
-        data.sendDeliveryProofToCustomer,
-        branchId ?? null,
-      );
-    }
+  const closeModal = () => {
     setFormOpen(false);
     setEditingWarehouse(null);
   };
@@ -126,10 +173,15 @@ export default function ManageWarehousesSection({
     setDeleteTargetId(null);
   };
 
-  const openUsers = (warehouseId: string) => {
+  const openDetail = (warehouseId: string) => {
     const href = getICTransferWarehouseDetailHref(workspace.slug ?? '', warehouseId, workspace.mode);
     router.push(href);
   };
+
+  const tableEmpty =
+    warehouses.length === 0
+      ? 'No warehouses configured yet.'
+      : 'No warehouses match your search or filters.';
 
   return (
     <>
@@ -144,106 +196,114 @@ export default function ManageWarehousesSection({
         onCancel={() => setDeleteTargetId(null)}
       />
 
-      <div className="mb-3">
-        <SalesTableShell title="Warehouses">
-          <table className={`${salesTableClass} min-w-[880px]`}>
-            <thead>
-              <tr className={salesTableTheadRowClass}>
-                {['Name', 'Region', 'Phone', 'Email', 'Delivery proof', 'Actions'].map(col => (
-                  <th key={col} className={salesTableThClass}>{col}</th>
+      <div className="mb-3 min-h-0 flex-1">
+        <ICTransferDataTableShell
+          title="Warehouses"
+          search={search}
+          onSearchChange={setSearch}
+          searchPlaceholder="Search name, location, phone, email…"
+          sortField={sortField}
+          sortOrder={sortOrder}
+          onSort={handleSort}
+          columns={WAREHOUSE_TABLE_COLUMNS}
+          isEmpty={sortedWarehouses.length === 0}
+          emptyMessage={tableEmpty}
+          filters={
+            <>
+              <ICTransferTableFilterSelect
+                value={filterState}
+                onChange={setFilterState}
+                aria-label="Filter by state"
+              >
+                <option value="All">All states</option>
+                {stateOptions.map(state => (
+                  <option key={state} value={state}>
+                    {state}
+                  </option>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {sortedWarehouses.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className={salesTableEmptyClass}>
-                    No warehouses configured yet.
-                  </td>
-                </tr>
-              ) : (
-                sortedWarehouses.map(warehouse => {
-                  const href = getICTransferWarehouseDetailHref(workspace.slug ?? '', warehouse.id, workspace.mode);
-                  return (
-                    <tr
-                      key={warehouse.id}
-                      className={salesTableRowInteractiveClass}
-                      onClick={() => openUsers(warehouse.id)}
+              </ICTransferTableFilterSelect>
+              <ICTransferTableFilterSelect
+                value={filterHasEmail}
+                onChange={v => setFilterHasEmail(v as 'All' | 'yes' | 'no')}
+                aria-label="Filter by email"
+              >
+                <option value="All">All email</option>
+                <option value="yes">Has email</option>
+                <option value="no">No email</option>
+              </ICTransferTableFilterSelect>
+            </>
+          }
+        >
+          {sortedWarehouses.map(warehouse => {
+            const href = getICTransferWarehouseDetailHref(
+              workspace.slug ?? '',
+              warehouse.id,
+              workspace.mode,
+            );
+            return (
+              <tr
+                key={warehouse.id}
+                className="cursor-pointer border-b border-slate-100 hover:bg-slate-50/80"
+                onClick={() => openDetail(warehouse.id)}
+              >
+                <td className={`${icTdClass('left')} font-medium text-slate-900`}>
+                  <Link
+                    href={href}
+                    className="hover:text-accent"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    {warehouse.name}
+                  </Link>
+                </td>
+                <td className={icTdClass('left')}>{formatIndiaLocation(warehouse)}</td>
+                <td className={icTdClass('left')}>{warehouse.phone || '—'}</td>
+                <td className={icTdClass('left')}>{warehouse.email || '—'}</td>
+                <td className={icTdClass('center')}>
+                  <div className="flex flex-wrap items-center justify-center gap-1">
+                    <button
+                      type="button"
+                      className={asicBtnGhost}
+                      onClick={e => {
+                        e.stopPropagation();
+                        openDetail(warehouse.id);
+                      }}
                     >
-                      <td className={salesTableTdLabelClass}>
-                        <Link
-                          href={href}
-                          className="hover:text-accent"
-                          onClick={e => e.stopPropagation()}
-                        >
-                          {warehouse.name}
-                        </Link>
-                      </td>
-                      <td className={salesTableTdClass}>{regionName(warehouse.regionId)}</td>
-                      <td className={salesTableTdClass}>{warehouse.phone || '—'}</td>
-                      <td className={salesTableTdClass}>{warehouse.email || '—'}</td>
-                      <td className={salesTableTdClass}>
-                        {warehouse.sendDeliveryProofToCustomer === false
-                          ? 'Admin verifies'
-                          : 'Customer verifies'}
-                      </td>
-                      <td className={salesTableTdClass}>
-                        <div className="flex flex-wrap items-center gap-1">
-                          <button
-                            type="button"
-                            className={asicBtnGhost}
-                            onClick={e => {
-                              e.stopPropagation();
-                              openUsers(warehouse.id);
-                            }}
-                          >
-                            View & users
-                          </button>
-                          <button
-                            type="button"
-                            className={asicBtnGhost}
-                            onClick={e => {
-                              e.stopPropagation();
-                              openEdit(warehouse);
-                            }}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className={`${asicBtnGhost} text-red-600 hover:text-red-700`}
-                            onClick={e => {
-                              e.stopPropagation();
-                              setDeleteTargetId(warehouse.id);
-                            }}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </SalesTableShell>
+                      View
+                    </button>
+                    <button
+                      type="button"
+                      className={asicBtnGhost}
+                      onClick={e => {
+                        e.stopPropagation();
+                        openEdit(warehouse);
+                      }}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className={`${asicBtnGhost} text-red-600 hover:text-red-700`}
+                      onClick={e => {
+                        e.stopPropagation();
+                        setDeleteTargetId(warehouse.id);
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </ICTransferDataTableShell>
       </div>
 
-      <AddUserModal
+      <WarehouseModal
         open={formOpen}
-        onClose={() => {
-          setFormOpen(false);
-          setEditingWarehouse(null);
-        }}
-        title={editingWarehouse ? 'Edit Warehouse' : 'Add Warehouse'}
-        showCommission={false}
-        showDeliveryProofToggle
-        showRate={false}
-        showPassword={false}
-        showRegion={false}
-        initialData={editingWarehouse}
-        onAdd={handleSave}
+        warehouse={editingWarehouse}
+        branchId={branchId ?? null}
+        onClose={closeModal}
+        onSaved={closeModal}
       />
     </>
   );

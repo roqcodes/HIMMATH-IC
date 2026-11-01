@@ -16,7 +16,9 @@ export type ICFundsReportId =
   | 'warehouse-pl'
   | 'balance-sheet'
   | 'receivables'
-  | 'trial-balance';
+  | 'trial-balance'
+  | 'fund-trades'
+  | 'metal-trades';
 
 export type ICFundsNavItem = {
   id: ICFundsSectionId;
@@ -42,6 +44,8 @@ export const IC_FUNDS_REPORTS: ReadonlyArray<{ id: ICFundsReportId; label: strin
   { id: 'warehouse-pl', label: 'Warehouse gross profit' },
   { id: 'balance-sheet', label: 'Balance sheet' },
   { id: 'trial-balance', label: 'Trial balance' },
+  { id: 'fund-trades', label: 'Fund purchase & sales' },
+  { id: 'metal-trades', label: 'Metal purchase & sales' },
 ];
 
 const SECTION_IDS = new Set(IC_FUNDS_NAV.map(item => item.id));

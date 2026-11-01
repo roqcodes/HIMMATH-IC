@@ -333,7 +333,7 @@ export default function ICTransferRatesPage({ portalMode = 'admin', branchId }: 
               disabled={isTogglingAutoReset}
               tone="amber"
               label="Automatic rate reset at 5:00 PM Dubai time"
-              hint="When enabled, every rate group's sale rate and pricing config resets to 0 daily at 5:00 PM GST (13:00 UTC)."
+              hint="When enabled, every rate group's sale rate and pricing config resets to 0 daily at 5:00 PM GST (13:00 UTC). Customer and branch assignments are kept."
             />
           </div>
         </SectionCard>

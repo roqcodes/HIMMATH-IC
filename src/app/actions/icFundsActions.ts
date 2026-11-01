@@ -40,6 +40,15 @@ import {
   type ICWarehousePLReport,
   type WarehouseInventoryEvent,
 } from '@/lib/icFunds/warehouseProfit';
+import {
+  summarizeSettlementTrades,
+  resolveTradeUnitRateAed,
+  type ICSettlementTradeLine,
+  type ICSettlementTradeReport,
+} from '@/lib/icFunds/settlementTradeReport';
+import { sqlExcludeVoidIcSales } from '@/lib/icFunds/icTransferReportFilters';
+import { allocateLotAmount, computeMetalLotProfit } from '@/lib/icTransfer/metalInventory';
+import { getFormattedTxnId } from '@/lib/icTransferMappers';
 import { validateVoucherAccounts } from '@/lib/icFunds/voucherRules';
 import { validateVoucherCurrencyPolicy, roundLedgerAmount } from '@/lib/icFunds/currencyPolicy';
 import {
@@ -62,6 +71,7 @@ import {
 import {
   createICFundAccountSchema,
   icFundsDateRangeSchema,
+  icSettlementTradeReportSchema,
   postICFundVoucherSchema,
   updateICFundAccountSchema,
 } from '@/lib/validations/icFunds';
@@ -1284,7 +1294,7 @@ export async function getICFundAccountDetailAction(params: {
 
     if (account.sourceType === 'ic_supplier' && account.sourceId) {
       const purchases = await query(
-        `SELECT p.id, p.created_at, p.units, p.aed_total, p.payment_method, w.name AS warehouse_name
+        `SELECT p.id, p.created_at, p.units, p.aed_total, p.payment_method, p.settlement_mode, p.inr_total, w.name AS warehouse_name
          FROM ic_purchases p
          LEFT JOIN ic_warehouses w ON w.id = p.warehouse_id
          WHERE p.supplier_id = $1
@@ -1297,6 +1307,8 @@ export async function getICFundAccountDetailAction(params: {
         date: row.created_at ? String(row.created_at) : '',
         units: Number(row.units) || 0,
         aedAmount: Number(row.aed_total) || 0,
+        inrTotal: row.inr_total != null ? Number(row.inr_total) : undefined,
+        settlementMode: row.settlement_mode === 'metal' ? 'metal' : 'cash',
         paymentMethod: row.payment_method ? String(row.payment_method) : undefined,
         warehouseName: row.warehouse_name ? String(row.warehouse_name) : undefined,
       })) as ICFundAccountRelatedPurchase[];
@@ -1375,6 +1387,7 @@ export async function getICFundReportBundleAction(params: unknown): Promise<
       receivables: number;
       payables: number;
       equity: number;
+      inventoryOnHand: number;
       accumulatedPL: number;
       totalAssets: number;
       totalLiabilitiesEquity: number;
@@ -1434,7 +1447,10 @@ export async function getICFundReportBundleAction(params: unknown): Promise<
       ? await queryProfitLossTotals(parsed.data.branchId, { endDate: asOfDate })
       : periodPL;
     const accumulatedPL =
-      accumulatedTotals.income - accumulatedTotals.expense - accumulatedTotals.dExpense;
+      accumulatedTotals.income +
+      accumulatedTotals.profit -
+      accumulatedTotals.expense -
+      accumulatedTotals.dExpense;
 
     const personal = accounts.filter(a => a.accountType === 'personal');
     const cashBank = accounts.filter(a => a.accountType === 'bank');
@@ -1479,6 +1495,10 @@ export async function getICFundReportBundleAction(params: unknown): Promise<
     const trialCredit = trialBalance.reduce((s, l) => s + (l.closingCredit ?? l.credit), 0);
     const tbBalanced = Math.abs(trialDebit - trialCredit) < 0.01;
 
+    const inventoryOnHand = accounts
+      .filter(a => a.sourceId === 'ic_inventory' || a.name.trim() === 'IC Inventory')
+      .reduce((sum, a) => sum + Math.max(0, a.balance), 0);
+
     const { income, profit, expense, dExpense } = periodPL;
 
     return {
@@ -1511,6 +1531,7 @@ export async function getICFundReportBundleAction(params: unknown): Promise<
           receivables: Number(ar.toFixed(2)),
           payables: Number(ap.toFixed(2)),
           equity: Number(profitReserve.toFixed(2)),
+          inventoryOnHand: Number(inventoryOnHand.toFixed(2)),
           accumulatedPL: Number(accumulatedPL.toFixed(2)),
           totalAssets: balanceSheetDetail.totalAssets,
           totalLiabilitiesEquity: balanceSheetDetail.totalLiabilitiesEquity,
@@ -1763,5 +1784,222 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
   } catch (err) {
     logger.error({ err }, 'Failed to load warehouse P&L report');
     return { success: false, error: 'Failed to load warehouse P&L' };
+  }
+}
+
+function buildTradeDateFilter(
+  startDate: string | undefined,
+  endDate: string | undefined,
+  paramOffset: number,
+): { sql: string; params: string[]; nextIndex: number } {
+  const params: string[] = [];
+  let sql = '';
+  let idx = paramOffset;
+  if (startDate) {
+    sql += ` AND t.created_at >= $${idx}::timestamptz`;
+    params.push(`${startDate}T00:00:00.000Z`);
+    idx += 1;
+  }
+  if (endDate) {
+    sql += ` AND t.created_at <= $${idx}::timestamptz`;
+    params.push(`${endDate}T23:59:59.999Z`);
+    idx += 1;
+  }
+  return { sql, params, nextIndex: idx };
+}
+
+export async function getICSettlementTradeReportAction(params: unknown): Promise<
+  ActionResult<ICSettlementTradeReport>
+> {
+  const parsed = icSettlementTradeReportSchema.safeParse(params);
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0]?.message ?? 'Invalid input' };
+  }
+
+  const access = await requireICFundsAccess(parsed.data.branchId, 'read');
+  if (!access.ok) return { success: false, error: access.error };
+
+  const { branchId, startDate, endDate, settlementMode } = parsed.data;
+  const isHqLedger = isHqIcFundsBranchId(branchId);
+  const branchFilter = isHqLedger ? '' : `AND (w.branch_id = $1 OR w.branch_id IS NULL)`;
+  const branchParams: string[] = isHqLedger ? [] : [branchId];
+
+  try {
+    const purchaseDate = buildTradeDateFilter(startDate, endDate, branchParams.length + 1);
+    const purchaseModeIndex = branchParams.length + 1 + purchaseDate.params.length;
+    const purchaseRes = await query(
+      `SELECT
+         p.id,
+         p.created_at,
+         p.units,
+         p.unit_rate,
+         p.aed_total,
+         p.inr_total,
+         p.metal_weight_g,
+         p.metal_rate_inr_per_g,
+         p.metal_rate_aed_per_g,
+         p.payment_method,
+         p.payment_status,
+         p.notes,
+         s.name AS supplier_name,
+         s.code AS supplier_code,
+         w.name AS warehouse_name,
+         w.code AS warehouse_code
+       FROM ic_purchases p
+       LEFT JOIN ic_suppliers s ON s.id = p.supplier_id
+       LEFT JOIN ic_warehouses w ON w.id = p.warehouse_id
+       WHERE p.settlement_mode = $${purchaseModeIndex}
+         ${branchFilter.replace(/\bw\./g, 'w.')}
+         ${purchaseDate.sql.replace(/\bt\./g, 'p.')}
+       ORDER BY p.created_at ASC, p.id ASC`,
+      [...branchParams, ...purchaseDate.params, settlementMode],
+    );
+
+    const saleDate = buildTradeDateFilter(startDate, endDate, branchParams.length + 1);
+    const saleModeIndex = branchParams.length + 1 + saleDate.params.length;
+    const salesRes = await query(
+      `SELECT
+         s.id,
+         s.created_at,
+         s.units,
+         s.unit_rate,
+         s.aed_amount,
+         s.service_charge,
+         s.inr_total,
+         s.metal_weight_g,
+         s.metal_rate_inr_per_g,
+         s.metal_rate_aed_per_g,
+         s.metal_payment_method,
+         s.metal_purchase_id,
+         s.payment_status,
+         s.order_status,
+         s.customer_name,
+         s.order_customer_name,
+         s.order_customer_id,
+         s.rejection_remarks,
+         w.name AS warehouse_name,
+         w.code AS warehouse_code,
+         c.name AS customer_master_name,
+         c.code AS customer_code,
+         mp.inr_total AS lot_purchase_inr,
+         mp.aed_total AS lot_purchase_aed,
+         mp.metal_weight_g AS lot_purchase_g
+       FROM ic_sales s
+       LEFT JOIN ic_warehouses w ON w.id = s.warehouse_id
+       LEFT JOIN customers c ON c.id = s.order_customer_id
+       LEFT JOIN ic_purchases mp ON mp.id = s.metal_purchase_id
+       WHERE s.settlement_mode = $${saleModeIndex}
+         ${sqlExcludeVoidIcSales('s')}
+         ${branchFilter}
+         ${saleDate.sql.replace(/\bt\./g, 's.')}
+       ORDER BY s.created_at ASC, s.id ASC`,
+      [...branchParams, ...saleDate.params, settlementMode],
+    );
+
+    const settlementLabel = settlementMode === 'metal' ? 'Metal' : 'Fund (cash)';
+
+    const purchases: ICSettlementTradeLine[] = purchaseRes.rows.map(row => {
+      const units = Number(row.units) || 0;
+      const aedTotal = purchaseAedTotal(units, Number(row.unit_rate) || 0, row.aed_total);
+      const unitRate = resolveTradeUnitRateAed(units, Number(row.unit_rate) || 0, aedTotal);
+      const id = String(row.id);
+      return {
+        id,
+        txnKind: 'purchase',
+        date: row.created_at ? String(row.created_at) : '',
+        reference: getFormattedTxnId(id, 'purchase', { id }),
+        counterparty: row.supplier_name ? String(row.supplier_name) : '—',
+        counterpartyCode: row.supplier_code ? String(row.supplier_code) : undefined,
+        warehouseName: row.warehouse_name ? String(row.warehouse_name) : undefined,
+        warehouseCode: row.warehouse_code ? String(row.warehouse_code) : undefined,
+        units,
+        unitRateAed: unitRate,
+        aedTotal,
+        inrTotal: row.inr_total != null ? Number(row.inr_total) : undefined,
+        metalWeightG: row.metal_weight_g != null ? Number(row.metal_weight_g) : undefined,
+        metalRateInrPerG: row.metal_rate_inr_per_g != null ? Number(row.metal_rate_inr_per_g) : undefined,
+        metalRateAedPerG: row.metal_rate_aed_per_g != null ? Number(row.metal_rate_aed_per_g) : undefined,
+        settlementLabel,
+        paymentMethod: row.payment_method ? String(row.payment_method) : undefined,
+        paymentStatus: row.payment_status ? String(row.payment_status) : undefined,
+        notes: row.notes ? String(row.notes) : undefined,
+      };
+    });
+
+    const sales: ICSettlementTradeLine[] = salesRes.rows.map(row => {
+      const units = Number(row.units) || 0;
+      const aedTotal = (Number(row.aed_amount) || 0) + (Number(row.service_charge) || 0);
+      const unitRate = resolveTradeUnitRateAed(units, Number(row.unit_rate) || 0, aedTotal);
+      const id = String(row.id);
+      const counterparty = String(row.order_customer_name || row.customer_master_name || row.customer_name || 'Customer');
+      const metalPaymentMethod =
+        row.metal_payment_method === 'INR' || row.metal_payment_method === 'AED'
+          ? row.metal_payment_method
+          : undefined;
+      const saleG = row.metal_weight_g != null ? Number(row.metal_weight_g) : 0;
+      const pl =
+        settlementMode === 'metal' && metalPaymentMethod
+          ? computeMetalLotProfit({
+              paymentMethod: metalPaymentMethod,
+              weightG: saleG,
+              purchaseInr: allocateLotAmount(
+                Number(row.lot_purchase_inr) || 0,
+                saleG,
+                Number(row.lot_purchase_g) || 0,
+              ),
+              purchaseAed: allocateLotAmount(
+                Number(row.lot_purchase_aed) || 0,
+                saleG,
+                Number(row.lot_purchase_g) || 0,
+              ),
+              saleInr: Number(row.inr_total) || 0,
+              saleAed: aedTotal,
+            })
+          : null;
+      return {
+        id,
+        txnKind: 'sale',
+        date: row.created_at ? String(row.created_at) : '',
+        reference: getFormattedTxnId(id, 'sale', {
+          id,
+          customer_name: row.customer_name,
+          order_customer_name: row.order_customer_name,
+          order_customer_id: row.order_customer_id,
+        }),
+        counterparty,
+        counterpartyCode: row.customer_code ? String(row.customer_code) : undefined,
+        warehouseName: row.warehouse_name ? String(row.warehouse_name) : undefined,
+        warehouseCode: row.warehouse_code ? String(row.warehouse_code) : undefined,
+        units,
+        unitRateAed: unitRate,
+        aedTotal,
+        inrTotal: row.inr_total != null ? Number(row.inr_total) : undefined,
+        metalWeightG: row.metal_weight_g != null ? Number(row.metal_weight_g) : undefined,
+        metalRateInrPerG: row.metal_rate_inr_per_g != null ? Number(row.metal_rate_inr_per_g) : undefined,
+        metalRateAedPerG: row.metal_rate_aed_per_g != null ? Number(row.metal_rate_aed_per_g) : undefined,
+        settlementLabel: metalPaymentMethod ? `${settlementLabel} · ${metalPaymentMethod}` : settlementLabel,
+        metalPaymentMethod,
+        bookedProfit: pl?.bookedProfit,
+        bookedCurrency: pl?.bookedCurrency,
+        paymentStatus: row.payment_status ? String(row.payment_status) : undefined,
+        orderStatus: row.order_status ? String(row.order_status) : undefined,
+        notes: row.rejection_remarks ? String(row.rejection_remarks) : undefined,
+      };
+    });
+
+    const summary = summarizeSettlementTrades(purchases, sales);
+
+    return {
+      success: true,
+      data: {
+        settlementMode,
+        purchases,
+        sales,
+        summary,
+      },
+    };
+  } catch (err) {
+    logger.error({ err, settlementMode }, 'Failed to load settlement trade report');
+    return { success: false, error: 'Failed to load trade register' };
   }
 }

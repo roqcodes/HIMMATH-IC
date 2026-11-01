@@ -1,48 +1,37 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React from 'react';
 import type { Branch, ICSale } from '@/types';
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
 import { getAdminSaleCustomerName } from '@/lib/icTransfer/branchOrderOwnership';
 import { isBranchHandledSale } from '@/lib/icTransfer/fulfillmentHandler';
-import { canAdminAccept, getAdminRowAccentClass } from '@/lib/icTransfer/orderStatus';
+import { getAdminRowAccentClass } from '@/lib/icTransfer/orderStatus';
 import { highPriorityRowClass } from '@/lib/icTransfer/orderPriority';
 import { getDeliveredUnits, getRemainingUnits } from '@/lib/icTransfer/saleUnits';
-import { AdminOrderStatusCell } from '../shared/AdminOrderWorkflowPanel';
 import AsicTabBar from '@/components/asic/AsicTabBar';
-import { SortIcon } from '@/components/ic-transfer/sales/sales-icons';
 import { fmtLedgerAed } from '@/lib/icFunds/format';
+import ICTransferDataTableShell, {
+  ICTransferTableFilterSelect,
+  type ICTransferTableColumn,
+  icTdClass,
+} from '@/components/ic-transfer/shared/ICTransferDataTableShell';
+import {
+  ICTransferDeleteIconButton,
+  ICTransferEditIconButton,
+  ICTransferViewIconButton,
+} from '@/components/ic-transfer/shared/ICTransferTableActions';
 
 export type SalesTab = 'needs_action' | 'all' | 'awaiting_verification';
 
-type ColumnId =
-  | 'select'
-  | 'date'
-  | 'customer'
-  | 'units'
-  | 'totalAed'
-  | 'delivered'
-  | 'remaining'
-  | 'warehouse'
-  | 'status'
-  | 'actions';
-
-type ColumnVisibility = Record<Exclude<ColumnId, 'select' | 'actions'>, boolean>;
-
-const DEFAULT_VISIBILITY: ColumnVisibility = {
-  date: true,
-  customer: true,
-  units: true,
-  totalAed: true,
-  delivered: true,
-  remaining: true,
-  warehouse: true,
-  status: true,
-};
-
-const HIDEABLE_COLUMNS: { id: keyof ColumnVisibility; label: string }[] = [
-  { id: 'delivered', label: 'Delivered' },
-  { id: 'remaining', label: 'Remaining' },
+const SALES_COLUMNS: ICTransferTableColumn[] = [
+  { id: 'Date', label: 'Date', align: 'left' },
+  { id: 'Customer', label: 'Customer', align: 'left' },
+  { id: 'Warehouse', label: 'Warehouse', align: 'left' },
+  { id: 'Units', label: 'Units', align: 'right' },
+  { id: 'Total AED', label: 'AED', align: 'right' },
+  { id: 'Delivered Units', label: 'Delivered', align: 'right' },
+  { id: 'Remaining Units', label: 'Remaining', align: 'right' },
+  { id: 'Actions', label: 'Actions', align: 'center', sortable: false },
 ];
 
 const verifyCheckboxClass =
@@ -55,11 +44,13 @@ type SalesDataTableProps = {
   sales: ICSale[];
   search: string;
   onSearchChange: (value: string) => void;
-  filterStatus: string;
-  onFilterStatusChange: (value: string) => void;
+  filterCustomer: string;
+  onFilterCustomerChange: (value: string) => void;
+  customerOptions: { id: string; name: string }[];
   filterWarehouse: string;
   onFilterWarehouseChange: (value: string) => void;
-  statusOptions: { value: string; label: string }[];
+  filterSettlement: 'All' | 'cash' | 'metal';
+  onFilterSettlementChange: (value: 'All' | 'cash' | 'metal') => void;
   warehouses: { id: string; name: string }[];
   sortField: string;
   sortOrder: 'asc' | 'desc';
@@ -77,6 +68,7 @@ type SalesDataTableProps = {
   branchName: string;
   branches: Branch[];
   txnBranchName?: string;
+  warehouseFulfillmentEnabled?: boolean;
 };
 
 function OutlineBadge({
@@ -110,11 +102,13 @@ export default function SalesDataTable(props: SalesDataTableProps) {
     sales,
     search,
     onSearchChange,
-    filterStatus,
-    onFilterStatusChange,
+    filterCustomer,
+    onFilterCustomerChange,
+    customerOptions,
     filterWarehouse,
     onFilterWarehouseChange,
-    statusOptions,
+    filterSettlement,
+    onFilterSettlementChange,
     warehouses,
     sortField,
     sortOrder,
@@ -132,28 +126,18 @@ export default function SalesDataTable(props: SalesDataTableProps) {
     branchName,
     branches,
     txnBranchName,
+    warehouseFulfillmentEnabled = true,
   } = props;
 
-  const isVerificationTab = tab === 'awaiting_verification';
-  const [columnVisibility, setColumnVisibility] = useState<ColumnVisibility>(DEFAULT_VISIBILITY);
-  const [columnsOpen, setColumnsOpen] = useState(false);
-  const columnsRef = useRef<HTMLDivElement>(null);
+  const isVerificationTab = warehouseFulfillmentEnabled && tab === 'awaiting_verification';
 
-  useEffect(() => {
-    const onPointerDown = (e: MouseEvent) => {
-      if (columnsRef.current && !columnsRef.current.contains(e.target as Node)) {
-        setColumnsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', onPointerDown);
-    return () => document.removeEventListener('mousedown', onPointerDown);
-  }, []);
-
-  const tabs: { id: SalesTab; label: string; count: number }[] = [
-    { id: 'all', label: 'All Sales', count: tabCounts.all },
-    { id: 'needs_action', label: 'Needs Action', count: tabCounts.needsAction },
-    { id: 'awaiting_verification', label: 'Awaiting Verification', count: tabCounts.awaitingVerification },
-  ];
+  const tabs: { id: SalesTab; label: string; count: number }[] = warehouseFulfillmentEnabled
+    ? [
+        { id: 'all', label: 'All Sales', count: tabCounts.all },
+        { id: 'needs_action', label: 'Needs Action', count: tabCounts.needsAction },
+        { id: 'awaiting_verification', label: 'Awaiting Verification', count: tabCounts.awaitingVerification },
+      ]
+    : [{ id: 'all', label: 'All Sales', count: tabCounts.all }];
 
   const emptyMessage =
     tab === 'needs_action'
@@ -162,198 +146,118 @@ export default function SalesDataTable(props: SalesDataTableProps) {
         ? 'No orders awaiting delivery verification.'
         : 'No sales found.';
 
-  const visibleColumnCount = useMemo(() => {
-    let count = 2; // status + actions always visible
-    if (isVerificationTab) count += 1;
-    for (const key of Object.keys(columnVisibility) as (keyof ColumnVisibility)[]) {
-      if (columnVisibility[key]) count += 1;
-    }
-    return count;
-  }, [columnVisibility, isVerificationTab]);
+  const tableFilters = (
+    <>
+      <ICTransferTableFilterSelect
+        value={filterCustomer}
+        onChange={onFilterCustomerChange}
+        aria-label="Filter by customer"
+        className="min-w-[9.5rem]"
+      >
+        <option value="All">All customers</option>
+        {customerOptions.map(c => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
+        ))}
+      </ICTransferTableFilterSelect>
+      <ICTransferTableFilterSelect
+        value={filterWarehouse}
+        onChange={onFilterWarehouseChange}
+        aria-label="Filter by warehouse"
+        className="min-w-[9.5rem]"
+      >
+        <option value="All">All warehouses</option>
+        <option value="None">No warehouse</option>
+        {warehouses.map(w => (
+          <option key={w.id} value={w.id}>
+            {w.name}
+          </option>
+        ))}
+      </ICTransferTableFilterSelect>
+      <ICTransferTableFilterSelect
+        value={filterSettlement}
+        onChange={v => onFilterSettlementChange(v as 'All' | 'cash' | 'metal')}
+        aria-label="Filter by settlement"
+        className="min-w-[8rem]"
+      >
+        <option value="All">All settlement</option>
+        <option value="cash">Cash</option>
+        <option value="metal">Metal</option>
+      </ICTransferTableFilterSelect>
+    </>
+  );
+
+  const toolbarEnd =
+    isVerificationTab && selectedVerifyCount > 0 ? (
+      <button
+        type="button"
+        onClick={onBulkVerify}
+        className="h-9 rounded-md bg-slate-900 px-3 text-xs font-medium text-white hover:bg-slate-800"
+      >
+        Verify selected ({selectedVerifyCount})
+      </button>
+    ) : null;
+
+  const headerLeading = isVerificationTab ? (
+    <input
+      type="checkbox"
+      checked={allVerifySelected}
+      onChange={onToggleSelectAllVerify}
+      className={verifyCheckboxClass}
+      aria-label="Select all orders for verification"
+    />
+  ) : undefined;
 
   return (
-    <div className="flex min-h-0 max-h-[calc(100dvh-14rem)] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white">
-      <div className="shrink-0">
-        <AsicTabBar
-          tabs={tabs}
-          activeTab={tab}
-          onTabChange={id => onTabChange(id as SalesTab)}
-          ariaLabel="Sales views"
+    <ICTransferDataTableShell
+      title="All Sales"
+      search={search}
+      onSearchChange={onSearchChange}
+      searchPlaceholder="Search sales…"
+      filters={tableFilters}
+      toolbarEnd={toolbarEnd}
+      tabs={
+        tabs.length > 1 ? (
+          <AsicTabBar
+            tabs={tabs}
+            activeTab={tab}
+            onTabChange={id => onTabChange(id as SalesTab)}
+            ariaLabel="Sales views"
+          />
+        ) : undefined
+      }
+      columns={SALES_COLUMNS}
+      sortField={sortField}
+      sortOrder={sortOrder}
+      onSort={onSort}
+      emptyMessage={emptyMessage}
+      isEmpty={sales.length === 0}
+      headerLeading={headerLeading}
+    >
+      {sales.map(s => (
+        <SaleRow
+          key={s.id}
+          sale={s}
+          isVerificationTab={isVerificationTab}
+          selectedVerifyIds={selectedVerifyIds}
+          onToggleVerify={onToggleVerify}
+          onView={onView}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          getWarehouseName={getWarehouseName}
+          branchName={branchName}
+          branches={branches}
+          txnBranchName={txnBranchName}
         />
-
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-3 py-2">
-        <input
-          type="search"
-          value={search}
-          onChange={e => onSearchChange(e.target.value)}
-          placeholder="Search sales…"
-          className="h-8 min-w-[160px] flex-1 rounded-md border border-slate-200 px-2.5 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:border-slate-400 focus:ring-1 focus:ring-slate-200"
-        />
-        <select
-          value={filterStatus}
-          onChange={e => onFilterStatusChange(e.target.value)}
-          className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700"
-        >
-          <option value="All">All statuses</option>
-          {statusOptions.map(opt => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-        <select
-          value={filterWarehouse}
-          onChange={e => onFilterWarehouseChange(e.target.value)}
-          className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700"
-        >
-          <option value="All">All warehouses</option>
-          <option value="None">No warehouse</option>
-          {warehouses.map(w => (
-            <option key={w.id} value={w.id}>
-              {w.name}
-            </option>
-          ))}
-        </select>
-
-        {isVerificationTab && selectedVerifyCount > 0 && (
-          <button
-            type="button"
-            onClick={onBulkVerify}
-            className="h-8 rounded-md bg-slate-900 px-2.5 text-xs font-medium text-white hover:bg-slate-800"
-          >
-            Verify selected ({selectedVerifyCount})
-          </button>
-        )}
-
-        <div ref={columnsRef} className="relative ml-auto">
-          <button
-            type="button"
-            onClick={() => setColumnsOpen(prev => !prev)}
-            className="h-8 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
-          >
-            Columns
-          </button>
-          {columnsOpen && (
-            <div className="absolute right-0 top-[calc(100%+4px)] z-20 min-w-[160px] rounded-md border border-slate-200 bg-white p-2 shadow-lg">
-              {HIDEABLE_COLUMNS.map(col => (
-                <label
-                  key={col.id}
-                  className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-xs text-slate-700 hover:bg-slate-50"
-                >
-                  <input
-                    type="checkbox"
-                    checked={columnVisibility[col.id]}
-                    onChange={e =>
-                      setColumnVisibility(prev => ({ ...prev, [col.id]: e.target.checked }))
-                    }
-                    className="size-3.5 rounded border-slate-300"
-                  />
-                  <span>{col.label}</span>
-                </label>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-auto">
-        <table className="w-full min-w-[820px] border-collapse text-left text-sm">
-          <thead className="sticky top-0 z-10">
-            <tr className="border-b border-slate-200 bg-slate-50/80">
-              {isVerificationTab && (
-                <th className="px-2.5 py-2">
-                  <input
-                    type="checkbox"
-                    checked={allVerifySelected}
-                    onChange={onToggleSelectAllVerify}
-                    className={verifyCheckboxClass}
-                    aria-label="Select all orders for verification"
-                  />
-                </th>
-              )}
-              {columnVisibility.date && (
-                <th className="px-2.5 py-2">
-                  <SortHeader label="Date" field="Date" sortField={sortField} sortOrder={sortOrder} onSort={onSort} />
-                </th>
-              )}
-              {columnVisibility.customer && (
-                <th className="px-2.5 py-2">
-                  <SortHeader label="Customer" field="Customer" sortField={sortField} sortOrder={sortOrder} onSort={onSort} />
-                </th>
-              )}
-              {columnVisibility.units && (
-                <th className="px-2.5 py-2">
-                  <SortHeader label="Units" field="Units" sortField={sortField} sortOrder={sortOrder} onSort={onSort} align="right" />
-                </th>
-              )}
-              {columnVisibility.totalAed && (
-                <th className="px-2.5 py-2">
-                  <SortHeader label="Total AED" field="Total AED" sortField={sortField} sortOrder={sortOrder} onSort={onSort} align="right" />
-                </th>
-              )}
-              {columnVisibility.delivered && (
-                <th className="px-2.5 py-2">
-                  <SortHeader label="Delivered" field="Delivered Units" sortField={sortField} sortOrder={sortOrder} onSort={onSort} align="right" />
-                </th>
-              )}
-              {columnVisibility.remaining && (
-                <th className="px-2.5 py-2">
-                  <SortHeader label="Remaining" field="Remaining Units" sortField={sortField} sortOrder={sortOrder} onSort={onSort} align="right" />
-                </th>
-              )}
-              {columnVisibility.warehouse && (
-                <th className="px-2.5 py-2">
-                  <SortHeader label="Warehouse" field="Warehouse" sortField={sortField} sortOrder={sortOrder} onSort={onSort} />
-                </th>
-              )}
-              {columnVisibility.status && (
-                <th className="px-2.5 py-2">
-                  <SortHeader label="Status" field="Status" sortField={sortField} sortOrder={sortOrder} onSort={onSort} align="center" />
-                </th>
-              )}
-              <th className="px-2.5 py-2">
-                <span className="sr-only">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {sales.length === 0 ? (
-              <tr>
-                <td colSpan={visibleColumnCount} className="px-3 py-10 text-center text-sm text-slate-400">
-                  {emptyMessage}
-                </td>
-              </tr>
-            ) : (
-              sales.map(s => (
-                <SaleRow
-                  key={s.id}
-                  sale={s}
-                  isVerificationTab={isVerificationTab}
-                  columnVisibility={columnVisibility}
-                  selectedVerifyIds={selectedVerifyIds}
-                  onToggleVerify={onToggleVerify}
-                  onView={onView}
-                  onEdit={onEdit}
-                  onDelete={onDelete}
-                  getWarehouseName={getWarehouseName}
-                  branchName={branchName}
-                  branches={branches}
-                  txnBranchName={txnBranchName}
-                />
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
+      ))}
+    </ICTransferDataTableShell>
   );
 }
 
 function SaleRow({
   sale: s,
   isVerificationTab,
-  columnVisibility,
   selectedVerifyIds,
   onToggleVerify,
   onView,
@@ -366,7 +270,6 @@ function SaleRow({
 }: {
   sale: ICSale;
   isVerificationTab: boolean;
-  columnVisibility: ColumnVisibility;
   selectedVerifyIds: Set<string>;
   onToggleVerify: (id: string) => void;
   onView: (sale: ICSale) => void;
@@ -390,7 +293,7 @@ function SaleRow({
       className={`cursor-pointer border-b border-slate-100 transition-colors hover:bg-slate-50/80 ${accent}`}
     >
       {isVerificationTab && (
-        <td className="px-2.5 py-2.5" onClick={e => e.stopPropagation()}>
+        <td className={icTdClass('left')} onClick={e => e.stopPropagation()}>
           <input
             type="checkbox"
             checked={selectedVerifyIds.has(s.id)}
@@ -400,88 +303,62 @@ function SaleRow({
           />
         </td>
       )}
-      {columnVisibility.date && (
-        <td className="px-2.5 py-2.5">
-          <div className="leading-tight">
-            <div className="text-xs font-medium text-slate-800">
-              {new Date(s.createdAt || '').toLocaleDateString('en-GB', {
-                day: '2-digit',
-                month: 'short',
-                year: 'numeric',
-              })}
-            </div>
-            <div className="text-[10px] text-slate-400">
-              {new Date(s.createdAt || '').toLocaleTimeString('en-US', {
-                hour: '2-digit',
-                minute: '2-digit',
-              })}
-            </div>
+      <td className={icTdClass('left')}>
+        <div className="leading-tight">
+          <div className="text-xs font-medium text-slate-800">
+            {new Date(s.createdAt || '').toLocaleDateString('en-GB', {
+              day: '2-digit',
+              month: 'short',
+              year: 'numeric',
+            })}
           </div>
-        </td>
-      )}
-      {columnVisibility.customer && (
-        <td className="px-2.5 py-2.5">
-          <div className="min-w-[120px]">
-            <span className="text-sm font-medium text-slate-900">{customerLabel}</span>
-            <div className="mt-0.5 flex flex-wrap items-center gap-1">
-              {s.transactionType === 'by_hand' && <OutlineBadge tone="violet">By Hand</OutlineBadge>}
-              {s.derivedFromSaleId && (
-                <OutlineBadge tone="indigo">
-                  Split · {getFormattedTxnId(s.derivedFromSaleId, 'sale', null, branches, txnBranchName)}
-                </OutlineBadge>
-              )}
-            </div>
+          <div className="text-[10px] text-slate-400">
+            {new Date(s.createdAt || '').toLocaleTimeString('en-US', {
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
           </div>
-        </td>
-      )}
-      {columnVisibility.units && (
-        <td className="px-2.5 py-2.5 text-right">
-          <span className="font-mono text-sm text-slate-700">{s.units.toLocaleString()}</span>
-        </td>
-      )}
-      {columnVisibility.totalAed && (
-        <td className="px-2.5 py-2.5 text-right">
-          <span className="font-mono text-sm font-medium text-slate-900">
-            {fmtLedgerAed(s.aedAmount || 0)}
-          </span>
-        </td>
-      )}
-      {columnVisibility.delivered && (
-        <td className="px-2.5 py-2.5 text-right">
-          <span className="font-mono text-sm text-emerald-700">{delivered.toLocaleString()}</span>
-        </td>
-      )}
-      {columnVisibility.remaining && (
-        <td className="px-2.5 py-2.5 text-right">
-          <span className={`font-mono text-sm ${remaining > 0 ? 'text-amber-700' : 'text-slate-400'}`}>
-            {remaining.toLocaleString()}
-          </span>
-        </td>
-      )}
-      {columnVisibility.warehouse && (
-        <td className="px-2.5 py-2.5">
-          <WarehouseCell sale={s} getWarehouseName={getWarehouseName} onEdit={onEdit} />
-        </td>
-      )}
-      {columnVisibility.status && (
-        <td className="px-2.5 py-2.5 text-center">
-          <AdminOrderStatusCell sale={s} />
-        </td>
-      )}
-      <td className="px-2.5 py-2.5" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-end gap-0.5">
-          <RowIconButton title="View" onClick={() => onView(s)}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-          </RowIconButton>
+        </div>
+      </td>
+      <td className={icTdClass('left')}>
+        <div className="min-w-[120px]">
+          <span className="font-medium text-slate-900">{customerLabel}</span>
+          <div className="mt-0.5 flex flex-wrap items-center gap-1">
+            {s.transactionType === 'by_hand' && <OutlineBadge tone="violet">By Hand</OutlineBadge>}
+            {s.derivedFromSaleId && (
+              <OutlineBadge tone="indigo">
+                Split · {getFormattedTxnId(s.derivedFromSaleId, 'sale', null, branches, txnBranchName)}
+              </OutlineBadge>
+            )}
+          </div>
+        </div>
+      </td>
+      <td className={icTdClass('left')}>
+        <WarehouseCell sale={s} getWarehouseName={getWarehouseName} />
+      </td>
+      <td className={icTdClass('right')}>
+        <span className="font-mono tabular-nums text-slate-700">{s.units.toLocaleString()}</span>
+      </td>
+      <td className={icTdClass('right')}>
+        <span className="font-mono font-medium tabular-nums text-slate-900">
+          {fmtLedgerAed(s.aedAmount || 0)}
+        </span>
+      </td>
+      <td className={icTdClass('right')}>
+        <span className="font-mono tabular-nums text-emerald-700">{delivered.toLocaleString()}</span>
+      </td>
+      <td className={icTdClass('right')}>
+        <span className={`font-mono tabular-nums ${remaining > 0 ? 'text-amber-700' : 'text-slate-400'}`}>
+          {remaining.toLocaleString()}
+        </span>
+      </td>
+      <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-center gap-0.5">
+          <ICTransferViewIconButton onClick={() => onView(s)} />
           {!branchHandled && (
             <>
-              <RowIconButton title="Edit" onClick={() => onEdit(s)}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-              </RowIconButton>
-              <RowIconButton title="Delete" onClick={e => onDelete(e, s)} danger>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </RowIconButton>
+              <ICTransferEditIconButton onClick={() => onEdit(s)} />
+              <ICTransferDeleteIconButton onClick={e => onDelete(e, s)} />
             </>
           )}
         </div>
@@ -493,89 +370,15 @@ function SaleRow({
 function WarehouseCell({
   sale: s,
   getWarehouseName,
-  onEdit,
 }: {
   sale: ICSale;
   getWarehouseName: (id?: string) => string;
-  onEdit: (sale: ICSale) => void;
 }) {
-  const branchHandled = isBranchHandledSale(s);
   if (s.warehouseId) {
-    return <span className="text-sm text-slate-700">{getWarehouseName(s.warehouseId)}</span>;
+    return <span className="text-slate-700">{getWarehouseName(s.warehouseId)}</span>;
   }
-  if (branchHandled) {
+  if (isBranchHandledSale(s)) {
     return <span className="text-xs italic text-teal-700">Branch managed</span>;
   }
-  if (canAdminAccept(s.orderStatus)) {
-    return <span className="text-xs text-slate-400">Awaiting acceptance</span>;
-  }
-  return (
-    <button
-      type="button"
-      onClick={e => {
-        e.stopPropagation();
-        onEdit(s);
-      }}
-      className="rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
-    >
-      Assign warehouse
-    </button>
-  );
-}
-
-function SortHeader({
-  label,
-  field,
-  sortField,
-  sortOrder,
-  onSort,
-  align = 'left',
-}: {
-  label: string;
-  field: string;
-  sortField: string;
-  sortOrder: 'asc' | 'desc';
-  onSort: (field: string) => void;
-  align?: 'left' | 'right' | 'center';
-}) {
-  const active = sortField === field;
-  return (
-    <button
-      type="button"
-      onClick={() => onSort(field)}
-      className={`inline-flex w-full items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-slate-500 hover:text-slate-800 ${
-        align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start'
-      }`}
-    >
-      {label}
-      <SortIcon direction={active ? sortOrder : false} />
-    </button>
-  );
-}
-
-function RowIconButton({
-  children,
-  title,
-  onClick,
-  danger,
-}: {
-  children: React.ReactNode;
-  title: string;
-  onClick: (e: React.MouseEvent) => void;
-  danger?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      className={`rounded p-1 text-slate-400 transition-colors hover:bg-slate-100 ${
-        danger ? 'hover:text-red-600' : 'hover:text-slate-700'
-      }`}
-    >
-      <svg className="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" aria-hidden>
-        {children}
-      </svg>
-    </button>
-  );
+  return <span className="text-slate-400">—</span>;
 }

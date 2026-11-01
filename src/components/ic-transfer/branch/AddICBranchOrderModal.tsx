@@ -26,6 +26,10 @@ import { resolveCustomerPortalRateGroup } from '@/lib/icTransfer/customerPortalS
 import SubCustomerSearchInput from './SubCustomerSearchInput';
 import ImageDropZone from '@/components/ui/ImageDropZone';
 import { uploadImageToCloudinary, deleteCloudinaryImageByToken } from '@/lib/cloudinary';
+import {
+  buildCustomerSearchOptions,
+  entitySearchOptionsToComboOptions,
+} from '@/lib/icTransfer/entitySearchOptions';
 
 type Props = {
   open: boolean;
@@ -58,7 +62,7 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
   const [deleteToken, setDeleteToken] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [customers, setCustomers] = useState<{ id: string; name: string }[]>([]);
+  const [customers, setCustomers] = useState<{ id: string; name: string; code?: string }[]>([]);
   const [subCustomers, setSubCustomers] = useState<{ id: string; name: string }[]>([]);
   const [customerQuery, setCustomerQuery] = useState('');
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
@@ -86,6 +90,15 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
     }
     return new Set(customers.map(c => c.id));
   }, [customers, isCustomer, linkedCustomerId]);
+
+  const branchCustomerSearchOptions = useMemo(
+    () => buildCustomerSearchOptions(customers),
+    [customers],
+  );
+  const branchCustomerComboOptions = useMemo(
+    () => entitySearchOptionsToComboOptions(branchCustomerSearchOptions),
+    [branchCustomerSearchOptions],
+  );
 
   const orderRates = useMemo(() => {
     const customerId = isCustomer
@@ -134,7 +147,13 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
     }
     getCustomersBySlug(currentSlug).then(res => {
       if (res.success && res.customers) {
-        setCustomers(res.customers.map((c: { id: string; name: string }) => ({ id: c.id, name: c.name })));
+        setCustomers(
+          res.customers.map((c: { id: string; name: string; code?: string }) => ({
+            id: c.id,
+            name: c.name,
+            code: c.code,
+          })),
+        );
       }
     });
   }, [open, currentSlug, isCustomer]);
@@ -414,15 +433,17 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
                   value={customerQuery}
                   onChange={val => {
                     setCustomerQuery(val);
-                    const match = customers.find(c => c.name === val);
+                    const match =
+                      customers.find(c => c.name === val) ||
+                      customers.find(c => c.code?.toUpperCase() === val.trim().toUpperCase());
                     setSelectedCustomerId(match?.id || '');
                   }}
                   onSelectOption={opt => {
-                    setCustomerQuery(opt.label);
+                    setCustomerQuery(opt.name ?? opt.label);
                     setSelectedCustomerId(opt.value);
                   }}
-                  options={customers.map(c => ({ value: c.id, label: c.name }))}
-                  placeholder="Search and select a customer…"
+                  options={branchCustomerComboOptions}
+                  placeholder="Search by code or name…"
                 />
               )}
               <p className="mt-1 text-[11px] text-slate-400">

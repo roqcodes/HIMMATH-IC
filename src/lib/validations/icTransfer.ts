@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { IC_SALE_TRANSACTION_TYPES, LEGACY_IC_SALE_TRANSACTION_TYPES } from '@/lib/icTransfer/transactionTypes';
 import { PASSWORD_INVALID_MESSAGE, validatePassword } from '@/lib/passwordValidation';
+import { entityCodeSchema } from '@/lib/validations/entityCode';
 
 const passwordSchema = z.string().refine((val) => validatePassword(val).isValid, {
   message: PASSWORD_INVALID_MESSAGE,
@@ -29,11 +30,15 @@ export const updateRegionSchema = z.object({
 
 export const addSupplierSchema = z.object({
   name: nameSchema,
+  code: entityCodeSchema,
   phone: z.string().optional().nullable(),
   commission: z.number().optional().nullable(),
   regionId: z.string().optional().nullable(),
   email: z.string().email('Invalid email').optional().nullable().or(z.literal('')),
   address: z.string().optional().nullable(),
+  country: z.string().min(1, 'Country is required'),
+  subdivision: z.string().optional().nullable().or(z.literal('')),
+  locality: z.string().optional().nullable().or(z.literal('')),
   branchId: z.string().optional().nullable(),
 });
 
@@ -43,11 +48,14 @@ export const updateSupplierSchema = addSupplierSchema.extend({
 
 export const addWarehouseSchema = z.object({
   name: nameSchema,
+  code: entityCodeSchema,
   phone: z.string().optional().nullable(),
   commission: z.number().optional().nullable(),
   regionId: z.string().optional().nullable(),
   email: z.string().email('Invalid email').optional().nullable().or(z.literal('')),
   address: z.string().optional().nullable(),
+  indiaState: z.string().min(1, 'Indian state is required'),
+  indiaCity: z.string().optional().nullable(),
   sendDeliveryProofToCustomer: z.boolean().optional().default(true),
   branchId: z.string().optional().nullable(),
 });
@@ -135,30 +143,82 @@ export const setRateGroupBranchesSchema = z.object({
   branchIds: z.array(z.string().min(1)),
 });
 
-export const addPurchaseSchema = z.object({
-  supplierId: z.string().optional().nullable(),
+export const icSettlementModeSchema = z.enum(['cash', 'metal']);
+
+const purchaseFieldsBaseSchema = z.object({
+  counterpartyId: z.string().min(1).optional(),
+  supplierId: z.string().min(1).optional(),
   locationId: z.string().optional().nullable(),
   warehouseId: z.string().optional().nullable(),
-  unitRate: z.number().positive(),
-  units: z.number().positive(),
+  settlementMode: icSettlementModeSchema.optional().default('cash'),
+  unitRate: z.number().nonnegative().optional(),
+  units: z.number().nonnegative().optional(),
+  metalWeightG: z.number().positive().optional(),
+  metalRateInrPerG: z.number().positive().optional(),
+  metalRateAedPerG: z.number().positive().optional(),
+  inrTotal: z.number().positive().optional(),
   paymentMethod: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
-  aedTotal: z.number().optional().nullable(),
+  aedTotal: z.number().positive().optional().nullable(),
 });
 
-export const updatePurchaseSchema = addPurchaseSchema.partial();
+const purchaseFieldsSchema = purchaseFieldsBaseSchema.transform(data => ({
+  ...data,
+  counterpartyId: data.counterpartyId ?? data.supplierId,
+}));
 
-export const addSaleSchema = z.object({
+export const addPurchaseSchema = purchaseFieldsSchema.superRefine((data, ctx) => {
+    if (!data.counterpartyId?.trim()) {
+      ctx.addIssue({ code: 'custom', message: 'Counterparty is required', path: ['counterpartyId'] });
+    }
+    const mode = data.settlementMode ?? 'cash';
+    if (mode === 'cash') {
+      if (data.units == null || data.units <= 0) {
+        ctx.addIssue({ code: 'custom', message: 'Units required for cash purchase', path: ['units'] });
+      }
+      if (data.unitRate == null || data.unitRate <= 0) {
+        ctx.addIssue({ code: 'custom', message: 'Unit rate required for cash purchase', path: ['unitRate'] });
+      }
+      return;
+    }
+    if (data.metalWeightG == null || data.metalWeightG <= 0) {
+      ctx.addIssue({ code: 'custom', message: 'Weight required for metal purchase', path: ['metalWeightG'] });
+    }
+    if (data.metalRateInrPerG == null || data.metalRateInrPerG <= 0) {
+      ctx.addIssue({ code: 'custom', message: 'INR rate per gram required', path: ['metalRateInrPerG'] });
+    }
+    if (data.metalRateAedPerG == null || data.metalRateAedPerG <= 0) {
+      ctx.addIssue({ code: 'custom', message: 'AED rate per gram required', path: ['metalRateAedPerG'] });
+    }
+    if (data.inrTotal == null || data.inrTotal <= 0) {
+      ctx.addIssue({ code: 'custom', message: 'Total INR required', path: ['inrTotal'] });
+    }
+    if (data.aedTotal == null || data.aedTotal <= 0) {
+      ctx.addIssue({ code: 'custom', message: 'Total AED required', path: ['aedTotal'] });
+    }
+  });
+
+export const updatePurchaseSchema = purchaseFieldsBaseSchema.partial();
+
+const saleFieldsSchema = z.object({
   customerName: nameSchema,
   orderCustomerName: z.string().optional().nullable(),
   orderCustomerId: z.string().optional().nullable(),
+  counterpartyId: z.string().optional().nullable(),
   subCustomerId: z.string().optional().nullable(),
   subCustomerName: z.string().optional().nullable(),
   warehouseId: z.string().optional().nullable(),
+  settlementMode: icSettlementModeSchema.optional().default('cash'),
   transactionType: icSaleTransactionTypeSchema.optional().nullable(),
-  units: z.number().positive(),
-  unitRate: z.number().positive(),
-  aedAmount: z.number().optional().nullable(),
+  units: z.number().nonnegative().optional(),
+  unitRate: z.number().nonnegative().optional(),
+  metalWeightG: z.number().positive().optional(),
+  metalRateInrPerG: z.number().positive().optional(),
+  metalRateAedPerG: z.number().positive().optional(),
+  inrTotal: z.number().positive().optional(),
+  metalPurchaseId: z.string().uuid().optional().nullable(),
+  metalPaymentMethod: z.enum(['INR', 'AED']).optional().nullable(),
+  aedAmount: z.number().nonnegative().optional().nullable(),
   bank: z.string().optional().nullable(),
   address: z.string().optional().nullable(),
   location: z.string().optional().nullable(),
@@ -174,7 +234,41 @@ export const addSaleSchema = z.object({
   rejectionRemarks: z.string().optional().nullable(),
 });
 
-export const updateSaleSchema = addSaleSchema.partial();
+export const addSaleSchema = saleFieldsSchema.superRefine((data, ctx) => {
+    const mode = data.settlementMode ?? 'cash';
+    if (mode === 'cash') {
+      if (data.units == null || data.units <= 0) {
+        ctx.addIssue({ code: 'custom', message: 'Units required for cash sale', path: ['units'] });
+      }
+      if (data.unitRate == null || data.unitRate <= 0) {
+        ctx.addIssue({ code: 'custom', message: 'Unit rate required for cash sale', path: ['unitRate'] });
+      }
+      return;
+    }
+    if (!data.metalPurchaseId) {
+      ctx.addIssue({ code: 'custom', message: 'Select the metal purchase to sell', path: ['metalPurchaseId'] });
+    }
+    if (data.metalPaymentMethod !== 'INR' && data.metalPaymentMethod !== 'AED') {
+      ctx.addIssue({ code: 'custom', message: 'Choose INR or AED payment', path: ['metalPaymentMethod'] });
+    }
+    if (data.metalWeightG == null || data.metalWeightG <= 0) {
+      ctx.addIssue({ code: 'custom', message: 'Weight required for metal sale', path: ['metalWeightG'] });
+    }
+    if (data.metalRateInrPerG == null || data.metalRateInrPerG <= 0) {
+      ctx.addIssue({ code: 'custom', message: 'INR rate per gram required', path: ['metalRateInrPerG'] });
+    }
+    if (data.metalRateAedPerG == null || data.metalRateAedPerG <= 0) {
+      ctx.addIssue({ code: 'custom', message: 'AED rate per gram required', path: ['metalRateAedPerG'] });
+    }
+    if (data.inrTotal == null || data.inrTotal <= 0) {
+      ctx.addIssue({ code: 'custom', message: 'Total INR required', path: ['inrTotal'] });
+    }
+    if (data.aedAmount == null || data.aedAmount <= 0) {
+      ctx.addIssue({ code: 'custom', message: 'Total AED required', path: ['aedAmount'] });
+    }
+  });
+
+export const updateSaleSchema = saleFieldsSchema.partial();
 
 export const saveSubCustomerSchema = z.object({
   id: z.string().optional(),

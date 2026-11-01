@@ -17,7 +17,7 @@ export const IC_TRANSFER_NAV: ICTransferNavItem[] = [
     label: 'Settings',
     path: '/settings',
     children: [
-      { id: 'suppliers', label: 'Suppliers', path: '/settings/suppliers' },
+      { id: 'suppliers', label: 'Counterparties', path: '/counterparties' },
       { id: 'rates', label: 'Rates', path: '/settings/rates' },
     ],
   },
@@ -32,6 +32,6 @@ export const IC_TRANSFER_BRANCH_PORTAL_NAV: ICTransferNavItem[] = [
   { id: 'orders', label: 'Sales Orders', path: '' },
   { id: 'purchase', label: 'Purchases', path: '/purchase' },
   { id: 'warehouse', label: 'Warehouses', path: '/warehouse' },
-  { id: 'suppliers', label: 'Suppliers', path: '/suppliers' },
+  { id: 'suppliers', label: 'Counterparties', path: '/counterparties' },
   { id: 'rates', label: 'Rates', path: '/rates' },
 ];

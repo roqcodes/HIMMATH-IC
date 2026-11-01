@@ -42,15 +42,22 @@ CREATE TABLE IF NOT EXISTS public.customers (
     id VARCHAR(50) PRIMARY KEY,
     branch_id VARCHAR(50) REFERENCES public.branches(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
+    code VARCHAR(32),
     phone VARCHAR(50),
     email VARCHAR(255),
     balance DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
     auth_user_id UUID UNIQUE REFERENCES auth.users(id) ON DELETE SET NULL,
+    country VARCHAR(100),
+    subdivision VARCHAR(255),
+    locality VARCHAR(255),
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_customers_branch_id ON public.customers(branch_id);
 CREATE INDEX IF NOT EXISTS idx_customers_auth_user_id ON public.customers(auth_user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_branch_code
+  ON public.customers (branch_id, lower(btrim(code)))
+  WHERE code IS NOT NULL AND btrim(code) <> '';
 
 CREATE TABLE IF NOT EXISTS public.user_page_permissions (
     user_id VARCHAR(128) NOT NULL,
@@ -73,32 +80,79 @@ CREATE TABLE IF NOT EXISTS public.ic_regions (
 CREATE TABLE IF NOT EXISTS public.ic_suppliers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
+    code VARCHAR(32),
     phone VARCHAR(50),
     commission NUMERIC(10, 2),
     region_id UUID REFERENCES public.ic_regions(id) ON DELETE SET NULL,
     email VARCHAR(255),
     address TEXT,
+    country VARCHAR(100),
+    subdivision VARCHAR(255),
+    locality VARCHAR(255),
     branch_id VARCHAR(50) REFERENCES public.branches(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_ic_suppliers_region ON public.ic_suppliers(region_id);
 CREATE INDEX IF NOT EXISTS idx_ic_suppliers_branch ON public.ic_suppliers(branch_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_suppliers_scope_code
+  ON public.ic_suppliers (COALESCE(branch_id, ''), lower(btrim(code)))
+  WHERE code IS NOT NULL AND btrim(code) <> '';
+
+CREATE TABLE IF NOT EXISTS public.ic_counterparties (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    branch_id VARCHAR(50) REFERENCES public.branches(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    code VARCHAR(32),
+    phone VARCHAR(50),
+    email VARCHAR(255),
+    address TEXT,
+    commission NUMERIC(10, 2),
+    region_id UUID REFERENCES public.ic_regions(id) ON DELETE SET NULL,
+    country VARCHAR(100),
+    subdivision VARCHAR(255),
+    locality VARCHAR(255),
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+    auth_user_id UUID UNIQUE REFERENCES auth.users(id) ON DELETE SET NULL,
+    legacy_customer_id VARCHAR(50),
+    legacy_supplier_id UUID,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_counterparties_legacy_customer
+  ON public.ic_counterparties (legacy_customer_id)
+  WHERE legacy_customer_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_counterparties_legacy_supplier
+  ON public.ic_counterparties (legacy_supplier_id)
+  WHERE legacy_supplier_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_counterparties_scope_code
+  ON public.ic_counterparties (COALESCE(branch_id, ''), lower(btrim(code)))
+  WHERE code IS NOT NULL AND btrim(code) <> '';
+CREATE INDEX IF NOT EXISTS idx_ic_counterparties_branch ON public.ic_counterparties (branch_id);
+
+ALTER TABLE public.customers
+  ADD COLUMN IF NOT EXISTS counterparty_id UUID REFERENCES public.ic_counterparties(id) ON DELETE SET NULL;
 
 CREATE TABLE IF NOT EXISTS public.ic_warehouses (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
+    code VARCHAR(32),
     phone VARCHAR(50),
     commission NUMERIC(10, 2),
     region_id UUID REFERENCES public.ic_regions(id) ON DELETE SET NULL,
     email VARCHAR(255),
     address TEXT,
+    india_state VARCHAR(100),
+    india_city VARCHAR(100),
     current_stock NUMERIC(15, 4) NOT NULL DEFAULT 0,
+    current_metal_g NUMERIC(15, 4) NOT NULL DEFAULT 0,
     send_delivery_proof_to_customer BOOLEAN NOT NULL DEFAULT true,
     branch_id VARCHAR(50) REFERENCES public.branches(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_ic_warehouses_region ON public.ic_warehouses(region_id);
 CREATE INDEX IF NOT EXISTS idx_ic_warehouses_branch ON public.ic_warehouses(branch_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_warehouses_scope_code
+  ON public.ic_warehouses (COALESCE(branch_id, ''), lower(btrim(code)))
+  WHERE code IS NOT NULL AND btrim(code) <> '';
 
 CREATE TABLE IF NOT EXISTS public.ic_rate_groups (
     id VARCHAR(50) PRIMARY KEY,
@@ -116,9 +170,17 @@ CREATE TABLE IF NOT EXISTS public.ic_rate_group_customers (
     PRIMARY KEY (group_id, customer_id)
 );
 
+CREATE TABLE IF NOT EXISTS public.ic_rate_group_branches (
+    group_id VARCHAR(50) NOT NULL REFERENCES public.ic_rate_groups(id) ON DELETE CASCADE,
+    branch_id VARCHAR(50) NOT NULL REFERENCES public.branches(id) ON DELETE CASCADE,
+    PRIMARY KEY (group_id, branch_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ic_rate_group_branches_branch ON public.ic_rate_group_branches (branch_id);
+
 CREATE TABLE IF NOT EXISTS public.ic_purchases (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     supplier_id UUID REFERENCES public.ic_suppliers(id) ON DELETE SET NULL,
+    counterparty_id UUID REFERENCES public.ic_counterparties(id) ON DELETE SET NULL,
     location_id UUID REFERENCES public.ic_regions(id) ON DELETE SET NULL,
     warehouse_id UUID REFERENCES public.ic_warehouses(id) ON DELETE SET NULL,
     unit_rate NUMERIC(15, 4) NOT NULL,
@@ -126,14 +188,22 @@ CREATE TABLE IF NOT EXISTS public.ic_purchases (
     payment_method VARCHAR(50),
     notes TEXT,
     aed_total NUMERIC(15, 4),
-    payment_status VARCHAR(20) DEFAULT 'pending',
+    payment_status VARCHAR(20) DEFAULT 'paid',
+    settlement_mode VARCHAR(20) NOT NULL DEFAULT 'cash' CHECK (settlement_mode IN ('cash', 'metal')),
+    metal_weight_g NUMERIC(15, 4),
+    metal_rate_inr_per_g NUMERIC(15, 4),
+    metal_rate_aed_per_g NUMERIC(15, 4),
+    inr_total NUMERIC(15, 4),
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_ic_purchases_supplier ON public.ic_purchases(supplier_id);
+CREATE INDEX IF NOT EXISTS idx_ic_purchases_counterparty ON public.ic_purchases(counterparty_id);
 CREATE INDEX IF NOT EXISTS idx_ic_purchases_warehouse ON public.ic_purchases(warehouse_id);
 CREATE INDEX IF NOT EXISTS idx_ic_purchases_created ON public.ic_purchases(created_at);
 CREATE INDEX IF NOT EXISTS idx_ic_purchases_warehouse_created
   ON public.ic_purchases (warehouse_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ic_purchases_settlement_created
+  ON public.ic_purchases (settlement_mode, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS public.ic_warehouse_groups (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -172,6 +242,7 @@ CREATE TABLE IF NOT EXISTS public.ic_sales (
     customer_name VARCHAR(255) NOT NULL,
     order_customer_name VARCHAR(255),
     order_customer_id VARCHAR(255),
+    counterparty_id UUID REFERENCES public.ic_counterparties(id) ON DELETE SET NULL,
     sub_customer_id VARCHAR(50) REFERENCES public.ic_sub_customers(id) ON DELETE SET NULL,
     sub_customer_name VARCHAR(255),
     entered_by VARCHAR(255),
@@ -205,6 +276,13 @@ CREATE TABLE IF NOT EXISTS public.ic_sales (
     fulfillment_handler VARCHAR(20) NOT NULL DEFAULT 'hq_admin' CHECK (fulfillment_handler IN ('hq_admin')),
     version INTEGER NOT NULL DEFAULT 1,
     idempotency_key VARCHAR(80),
+    settlement_mode VARCHAR(20) NOT NULL DEFAULT 'cash' CHECK (settlement_mode IN ('cash', 'metal')),
+    metal_weight_g NUMERIC(15, 4),
+    metal_rate_inr_per_g NUMERIC(15, 4),
+    metal_rate_aed_per_g NUMERIC(15, 4),
+    inr_total NUMERIC(15, 4),
+    metal_purchase_id UUID REFERENCES public.ic_purchases(id) ON DELETE RESTRICT,
+    metal_payment_method VARCHAR(10) CHECK (metal_payment_method IS NULL OR metal_payment_method IN ('INR', 'AED')),
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
@@ -212,8 +290,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_sales_idempotency ON public.ic_sales (i
 CREATE INDEX IF NOT EXISTS idx_ic_sales_user ON public.ic_sales(entered_by_user_id);
 CREATE INDEX IF NOT EXISTS idx_ic_sales_warehouse ON public.ic_sales(warehouse_id);
 CREATE INDEX IF NOT EXISTS idx_ic_sales_created ON public.ic_sales(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ic_sales_settlement_created
+  ON public.ic_sales (settlement_mode, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ic_sales_metal_purchase
+  ON public.ic_sales (metal_purchase_id)
+  WHERE metal_purchase_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_ic_purchases_warehouse_metal
+  ON public.ic_purchases (warehouse_id, created_at DESC)
+  WHERE settlement_mode = 'metal';
 CREATE INDEX IF NOT EXISTS idx_ic_sales_order_status ON public.ic_sales(order_status);
 CREATE INDEX IF NOT EXISTS idx_ic_sales_order_customer ON public.ic_sales(order_customer_id);
+CREATE INDEX IF NOT EXISTS idx_ic_sales_counterparty ON public.ic_sales(counterparty_id);
 CREATE INDEX IF NOT EXISTS idx_ic_sales_delivery_agent ON public.ic_sales(delivery_agent_id);
 CREATE INDEX IF NOT EXISTS idx_ic_sales_warehouse_status_created
   ON public.ic_sales (warehouse_id, order_status, created_at DESC);
@@ -238,11 +325,12 @@ CREATE TABLE IF NOT EXISTS public.ic_transfer_settings (
     id VARCHAR(20) PRIMARY KEY DEFAULT 'global',
     sales_enabled BOOLEAN NOT NULL DEFAULT true,
     auto_rate_reset_enabled BOOLEAN NOT NULL DEFAULT false,
+    warehouse_fulfillment_enabled BOOLEAN NOT NULL DEFAULT false,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     updated_by VARCHAR(255)
 );
-INSERT INTO public.ic_transfer_settings (id, sales_enabled, auto_rate_reset_enabled)
-VALUES ('global', true, false)
+INSERT INTO public.ic_transfer_settings (id, sales_enabled, auto_rate_reset_enabled, warehouse_fulfillment_enabled)
+VALUES ('global', true, false, false)
 ON CONFLICT (id) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS public.ic_fund_accounts (
@@ -377,9 +465,11 @@ ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_page_permissions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_regions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_suppliers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ic_counterparties ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_warehouses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_rate_groups ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_rate_group_customers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ic_rate_group_branches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_purchases ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_sales ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_warehouse_transactions ENABLE ROW LEVEL SECURITY;

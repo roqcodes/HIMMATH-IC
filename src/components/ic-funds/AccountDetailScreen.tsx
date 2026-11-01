@@ -425,7 +425,7 @@ export default function AccountDetailScreen() {
                   <th className={icfTh}>Warehouse</th>
                   <th className={icfThAlign('right')}>Units</th>
                   <th className={icfThAlign('right')}>AED</th>
-                  <th className={icfTh}>Payment</th>
+                  <th className={icfTh}>Settlement</th>
                 </tr>
               </thead>
               <tbody>
@@ -443,7 +443,12 @@ export default function AccountDetailScreen() {
                       <td className={icfTd}>{p.warehouseName || '—'}</td>
                       <td className={`${icfTd} text-right font-mono tabular-nums`}>{p.units}</td>
                       <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(p.aedAmount)}</td>
-                      <td className={`${icfTd} capitalize text-slate-500`}>{p.paymentMethod || '—'}</td>
+                      <td className={`${icfTd} capitalize text-slate-500`}>
+                        {p.settlementMode === 'metal' ? 'Metal' : 'Cash'}
+                        {p.settlementMode === 'metal' && p.inrTotal
+                          ? ` · ${p.inrTotal.toLocaleString('en-IN')} INR`
+                          : ''}
+                      </td>
                     </tr>
                   ))
                 )}

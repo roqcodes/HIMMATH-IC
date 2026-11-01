@@ -66,3 +66,7 @@ export const asicFormGridLoose =
 
 export const asicTextarea =
   `${asicInput} min-h-[4rem] resize-y py-2 max-md:min-h-[4.5rem]`;
+
+/** Address field in two-column entity modals — grows to fill column height on large screens. */
+export const modalAddressTextarea =
+  `${asicTextarea} min-h-[5rem] w-full flex-1 lg:min-h-0`;

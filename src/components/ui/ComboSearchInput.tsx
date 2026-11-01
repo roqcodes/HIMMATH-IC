@@ -7,6 +7,10 @@ import { formInput } from '@/lib/ui';
 export interface ComboOption {
   value: string;
   label: string;
+  /** Plain entity name when label includes a code prefix. */
+  name?: string;
+  code?: string;
+  detail?: string;
 }
 
 interface ComboSearchInputProps {
@@ -15,7 +19,15 @@ interface ComboSearchInputProps {
   onSelectOption?: (option: ComboOption) => void;
   options: ComboOption[];
   placeholder?: string;
+  /** Highlights the row matching this option value. */
+  selectedValue?: string;
+  /** Wrapper (layout only). */
   className?: string;
+  /** Merged onto the text input (e.g. asicInput in modals). */
+  inputClassName?: string;
+  disabled?: boolean;
+  /** Called when the input is focused (e.g. refresh dropdown balances). */
+  onFocus?: () => void;
 }
 
 const DROPDOWN_GAP = 4;
@@ -28,6 +40,10 @@ export default function ComboSearchInput({
   options,
   placeholder = 'Search or type...',
   className = '',
+  inputClassName = '',
+  disabled = false,
+  selectedValue,
+  onFocus,
 }: ComboSearchInputProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -94,9 +110,16 @@ export default function ComboSearchInput({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const filtered = options.filter(o =>
-    o.label.toLowerCase().includes(value.toLowerCase()),
-  );
+  const filtered = options.filter(o => {
+    const q = value.toLowerCase();
+    const name = (o.name ?? o.label).toLowerCase();
+    return (
+      name.includes(q) ||
+      o.label.toLowerCase().includes(q) ||
+      (o.code ? o.code.toLowerCase().includes(q) : false) ||
+      (o.detail ? o.detail.toLowerCase().includes(q) : false)
+    );
+  });
 
   const dropdown =
     isOpen && filtered.length > 0 ? (
@@ -105,21 +128,39 @@ export default function ComboSearchInput({
         style={dropdownStyle}
         className="z-[500] overflow-y-auto rounded-lg border border-[var(--theme-border-subtle)] bg-white p-1 shadow-dropdown dark:bg-[var(--theme-surface)]"
       >
-        {filtered.slice(0, 20).map(option => (
-          <button
-            key={option.value}
-            type="button"
-            className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50"
-            onMouseDown={e => e.preventDefault()}
-            onClick={() => {
-              onChange(option.label);
-              onSelectOption?.(option);
-              setIsOpen(false);
-            }}
-          >
-            {option.label}
-          </button>
-        ))}
+        {filtered.slice(0, 30).map(option => {
+          const isSelected = selectedValue != null && selectedValue !== '' && option.value === selectedValue;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={`w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-slate-50 dark:hover:bg-[var(--theme-surface-elevated)] ${
+                isSelected ? 'bg-accent/5 ring-1 ring-accent/20' : ''
+              }`}
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => {
+                onChange(option.label);
+                onSelectOption?.(option);
+                setIsOpen(false);
+              }}
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <span
+                  className={`min-w-0 flex-1 truncate text-sm ${
+                    isSelected ? 'font-semibold text-accent' : 'font-medium text-slate-900 dark:text-[var(--theme-text)]'
+                  }`}
+                >
+                  {option.label}
+                </span>
+                {option.detail ? (
+                  <span className="max-w-[48%] shrink-0 truncate text-right text-xs text-slate-500 dark:text-[var(--theme-text-secondary)]">
+                    {option.detail}
+                  </span>
+                ) : null}
+              </span>
+            </button>
+          );
+        })}
       </div>
     ) : null;
 
@@ -129,13 +170,24 @@ export default function ComboSearchInput({
         <input
           type="text"
           value={value}
+          disabled={disabled}
           onChange={e => {
+            if (disabled) return;
             onChange(e.target.value);
             setIsOpen(true);
           }}
-          onFocus={() => setIsOpen(true)}
+          onFocus={() => {
+            if (!disabled) {
+              onFocus?.();
+              setIsOpen(true);
+            }
+          }}
           placeholder={placeholder}
-          className={`${formInput} w-full !py-2 !pr-10 !text-sm`}
+          className={
+            inputClassName
+              ? `${inputClassName} w-full !pr-10${disabled ? ' cursor-not-allowed opacity-60' : ''}`
+              : `${formInput} w-full !py-2 !pr-10 !text-sm${disabled ? ' cursor-not-allowed opacity-60' : ''}`
+          }
         />
         <svg
           width="16"

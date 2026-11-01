@@ -12,6 +12,10 @@ type ModalProps = {
   footer?: React.ReactNode;
   maxWidth?: string;
   maxHeight?: string;
+  /** When set (e.g. sm:h-[min(88dvh,720px)]), dialog keeps a stable height instead of shrinking with content. */
+  heightClass?: string;
+  /** Extra classes on the scrollable body region (e.g. tighter padding, overflow-hidden). */
+  bodyClassName?: string;
   zIndexClass?: string;
 };
 
@@ -27,6 +31,8 @@ export default function Modal({
   footer,
   maxWidth = 'max-w-lg',
   maxHeight = 'sm:max-h-[min(88dvh,720px)]',
+  heightClass,
+  bodyClassName,
   zIndexClass = 'z-[400]',
 }: ModalProps) {
   const [mounted, setMounted] = useState(false);
@@ -87,7 +93,7 @@ export default function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
-        className={`flex max-h-[min(92dvh,100%)] w-full ${maxWidth} flex-col overflow-hidden rounded-t-lg border border-[var(--theme-border-subtle)] bg-white ${uiShadowOverlay} motion-safe:transition-opacity motion-safe:duration-[120ms] motion-safe:ease-out dark:bg-[var(--theme-surface)] ${maxHeight} sm:rounded-lg ${visible ? 'opacity-100' : 'opacity-0'
+        className={`flex max-h-[min(92dvh,100%)] w-full ${maxWidth} flex-col overflow-hidden rounded-t-lg border border-[var(--theme-border-subtle)] bg-white ${uiShadowOverlay} motion-safe:transition-opacity motion-safe:duration-[120ms] motion-safe:ease-out dark:bg-[var(--theme-surface)] ${maxHeight} ${heightClass ?? ''} sm:rounded-lg ${visible ? 'opacity-100' : 'opacity-0'
           }`}
         style={{ transitionDuration: `${FADE_MS}ms` }}
         onClick={e => e.stopPropagation()}
@@ -106,7 +112,9 @@ export default function Modal({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4 sm:py-3">
+        <div
+          className={`flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-3 py-3 sm:px-4 sm:py-3 ${bodyClassName ?? ''}`}
+        >
           {children}
         </div>
 

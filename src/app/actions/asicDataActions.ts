@@ -8,12 +8,12 @@ import { resolveBranchTimeZone } from '@/lib/businessTime';
 import { normalizeHiddenPages } from '@/lib/branchPages';
 import { isBranchScopedUser, isCustomerRole } from '@/lib/rbac';
 import { PRODUCT_NAME } from '@/lib/brand';
+import { mapICCounterpartyRow, COUNTERPARTY_SELECT } from '@/lib/counterparties/mapper';
 import {
   mapICPurchaseRow,
   mapICRateGroupRow,
   mapICRegionRow,
   mapICSaleRow,
-  mapICSupplierRow,
   mapICWarehouseRow,
   mapICWarehouseTransactionRow,
 } from '@/lib/icTransferMappers';
@@ -30,15 +30,7 @@ const BRANCHES_SELECT = `
   FROM branches
   WHERE deleted_at IS NULL`;
 
-const IC_RATE_GROUPS_SELECT = `
-  SELECT g.*,
-    COALESCE(cust.customer_ids, ARRAY[]::varchar[]) AS customer_ids
-  FROM ic_rate_groups g
-  LEFT JOIN (
-    SELECT group_id, array_agg(customer_id) AS customer_ids
-    FROM ic_rate_group_customers
-    GROUP BY group_id
-  ) cust ON cust.group_id = g.id`;
+import { IC_RATE_GROUPS_WITH_MEMBERS_SELECT } from '@/lib/icTransfer/rateGroupQueries';
 
 const IC_SALES_SELECT = `
   SELECT s.*, a.name AS delivery_agent_name
@@ -110,14 +102,12 @@ async function loadBranches(branchId: string | null) {
 async function loadSuppliers(branchId: string | null) {
   if (branchId) {
     return query(
-      `SELECT id, name, phone, commission, region_id, email, address, branch_id
-       FROM ic_suppliers WHERE branch_id = $1 OR branch_id IS NULL`,
+      `SELECT ${COUNTERPARTY_SELECT}
+       FROM ic_counterparties WHERE branch_id = $1 OR branch_id IS NULL`,
       [branchId],
     );
   }
-  return query(
-    'SELECT id, name, phone, commission, region_id, email, address, branch_id FROM ic_suppliers',
-  );
+  return query(`SELECT ${COUNTERPARTY_SELECT} FROM ic_counterparties`);
 }
 
 async function loadWarehouses(branchId: string | null) {
@@ -243,10 +233,10 @@ export async function fetchAsicInitialDataAction(
       () => loadWarehouses(ctx.branchId),
       () =>
         query(
-          `SELECT sales_enabled, auto_rate_reset_enabled, updated_at, updated_by
+          `SELECT sales_enabled, auto_rate_reset_enabled, warehouse_fulfillment_enabled, updated_at, updated_by
            FROM ic_transfer_settings WHERE id = 'global' LIMIT 1`,
         ),
-      () => query(IC_RATE_GROUPS_SELECT),
+      () => query(IC_RATE_GROUPS_WITH_MEMBERS_SELECT),
       () => loadPurchases(ctx.branchId),
       () => loadSales(ctx),
       () => loadWarehouseTransactions(ctx.branchId),
@@ -262,7 +252,7 @@ export async function fetchAsicInitialDataAction(
         globalBranches: branches,
         branches: finalBranches,
         icRegions: icRegionsRes.rows.map(r => mapICRegionRow(r)),
-        icSuppliers: icSuppliersRes.rows.map(r => mapICSupplierRow(r)),
+        icSuppliers: icSuppliersRes.rows.map(r => mapICCounterpartyRow(r)),
         icWarehouses: icWarehousesRes.rows.map(r => mapICWarehouseRow(r)),
         icRateGroups,
         icTransferSettings: mapICTransferSettingsRow(icTransferSettingsRes.rows[0]),

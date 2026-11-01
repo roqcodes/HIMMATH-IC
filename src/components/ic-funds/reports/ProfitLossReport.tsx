@@ -83,6 +83,10 @@ export default function ProfitLossReport({
           above; not double-counted in net).
         </p>
       ) : null}
+      <p className="px-2.5 py-2 text-[11px] text-slate-500">
+        Direct costs are WAC COGS on completed IC sales (cash and metal). Purchases capitalize to{' '}
+        <span className="font-medium">IC Inventory</span> until sold; see balance sheet for unsold stock.
+      </p>
       <p className="px-2.5 pb-2 text-[11px] text-slate-500">
         Voucher detail:{' '}
         <Link href="/admin/pl" className="font-medium text-slate-700 underline">

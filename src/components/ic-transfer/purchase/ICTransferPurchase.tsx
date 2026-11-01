@@ -13,7 +13,6 @@ import {
   PageHeader,
   PageShell,
   useICTransferFilters,
-  icTdClass,
 } from '../ui';
 import {
   filterPurchasesForBranchPortal,
@@ -24,14 +23,29 @@ import {
   type ICTransferPortalMode,
 } from '@/lib/icTransfer/branchPortalScope';
 import { portalMobileCardFooterClass } from '@/lib/icTransfer/layoutConstants';
+import { effectivePurchaseCounterpartyId } from '@/lib/counterparties/effectiveId';
 import AddPurchaseModal from './AddPurchaseModal';
 import ViewPurchaseModal from './ViewPurchaseModal';
 import { ICPurchase } from '@/types';
+import { resolveDateFilterRange, isDateInRange } from '@/lib/dateFilterRange';
+import { toBusinessDate } from '@/lib/businessTime';
+import ICTransferDataTableShell, {
+  ICTransferTableFilterSelect,
+  type ICTransferTableColumn,
+  icTdClass,
+} from '@/components/ic-transfer/shared/ICTransferDataTableShell';
+import { ICTransferEditIconButton, ICTransferViewIconButton } from '@/components/ic-transfer/shared/ICTransferTableActions';
 
 const fmt = (n: number) => `AED ${n.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`;
 
-const PURCHASE_COLUMNS = [
-  'Date', 'ID', 'Supplier', 'Units', 'Total AED', 'Status', 'Actions'
+const PURCHASE_TABLE_COLUMNS: ICTransferTableColumn[] = [
+  { id: 'Date', label: 'Date', align: 'left' },
+  { id: 'ID', label: 'ID', align: 'left' },
+  { id: 'Supplier', label: 'Supplier', align: 'left' },
+  { id: 'Warehouse', label: 'Warehouse', align: 'left' },
+  { id: 'Units', label: 'Units', align: 'right' },
+  { id: 'Total AED', label: 'AED', align: 'right' },
+  { id: 'Actions', label: 'Actions', align: 'center', sortable: false },
 ];
 
 type Props = {
@@ -41,7 +55,6 @@ type Props = {
 
 export default function ICTransferPurchase({ portalMode = 'admin', branchId }: Props) {
   const { icPurchases, icSuppliers, icWarehouses, user } = useApp();
-  // Branch managers (including on admin routes) may only use their branch warehouses/suppliers.
   const scopedBranchId =
     portalMode === 'branch' && branchId
       ? branchId
@@ -69,6 +82,11 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [selectedPurchase, setSelectedPurchase] = useState<ICPurchase | null>(null);
   const [search, setSearch] = useState('');
+  const [filterWarehouse, setFilterWarehouse] = useState('All');
+  const [filterSupplier, setFilterSupplier] = useState('All');
+  const [filterSettlement, setFilterSettlement] = useState<'All' | 'cash' | 'metal'>('All');
+  const [sortField, setSortField] = useState('Date');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const {
     dateFilter,
     setDateFilter,
@@ -78,24 +96,116 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
     setCustomEndDate,
   } = useICTransferFilters();
 
-  const getSupplierName = (id: string) => scopedSuppliers.find(s => s.id === id)?.name || icSuppliers.find(s => s.id === id)?.name || id;
+  const getSupplierName = (id: string) =>
+    scopedSuppliers.find(s => s.id === id)?.name || icSuppliers.find(s => s.id === id)?.name || id;
 
-  const filteredPurchases = scopedPurchases.filter(p => {
-    const formattedId = getFormattedTxnId(p.id, 'purchase', p);
-    if (search && 
-        !formattedId.toLowerCase().includes(search.toLowerCase()) && 
-        !p.id.toLowerCase().includes(search.toLowerCase()) && 
-        !getSupplierName(p.supplierId || '').toLowerCase().includes(search.toLowerCase())) return false;
-    if (!matchesSelectedRegions(p.locationId, selectedRegionIds)) return false;
-    return true;
-  });
+  const getWarehouseName = (id?: string) => {
+    if (!id) return '—';
+    return (
+      scopedWarehouses.find(w => w.id === id)?.name ||
+      icWarehouses.find(w => w.id === id)?.name ||
+      '—'
+    );
+  };
+
+  const filteredPurchases = useMemo(() => {
+    const range = resolveDateFilterRange(dateFilter, customStartDate, customEndDate);
+    return scopedPurchases.filter(p => {
+      const formattedId = getFormattedTxnId(p.id, 'purchase', p);
+      if (
+        search &&
+        !formattedId.toLowerCase().includes(search.toLowerCase()) &&
+        !p.id.toLowerCase().includes(search.toLowerCase()) &&
+        !getSupplierName(effectivePurchaseCounterpartyId(p) || '').toLowerCase().includes(search.toLowerCase()) &&
+        !getWarehouseName(p.warehouseId).toLowerCase().includes(search.toLowerCase())
+      ) {
+        return false;
+      }
+      if (!matchesSelectedRegions(p.locationId, selectedRegionIds)) return false;
+      if (p.createdAt && range.startDate) {
+        if (!isDateInRange(toBusinessDate(p.createdAt, 'Asia/Dubai'), range)) return false;
+      }
+      if (filterSupplier !== 'All' && effectivePurchaseCounterpartyId(p) !== filterSupplier) return false;
+      if (filterSettlement !== 'All') {
+        const mode = p.settlementMode === 'metal' ? 'metal' : 'cash';
+        if (mode !== filterSettlement) return false;
+      }
+      if (filterWarehouse !== 'All') {
+        if (filterWarehouse === 'None') return !p.warehouseId;
+        return p.warehouseId === filterWarehouse;
+      }
+      return true;
+    });
+  }, [
+    scopedPurchases,
+    search,
+    selectedRegionIds,
+    dateFilter,
+    customStartDate,
+    customEndDate,
+    filterSupplier,
+    filterSettlement,
+    filterWarehouse,
+    icSuppliers,
+    scopedSuppliers,
+    scopedWarehouses,
+    icWarehouses,
+  ]);
+
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder(field === 'Date' ? 'desc' : 'asc');
+    }
+  };
+
+  const sortedPurchases = useMemo(() => {
+    const sorted = [...filteredPurchases];
+    sorted.sort((a, b) => {
+      let valA: string | number;
+      let valB: string | number;
+
+      switch (sortField) {
+        case 'ID':
+          valA = getFormattedTxnId(a.id, 'purchase', a);
+          valB = getFormattedTxnId(b.id, 'purchase', b);
+          break;
+        case 'Supplier':
+          valA = getSupplierName(effectivePurchaseCounterpartyId(a));
+          valB = getSupplierName(effectivePurchaseCounterpartyId(b));
+          break;
+        case 'Warehouse':
+          valA = getWarehouseName(a.warehouseId);
+          valB = getWarehouseName(b.warehouseId);
+          break;
+        case 'Units':
+          valA = Number(a.units || 0);
+          valB = Number(b.units || 0);
+          break;
+        case 'Total AED':
+          valA = Number(a.aedTotal || 0);
+          valB = Number(b.aedTotal || 0);
+          break;
+        case 'Date':
+        default:
+          valA = new Date(a.createdAt || '').getTime();
+          valB = new Date(b.createdAt || '').getTime();
+          break;
+      }
+
+      if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
+      if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+    return sorted;
+  }, [filteredPurchases, sortField, sortOrder]);
 
   const stats = React.useMemo(() => {
     const total = filteredPurchases.reduce((acc, p) => acc + (p.aedTotal || 0), 0);
-    const paid = filteredPurchases.filter(p => p.paymentStatus === 'paid').reduce((acc, p) => acc + (p.aedTotal || 0), 0);
-    const unpaid = total - paid;
     const totalUnits = filteredPurchases.reduce((acc, p) => acc + (p.units || 0), 0);
-    return { total, paid, unpaid, totalUnits };
+    return { total, totalUnits };
   }, [filteredPurchases]);
 
   const handleEdit = (p: ICPurchase) => {
@@ -109,23 +219,63 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
   };
 
   const { purchaseColumns, matrixRows } = React.useMemo(() => {
-    const columns = ['Purchase Vol', 'Purchase Rate', 'Due Vol', 'Due Rate'];
+    const columns = ['Purchase Vol', 'Purchase Rate'];
     const mRows = scopedSuppliers.map(s => {
-       const supplierPurchases = scopedPurchases.filter(p => p.supplierId === s.id);
-       const vol = supplierPurchases.reduce((acc, p) => acc + p.units, 0);
-       const rate = supplierPurchases.length > 0 ? supplierPurchases[0].unitRate : 0;
-       return {
-         label: s.name,
-         metrics: [
-           { label: 'Purchase Vol', value: vol },
-           { label: 'Purchase Rate', value: rate.toLocaleString() },
-           { label: 'Due Vol', value: 0 },
-           { label: 'Due Rate', value: 0 },
-         ]
-       };
+      const supplierPurchases = scopedPurchases.filter(p => effectivePurchaseCounterpartyId(p) === s.id);
+      const vol = supplierPurchases.reduce((acc, p) => acc + p.units, 0);
+      const rate = supplierPurchases.length > 0 ? supplierPurchases[0].unitRate : 0;
+      return {
+        label: s.name,
+        metrics: [
+          { label: 'Purchase Vol', value: vol },
+          { label: 'Purchase Rate', value: rate.toLocaleString() },
+        ],
+      };
     });
     return { purchaseColumns: columns, matrixRows: mRows };
   }, [scopedSuppliers, scopedPurchases]);
+
+  const tableFilters = (
+    <>
+      <ICTransferTableFilterSelect
+        value={filterSupplier}
+        onChange={setFilterSupplier}
+        aria-label="Filter by supplier"
+        className="min-w-[9.5rem]"
+      >
+        <option value="All">All suppliers</option>
+        {scopedSuppliers.map(s => (
+          <option key={s.id} value={s.id}>
+            {s.name}
+          </option>
+        ))}
+      </ICTransferTableFilterSelect>
+      <ICTransferTableFilterSelect
+        value={filterWarehouse}
+        onChange={setFilterWarehouse}
+        aria-label="Filter by warehouse"
+        className="min-w-[9.5rem]"
+      >
+        <option value="All">All warehouses</option>
+        <option value="None">No warehouse</option>
+        {scopedWarehouses.map(w => (
+          <option key={w.id} value={w.id}>
+            {w.name}
+          </option>
+        ))}
+      </ICTransferTableFilterSelect>
+      <ICTransferTableFilterSelect
+        value={filterSettlement}
+        onChange={v => setFilterSettlement(v as 'All' | 'cash' | 'metal')}
+        aria-label="Filter by settlement"
+        className="min-w-[8rem]"
+      >
+        <option value="All">All settlement</option>
+        <option value="cash">Cash</option>
+        <option value="metal">Metal</option>
+      </ICTransferTableFilterSelect>
+    </>
+  );
 
   return (
     <PageShell>
@@ -155,18 +305,6 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
             value: stats.totalUnits.toLocaleString(),
             hint: 'In selected range',
           },
-          {
-            label: 'Total paid',
-            value: fmt(stats.paid),
-            hint: 'Settled amount',
-            tone: 'emerald',
-          },
-          {
-            label: 'Remaining due',
-            value: fmt(stats.unpaid),
-            hint: 'Outstanding',
-            tone: 'amber',
-          },
         ]}
       />
 
@@ -176,46 +314,62 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
           columns={['Supplier', ...purchaseColumns]}
           data={matrixRows.map(r => [
             r.label,
-            ...r.metrics.map(m => typeof m.value === 'number' ? m.value.toLocaleString() : m.value)
+            ...r.metrics.map(m => (typeof m.value === 'number' ? m.value.toLocaleString() : m.value)),
           ])}
         />
       </div>
 
-      <DataTableSection
+      <ICTransferDataTableShell
         title="All Purchases"
-        columns={PURCHASE_COLUMNS}
-        searchValue={search}
+        search={search}
         onSearchChange={setSearch}
-        searchPlaceholder="Search purchases..."
+        searchPlaceholder="Search purchases…"
+        filters={tableFilters}
+        columns={PURCHASE_TABLE_COLUMNS}
+        sortField={sortField}
+        sortOrder={sortOrder}
+        onSort={handleSort}
+        isEmpty={sortedPurchases.length === 0}
+        emptyMessage="No purchases found."
         mobileView={
-          filteredPurchases.length === 0 ? (
+          sortedPurchases.length === 0 ? (
             <div className="py-8 text-center text-sm text-slate-400">No purchases found.</div>
           ) : (
-            filteredPurchases.map(p => (
+            sortedPurchases.map(p => (
               <div
                 key={p.id}
                 onClick={() => handleView(p)}
-                className="flex flex-col gap-3 rounded-lg border p-3 shadow-surface-xs cursor-pointer hover:bg-slate-50 transition-colors"
+                className="flex cursor-pointer flex-col gap-3 rounded-lg border border-slate-200 p-3 shadow-sm transition-colors hover:bg-slate-50"
               >
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-slate-900">{getSupplierName(p.supplierId || '')}</p>
-                  <p className="mt-0.5 text-xs font-mono text-slate-500">{getFormattedTxnId(p.id, 'purchase', p)}</p>
-                  <p className="mt-0.5 text-xs text-slate-400">{new Date(p.createdAt || '').toLocaleString()}</p>
+                  <p className="text-sm font-semibold text-slate-900">{getSupplierName(effectivePurchaseCounterpartyId(p) || '')}</p>
+                  <p className="mt-0.5 font-mono text-xs text-slate-500">
+                    {getFormattedTxnId(p.id, 'purchase', p)}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-400">
+                    {new Date(p.createdAt || '').toLocaleString()}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    Warehouse:{' '}
+                    <span className="font-medium text-slate-700">{getWarehouseName(p.warehouseId)}</span>
+                  </p>
                 </div>
-                <div className="flex justify-between items-center rounded-xl bg-slate-50/70 p-2.5 text-xs text-slate-500">
-                  <span>Units: <strong className="text-slate-700">{p.units.toLocaleString()}</strong></span>
-                  <span>Total: <strong className="text-slate-700">{(p.aedTotal || 0).toLocaleString()} AED</strong></span>
+                <div className="flex items-center justify-between rounded-xl bg-slate-50/70 p-2.5 text-xs text-slate-500">
+                  <span>
+                    Units: <strong className="text-slate-700">{p.units.toLocaleString()}</strong>
+                  </span>
+                  <span>
+                    AED: <strong className="text-slate-700">{(p.aedTotal || 0).toLocaleString()}</strong>
+                  </span>
                 </div>
                 <div className={portalMobileCardFooterClass}>
-                  <span className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                    p.paymentStatus === 'paid' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
-                  }`}>
-                    {p.paymentStatus || 'pending'}
-                  </span>
                   <button
                     type="button"
-                    onClick={e => { e.stopPropagation(); handleView(p); }}
-                    className="shrink-0 text-xs font-bold text-slate-500 hover:text-slate-700"
+                    onClick={e => {
+                      e.stopPropagation();
+                      handleView(p);
+                    }}
+                    className="ml-auto shrink-0 text-xs font-bold text-slate-500 hover:text-slate-700"
                   >
                     View Details
                   </button>
@@ -225,60 +379,72 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
           )
         }
       >
-        {filteredPurchases.map((p) => (
-          <tr key={p.id} onClick={() => handleView(p)} className="cursor-pointer hover:bg-slate-50/50 transition-colors border-b border-slate-100 last:border-0 group">
-            <td className={icTdClass('left')}>{new Date(p.createdAt || '').toLocaleDateString()}</td>
-            <td className={icTdClass('left')}><span className="font-mono text-slate-500">{getFormattedTxnId(p.id, 'purchase', p)}</span></td>
-            <td className={icTdClass('left')}><span className="font-semibold text-slate-900">{getSupplierName(p.supplierId || '')}</span></td>
-            <td className={icTdClass('right')}>{p.units.toLocaleString()}</td>
-            <td className={icTdClass('right')}><span className="font-bold text-slate-900">{(p.aedTotal || 0).toLocaleString()}</span></td>
-            <td className={icTdClass('center')}>
-              <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                p.paymentStatus === 'paid' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
-              }`}>
-                {p.paymentStatus || 'pending'}
+        {sortedPurchases.map(p => (
+          <tr
+            key={p.id}
+            onClick={() => handleView(p)}
+            className="cursor-pointer border-b border-slate-100 transition-colors hover:bg-slate-50/80"
+          >
+            <td className={icTdClass('left')}>
+              <div className="leading-tight">
+                <div className="text-xs font-medium text-slate-800">
+                  {new Date(p.createdAt || '').toLocaleDateString('en-GB', {
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric',
+                  })}
+                </div>
+                <div className="text-[10px] text-slate-400">
+                  {new Date(p.createdAt || '').toLocaleTimeString('en-US', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </div>
+              </div>
+            </td>
+            <td className={icTdClass('left')}>
+              <span className="font-mono text-xs text-slate-500">{getFormattedTxnId(p.id, 'purchase', p)}</span>
+            </td>
+            <td className={icTdClass('left')}>
+              <span className="font-medium text-slate-900">{getSupplierName(effectivePurchaseCounterpartyId(p) || '')}</span>
+            </td>
+            <td className={icTdClass('left')}>
+              <span className="text-slate-700">{getWarehouseName(p.warehouseId)}</span>
+            </td>
+            <td className={icTdClass('right')}>
+              <span className="font-mono tabular-nums">{p.units.toLocaleString()}</span>
+            </td>
+            <td className={icTdClass('right')}>
+              <span className="font-mono font-medium tabular-nums text-slate-900">
+                {(p.aedTotal || 0).toLocaleString()}
               </span>
             </td>
-            <td className={icTdClass('center')}>
-              <div className="flex items-center justify-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); handleView(p); }}
-                  className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 shadow-sm transition-all duration-150 hover:border-accent hover:bg-accent/5 hover:text-accent active:scale-95"
-                  title="More Info"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                    <circle cx="12" cy="12" r="3" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); handleEdit(p); }}
-                  className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 shadow-sm transition-all duration-150 hover:border-accent hover:bg-accent/5 hover:text-accent active:scale-95"
-                  title="Edit"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                  </svg>
-                </button>
+            <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-center gap-0.5">
+                <ICTransferViewIconButton onClick={() => handleView(p)} />
+                <ICTransferEditIconButton onClick={() => handleEdit(p)} />
               </div>
             </td>
           </tr>
         ))}
-      </DataTableSection>
+      </ICTransferDataTableShell>
 
-      <AddPurchaseModal 
-        open={modalOpen} 
-        onClose={() => { setModalOpen(false); setSelectedPurchase(null); }} 
+      <AddPurchaseModal
+        open={modalOpen}
+        onClose={() => {
+          setModalOpen(false);
+          setSelectedPurchase(null);
+        }}
         initialData={selectedPurchase || undefined}
         branchId={scopedBranchId}
         warehouses={isBranchScoped ? scopedWarehouses : undefined}
       />
       <ViewPurchaseModal
         open={viewModalOpen}
-        onClose={() => { setViewModalOpen(false); setSelectedPurchase(null); }}
+        onClose={() => {
+          setViewModalOpen(false);
+          setSelectedPurchase(null);
+        }}
         purchase={selectedPurchase}
       />
     </PageShell>

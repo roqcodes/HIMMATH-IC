@@ -18,7 +18,13 @@ function resolveSectionId(sectionRaw: string | null, portal: AsicPortal): AsicSe
 export function resolveSectionFromPathname(pathname: string): ResolvedAsicScope | null {
   const normalized = pathname.replace(/\/$/, '') || '/';
   if (normalized === '/admin/customers' || normalized.startsWith('/admin/customers/')) {
+    if (normalized === '/admin/customers' || normalized === '/admin/customers/') {
+      return { portal: 'admin', section: 'counterparties' };
+    }
     return { portal: 'admin', section: 'customers' };
+  }
+  if (normalized === '/admin/suppliers') {
+    return { portal: 'admin', section: 'counterparties' };
   }
 
   const parsed = parseAsicPath(pathname);

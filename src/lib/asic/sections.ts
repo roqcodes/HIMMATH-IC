@@ -4,6 +4,7 @@ export type AsicSectionId =
   | 'sales'
   | 'purchases'
   | 'warehouse'
+  | 'counterparties'
   | 'customers'
   | 'regions'
   | 'suppliers'
@@ -33,6 +34,7 @@ export const STAFF_MANAGED_SECTIONS: AsicSectionId[] = [
   'sales',
   'purchases',
   'warehouse',
+  'counterparties',
   'suppliers',
   'payments',
   'receipts',

@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { ICWarehouse } from '@/types';
+import { formatEntitySelectLabel } from '@/lib/validations/entityCode';
 
 export function initialWarehouseSelection(warehouses: ICWarehouse[], preferId?: string) {
   if (preferId && warehouses.some(w => w.id === preferId)) return preferId;
@@ -64,7 +65,9 @@ export default function WarehouseAssignPicker({
             />
             <span className="min-w-0 flex-1">
               <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                <span className="text-sm font-semibold text-slate-900 dark:text-[var(--theme-text)]">{w.name}</span>
+                <span className="text-sm font-semibold text-slate-900 dark:text-[var(--theme-text)]">
+                  {formatEntitySelectLabel(w.name, w.code)}
+                </span>
                 {isAssigned && !selected ? (
                   <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 ring-1 ring-amber-200/80 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-800/50">
                     Current

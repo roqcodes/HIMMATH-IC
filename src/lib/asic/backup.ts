@@ -115,7 +115,7 @@ export const BACKUP_TABLES: readonly BackupTableDef[] = [
     dated: false,
     insertOrder: 50,
     pk: ['id'],
-    columns: ['id', 'name', 'phone', 'commission', 'region_id', 'email', 'address', 'branch_id', 'created_at'],
+    columns: ['id', 'name', 'phone', 'commission', 'region_id', 'email', 'address', 'country', 'branch_id', 'created_at'],
   },
   {
     id: 'ic_warehouses',
@@ -199,7 +199,8 @@ export const BACKUP_TABLES: readonly BackupTableDef[] = [
     pk: ['id'],
     columns: [
       'id', 'supplier_id', 'location_id', 'warehouse_id', 'unit_rate', 'units', 'payment_method',
-      'notes', 'aed_total', 'payment_status', 'created_at',
+      'notes', 'aed_total', 'payment_status', 'settlement_mode', 'metal_weight_g',
+      'metal_rate_inr_per_g', 'metal_rate_aed_per_g', 'inr_total', 'created_at',
     ],
   },
   {
@@ -219,6 +220,7 @@ export const BACKUP_TABLES: readonly BackupTableDef[] = [
       'district', 'image_url', 'service_charge', 'collected_units',
       'priority', 'payment_status', 'order_status', 'rejection_remarks', 'status_updated_at',
       'status_updated_by', 'delivery_image_url', 'derived_from_sale_id', 'fulfillment_handler',
+      'settlement_mode', 'metal_weight_g', 'metal_rate_inr_per_g', 'metal_rate_aed_per_g', 'inr_total',
       'version', 'idempotency_key', 'updated_at', 'created_at',
     ],
   },

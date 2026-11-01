@@ -16,6 +16,8 @@ import {
   type RemainingStockPool,
   type WarehouseInventoryEvent,
 } from '@/lib/icFunds/warehouseProfit';
+import { allocateLotAmount, computeMetalLotProfit } from '@/lib/icTransfer/metalInventory';
+import { IC_SALE_VOID_ORDER_STATUSES } from '@/lib/icFunds/icTransferReportFilters';
 import { logger } from '@/lib/logger';
 
 type DbClient = {
@@ -24,23 +26,14 @@ type DbClient = {
 
 const db: DbClient = { query };
 
-export type ICFundAccountSourceType = 'ic_supplier' | 'ic_warehouse' | 'ic_customer';
+export type ICFundAccountSourceType = 'ic_supplier' | 'ic_warehouse' | 'ic_customer' | 'ic_counterparty';
 
 const SALE_GHOST_STATUSES = new Set([
   'accepted',
   'wh_processing',
   'delivery_pending_admin',
 ]);
-const SALE_VOID_STATUSES = new Set([
-  'pending',
-  'pending_branch_review',
-  'branch_rejected',
-  'admin_rejected',
-  'wh_rejected',
-  'da_rejected',
-  'cancelled',
-  'cancellation_pending',
-]);
+const SALE_VOID_STATUSES = new Set<string>(IC_SALE_VOID_ORDER_STATUSES);
 const STARTER_TILLS = ['Collection', 'Fund', 'Cashier'] as const;
 const SYNC_ACTOR = 'IC Transfer sync';
 
@@ -206,7 +199,7 @@ async function ensureSystemAccount(
   client: DbClient,
   branchId: string,
   name: string,
-  accountType: 'income' | 'd_expense' | 'profit',
+  accountType: 'income' | 'd_expense' | 'profit' | 'personal',
   sourceId: string,
 ): Promise<string> {
   const existing = await client.query(
@@ -304,7 +297,6 @@ async function voidSaleMarginVouchers(
   branchId: string,
   saleId: string,
 ): Promise<void> {
-  // Legacy COGS relief journals are voided on sync; purchases already hit IC Purchase Cost.
   await voidVoucherByReference(client, branchId, 'ic_sale_cogs', saleId);
   await voidVoucherByReference(client, branchId, 'ic_sale_profit', saleId);
 }
@@ -319,6 +311,7 @@ async function loadWarehouseInventoryEvents(
     `SELECT id, units, unit_rate, aed_total, created_at
      FROM ic_purchases
      WHERE warehouse_id = $1 AND created_at <= $2::timestamptz
+       AND COALESCE(settlement_mode, 'cash') <> 'metal'
      ORDER BY created_at ASC, id ASC`,
     [warehouseId, asOf],
   );
@@ -329,6 +322,7 @@ async function loadWarehouseInventoryEvents(
      FROM ic_sales
      WHERE warehouse_id = $1
        AND order_status = 'completed'
+       AND COALESCE(settlement_mode, 'cash') <> 'metal'
        AND id <> $2::uuid
        AND COALESCE(status_updated_at, created_at) <= $3::timestamptz
      ORDER BY completed_at ASC, created_at ASC, id ASC`,
@@ -362,7 +356,116 @@ async function loadWarehouseInventoryEvents(
     });
   }
 
+  await appendInrMetalConversionEvents(client, events, {
+    warehouseId,
+    excludeSaleId,
+    asOf,
+  });
+
   return events;
+}
+
+async function loadGlobalInventoryEvents(
+  client: DbClient,
+  excludeSaleId: string,
+  asOf: unknown,
+): Promise<WarehouseInventoryEvent[]> {
+  const purchasesRes = await client.query(
+    `SELECT id, units, unit_rate, aed_total, created_at
+     FROM ic_purchases
+     WHERE created_at <= $1::timestamptz
+       AND COALESCE(settlement_mode, 'cash') <> 'metal'
+     ORDER BY created_at ASC, id ASC`,
+    [asOf],
+  );
+
+  const salesRes = await client.query(
+    `SELECT id, units, unit_rate, aed_amount, service_charge, collected_units,
+            created_at, COALESCE(status_updated_at, created_at) AS completed_at
+     FROM ic_sales
+     WHERE order_status = 'completed'
+       AND COALESCE(settlement_mode, 'cash') <> 'metal'
+       AND id <> $2::uuid
+       AND COALESCE(status_updated_at, created_at) <= $3::timestamptz
+     ORDER BY completed_at ASC, created_at ASC, id ASC`,
+    [asOf, excludeSaleId, asOf],
+  );
+
+  const events: WarehouseInventoryEvent[] = [];
+
+  for (const row of purchasesRes.rows) {
+    const units = Number(row.units) || 0;
+    events.push({
+      kind: 'purchase',
+      at: new Date(String(row.created_at)).getTime(),
+      sortKey: String(row.id),
+      units,
+      cost: purchaseAedTotal(units, Number(row.unit_rate) || 0, row.aed_total),
+    });
+  }
+
+  for (const row of salesRes.rows) {
+    events.push({
+      kind: 'sale',
+      at: new Date(String(row.completed_at)).getTime(),
+      sortKey: String(row.id),
+      saleId: String(row.id),
+      units: Number(row.units) || 0,
+      collectedUnits: row.collected_units != null ? Number(row.collected_units) : null,
+      unitRate: Number(row.unit_rate) || 0,
+      aedAmount: Number(row.aed_amount) || 0,
+      serviceCharge: Number(row.service_charge) || 0,
+    });
+  }
+
+  await appendInrMetalConversionEvents(client, events, {
+    warehouseId: null,
+    excludeSaleId,
+    asOf,
+  });
+
+  return events;
+}
+
+async function appendInrMetalConversionEvents(
+  client: DbClient,
+  events: WarehouseInventoryEvent[],
+  params: { warehouseId: string | null; excludeSaleId: string; asOf: unknown },
+): Promise<void> {
+  const warehouseFilter = params.warehouseId ? 'AND s.warehouse_id = $3' : '';
+  const queryParams = params.warehouseId
+    ? [params.excludeSaleId, params.asOf, params.warehouseId]
+    : [params.excludeSaleId, params.asOf];
+  const convRes = await client.query(
+    `SELECT s.id, s.units, s.metal_weight_g,
+            COALESCE(s.status_updated_at, s.created_at) AS completed_at,
+            p.aed_total AS purchase_aed, p.metal_weight_g AS purchase_g
+     FROM ic_sales s
+     JOIN ic_purchases p ON p.id = s.metal_purchase_id
+     WHERE s.settlement_mode = 'metal'
+       AND s.metal_payment_method = 'INR'
+       AND s.order_status = 'completed'
+       AND s.units > 0
+       AND s.id <> $1::uuid
+       AND COALESCE(s.status_updated_at, s.created_at) <= $2::timestamptz
+       ${warehouseFilter}`,
+    queryParams,
+  );
+  for (const row of convRes.rows) {
+    const units = Number(row.units) || 0;
+    if (units <= 0) continue;
+    events.push({
+      kind: 'purchase',
+      at: new Date(String(row.completed_at)).getTime(),
+      sortKey: `metal-inr:${row.id}`,
+      units,
+      cost: allocateLotAmount(
+        Number(row.purchase_aed) || 0,
+        Number(row.metal_weight_g) || 0,
+        Number(row.purchase_g) || 0,
+      ),
+    });
+  }
 }
 
 function remainingStockPoolBeforeSale(
@@ -393,24 +496,135 @@ function remainingStockPoolBeforeSale(
   return pool;
 }
 
+async function postMetalLotMarginVouchers(
+  client: DbClient,
+  sale: Record<string, unknown>,
+  branchId: string,
+): Promise<void> {
+  const saleRef = String(sale.id);
+  const paymentMethod = sale.metal_payment_method === 'INR' ? 'INR' : 'AED';
+  if (paymentMethod === 'INR') {
+    await voidSaleMarginVouchers(client, branchId, saleRef);
+    return;
+  }
+
+  const purchaseId = sale.metal_purchase_id ? String(sale.metal_purchase_id) : '';
+  let purchaseAed = 0;
+  let purchaseInr = 0;
+  const saleG = Number(sale.metal_weight_g) || 0;
+  if (purchaseId) {
+    const purchaseRes = await client.query(
+      `SELECT aed_total, inr_total, metal_weight_g FROM ic_purchases WHERE id = $1 LIMIT 1`,
+      [purchaseId],
+    );
+    if (purchaseRes.rows[0]) {
+      const purchasedG = Number(purchaseRes.rows[0].metal_weight_g) || 0;
+      purchaseAed = allocateLotAmount(Number(purchaseRes.rows[0].aed_total) || 0, saleG, purchasedG);
+      purchaseInr = allocateLotAmount(Number(purchaseRes.rows[0].inr_total) || 0, saleG, purchasedG);
+    }
+  }
+
+  const pl = computeMetalLotProfit({
+    paymentMethod: 'AED',
+    weightG: saleG,
+    purchaseInr,
+    purchaseAed,
+    saleInr: Number(sale.inr_total) || 0,
+    saleAed: Number(sale.aed_amount) || 0,
+  });
+
+  const cogsAccountId = await ensureSystemAccount(
+    client,
+    branchId,
+    'IC Purchase Cost',
+    'd_expense',
+    'ic_purchase_cost',
+  );
+  const inventoryAccountId = await ensureSystemAccount(
+    client,
+    branchId,
+    'IC Inventory',
+    'personal',
+    'ic_inventory',
+  );
+  const incomeAccountId = await ensureSystemAccount(
+    client,
+    branchId,
+    'IC Transfer Sales',
+    'income',
+    'ic_transfer_sales',
+  );
+  const profitAccountId = await ensureSystemAccount(
+    client,
+    branchId,
+    'IC Sales Profit',
+    'profit',
+    'ic_sales_profit',
+  );
+
+  const voucherDate = isoDate(sale.status_updated_at || sale.created_at);
+  await voidVoucherByReference(client, branchId, 'ic_sale_cogs', saleRef);
+
+  if (pl.purchaseAed > 0) {
+    await postVoucherInTx(client, {
+      branchId,
+      voucherType: 'journal',
+      voucherDate,
+      debitAccountId: cogsAccountId,
+      creditAccountId: inventoryAccountId,
+      amount: pl.purchaseAed,
+      notes: `Metal lot COGS ${saleRef.slice(0, 8)} · ${pl.weightG} g`,
+      referenceType: 'ic_sale_cogs',
+      referenceId: saleRef,
+      voucherStatus: 'active',
+    });
+  }
+
+  if (pl.bookedProfit > 0) {
+    await postVoucherInTx(client, {
+      branchId,
+      voucherType: 'journal',
+      voucherDate,
+      debitAccountId: incomeAccountId,
+      creditAccountId: profitAccountId,
+      amount: pl.bookedProfit,
+      notes: `Metal lot profit ${saleRef.slice(0, 8)} · AED`,
+      referenceType: 'ic_sale_profit',
+      referenceId: saleRef,
+      voucherStatus: 'active',
+    });
+  } else if (pl.bookedProfit < 0) {
+    await postVoucherInTx(client, {
+      branchId,
+      voucherType: 'journal',
+      voucherDate,
+      debitAccountId: profitAccountId,
+      creditAccountId: incomeAccountId,
+      amount: Math.abs(pl.bookedProfit),
+      notes: `Metal lot loss ${saleRef.slice(0, 8)} · AED`,
+      referenceType: 'ic_sale_profit',
+      referenceId: saleRef,
+      voucherStatus: 'active',
+    });
+  } else {
+    await voidVoucherByReference(client, branchId, 'ic_sale_profit', saleRef);
+  }
+}
+
 async function postSaleMarginVouchers(
   client: DbClient,
   sale: Record<string, unknown>,
   branchId: string,
 ): Promise<void> {
-  const warehouseId = sale.warehouse_id ? String(sale.warehouse_id) : null;
-  if (!warehouseId) {
-    await voidSaleMarginVouchers(client, branchId, String(sale.id));
+  if (String(sale.settlement_mode || '') === 'metal') {
+    await postMetalLotMarginVouchers(client, sale, branchId);
     return;
   }
-
+  const warehouseId = sale.warehouse_id ? String(sale.warehouse_id) : null;
   const asOf = sale.status_updated_at || sale.created_at;
-  const priorEvents = await loadWarehouseInventoryEvents(
-    client,
-    warehouseId,
-    String(sale.id),
-    asOf,
-  );
+  const priorEvents = warehouseId
+    ? await loadWarehouseInventoryEvents(client, warehouseId, String(sale.id), asOf)
+    : await loadGlobalInventoryEvents(client, String(sale.id), asOf);
   const poolBeforeSale = remainingStockPoolBeforeSale(priorEvents);
   const margin = resolveSaleMarginFromPool(
     {
@@ -424,6 +638,20 @@ async function postSaleMarginVouchers(
     poolBeforeSale,
   );
 
+  const cogsAccountId = await ensureSystemAccount(
+    client,
+    branchId,
+    'IC Purchase Cost',
+    'd_expense',
+    'ic_purchase_cost',
+  );
+  const inventoryAccountId = await ensureSystemAccount(
+    client,
+    branchId,
+    'IC Inventory',
+    'personal',
+    'ic_inventory',
+  );
   const incomeAccountId = await ensureSystemAccount(
     client,
     branchId,
@@ -443,8 +671,22 @@ async function postSaleMarginVouchers(
   const saleRef = String(sale.id);
   const avgLabel = margin.avgPurchaseRate.toFixed(4);
 
-  // Purchases already debit IC Purchase Cost; no separate COGS relief journal.
   await voidVoucherByReference(client, branchId, 'ic_sale_cogs', saleRef);
+
+  if (margin.cogs > 0) {
+    await postVoucherInTx(client, {
+      branchId,
+      voucherType: 'journal',
+      voucherDate,
+      debitAccountId: cogsAccountId,
+      creditAccountId: inventoryAccountId,
+      amount: margin.cogs,
+      notes: `IC Sale COGS ${saleRef.slice(0, 8)} · ${margin.deliveredUnits} u @ ${avgLabel}`,
+      referenceType: 'ic_sale_cogs',
+      referenceId: saleRef,
+      voucherStatus: 'active',
+    });
+  }
 
   const profitNotesSuffix = `${margin.deliveredUnits} u @ ${margin.saleRate.toFixed(4)} (avg cost ${avgLabel})`;
 
@@ -609,15 +851,16 @@ function resolveIcFundsLedgerBranchId(explicitBranchId?: string | null): string 
 
 async function resolvePurchaseBranchId(client: DbClient, purchaseId: string): Promise<string> {
   const res = await client.query(
-    `SELECT COALESCE(w.branch_id, s.branch_id) AS branch_id
+    `SELECT COALESCE(w.branch_id, cp.branch_id, cp_sup.branch_id) AS branch_id
      FROM ic_purchases p
      LEFT JOIN ic_warehouses w ON w.id = p.warehouse_id
-     LEFT JOIN ic_suppliers s ON s.id = p.supplier_id
+     LEFT JOIN ic_counterparties cp ON cp.id = p.counterparty_id
+     LEFT JOIN ic_counterparties cp_sup ON cp_sup.legacy_supplier_id = p.supplier_id
      WHERE p.id = $1`,
     [purchaseId],
   );
-  const explicit = res.rows[0]?.branch_id;
-  return resolveIcFundsLedgerBranchId(explicit ? String(explicit) : null);
+  const branchId = res.rows[0]?.branch_id;
+  return resolveIcFundsLedgerBranchId(branchId ? String(branchId) : null);
 }
 
 async function resolveSaleBranchId(client: DbClient, sale: Record<string, unknown>): Promise<string> {
@@ -657,11 +900,11 @@ async function resolveDefaultBranchId(client: DbClient): Promise<string> {
   return HQ_IC_FUNDS_BRANCH_ID;
 }
 
-export async function syncICSupplierFundAccount(supplierId: string): Promise<void> {
+export async function syncICCounterpartyFundAccount(counterpartyId: string): Promise<void> {
   try {
     const res = await query(
-      `SELECT id, name, phone, email, branch_id FROM ic_suppliers WHERE id = $1 LIMIT 1`,
-      [supplierId],
+      `SELECT id, name, phone, email, branch_id, legacy_customer_id FROM ic_counterparties WHERE id = $1 LIMIT 1`,
+      [counterpartyId],
     );
     if (res.rows.length === 0) return;
     const row = res.rows[0];
@@ -669,14 +912,19 @@ export async function syncICSupplierFundAccount(supplierId: string): Promise<voi
     if (!branchId) return;
     await ensureLinkedAccount(db, {
       branchId,
-      sourceType: 'ic_supplier',
-      sourceId: supplierId,
+      sourceType: 'ic_counterparty',
+      sourceId: counterpartyId,
       name: String(row.name),
       phone: row.phone ? String(row.phone) : null,
+      customerId: row.legacy_customer_id ? String(row.legacy_customer_id) : null,
     });
   } catch (err) {
-    logger.error({ err, supplierId }, 'Failed to sync IC supplier fund account');
+    logger.error({ err, counterpartyId }, 'Failed to sync IC counterparty fund account');
   }
+}
+
+export async function syncICSupplierFundAccount(counterpartyId: string): Promise<void> {
+  return syncICCounterpartyFundAccount(counterpartyId);
 }
 
 export async function syncICWarehouseFundAccount(warehouseId: string): Promise<void> {
@@ -703,9 +951,9 @@ export async function syncICWarehouseFundAccount(warehouseId: string): Promise<v
 
 export async function backfillICTransferFundAccounts(): Promise<void> {
   try {
-    const suppliers = await query(`SELECT id FROM ic_suppliers ORDER BY created_at ASC`);
-    for (const row of suppliers.rows) {
-      await syncICSupplierFundAccount(String(row.id));
+    const counterparties = await query(`SELECT id FROM ic_counterparties ORDER BY created_at ASC`);
+    for (const row of counterparties.rows) {
+      await syncICCounterpartyFundAccount(String(row.id));
     }
     const warehouses = await query(`SELECT id FROM ic_warehouses ORDER BY created_at ASC`);
     for (const row of warehouses.rows) {
@@ -739,25 +987,44 @@ export async function syncICPurchaseToICFunds(purchaseId: string): Promise<void>
       const purchase = purchaseRes.rows[0];
       const branchId = await resolvePurchaseBranchId(client, purchaseId);
 
-      const amount = Number(purchase.aed_total) || 0;
+      const units = Number(purchase.units) || 0;
+      const amount = purchaseAedTotal(
+        units,
+        Number(purchase.unit_rate) || 0,
+        purchase.aed_total,
+      );
       if (amount <= 0) {
         await voidVoucherByReference(client, branchId, 'ic_purchase', purchaseId);
         return;
       }
 
       let supplierAccountId: string | null = null;
-      if (purchase.supplier_id) {
-        const supplierRes = await client.query(
-          `SELECT id, name, phone FROM ic_suppliers WHERE id = $1 LIMIT 1`,
-          [purchase.supplier_id],
+      const counterpartyId = purchase.counterparty_id
+        ? String(purchase.counterparty_id)
+        : purchase.supplier_id
+          ? (
+              await client.query(
+                `SELECT id, name, phone, legacy_customer_id FROM ic_counterparties
+                 WHERE legacy_supplier_id = $1 LIMIT 1`,
+                [purchase.supplier_id],
+              )
+            ).rows[0]?.id
+          : null;
+
+      if (counterpartyId) {
+        const cpRes = await client.query(
+          `SELECT id, name, phone, legacy_customer_id FROM ic_counterparties WHERE id = $1 LIMIT 1`,
+          [counterpartyId],
         );
-        if (supplierRes.rows.length > 0) {
+        if (cpRes.rows.length > 0) {
+          const cp = cpRes.rows[0];
           supplierAccountId = await ensureLinkedAccount(client, {
             branchId,
-            sourceType: 'ic_supplier',
-            sourceId: String(supplierRes.rows[0].id),
-            name: String(supplierRes.rows[0].name),
-            phone: supplierRes.rows[0].phone ? String(supplierRes.rows[0].phone) : null,
+            sourceType: 'ic_counterparty',
+            sourceId: String(cp.id),
+            name: String(cp.name),
+            phone: cp.phone ? String(cp.phone) : null,
+            customerId: cp.legacy_customer_id ? String(cp.legacy_customer_id) : null,
           });
         }
       }
@@ -765,21 +1032,21 @@ export async function syncICPurchaseToICFunds(purchaseId: string): Promise<void>
       if (!supplierAccountId) {
         supplierAccountId = await ensureLinkedAccount(client, {
           branchId,
-          sourceType: 'ic_supplier',
+          sourceType: 'ic_counterparty',
           sourceId: `purchase:${purchaseId}`,
           name: 'IC Purchase',
         });
       }
 
-      const expenseAccountId = await ensureSystemAccount(
+      const inventoryAccountId = await ensureSystemAccount(
         client,
         branchId,
-        'IC Purchase Cost',
-        'd_expense',
-        'ic_purchase_cost',
+        'IC Inventory',
+        'personal',
+        'ic_inventory',
       );
 
-      if (!supplierAccountId || !expenseAccountId) {
+      if (!supplierAccountId || !inventoryAccountId) {
         throw new Error('Could not resolve IC Funds accounts for purchase');
       }
 
@@ -787,10 +1054,10 @@ export async function syncICPurchaseToICFunds(purchaseId: string): Promise<void>
         branchId,
         voucherType: 'journal',
         voucherDate: isoDate(purchase.created_at),
-        debitAccountId: expenseAccountId,
+        debitAccountId: inventoryAccountId,
         creditAccountId: supplierAccountId,
         amount,
-        notes: `IC Purchase payable ${purchaseId.slice(0, 8)}`,
+        notes: `IC Purchase inventory ${purchaseId.slice(0, 8)}`,
         referenceType: 'ic_purchase',
         referenceId: purchaseId,
       });
@@ -825,26 +1092,50 @@ export async function syncICSaleToICFunds(saleId: string): Promise<void> {
         return;
       }
 
-      const amount = (Number(sale.aed_amount) || 0) + (Number(sale.service_charge) || 0);
+      const metalInrPay =
+        String(sale.settlement_mode || '') === 'metal' && String(sale.metal_payment_method || '') === 'INR';
+      const amount = metalInrPay
+        ? 0
+        : (Number(sale.aed_amount) || 0) + (Number(sale.service_charge) || 0);
       if (amount <= 0 || (!SALE_GHOST_STATUSES.has(orderStatus) && orderStatus !== 'completed')) {
         await voidVoucherByReference(client, branchId, 'ic_sale', saleId);
-        await voidSaleMarginVouchers(client, branchId, saleId);
+        if (String(sale.settlement_mode || '') === 'metal' && orderStatus === 'completed') {
+          await postSaleMarginVouchers(client, sale, branchId);
+        } else {
+          await voidSaleMarginVouchers(client, branchId, saleId);
+        }
         return;
       }
 
       const customerName =
         String(sale.order_customer_name || sale.customer_name || 'IC Customer').trim();
-      const customerSourceId = sale.order_customer_id
-        ? String(sale.order_customer_id)
-        : `name:${customerName.toLowerCase()}`;
 
-      const customerAccountId = await ensureLinkedAccount(client, {
-        branchId,
-        sourceType: 'ic_customer',
-        sourceId: customerSourceId,
-        name: customerName,
-        customerId: sale.order_customer_id ? String(sale.order_customer_id) : null,
-      });
+      let counterpartyId = sale.counterparty_id ? String(sale.counterparty_id) : null;
+      if (!counterpartyId && sale.order_customer_id) {
+        const cpLookup = await client.query(
+          `SELECT id FROM ic_counterparties WHERE legacy_customer_id = $1 LIMIT 1`,
+          [sale.order_customer_id],
+        );
+        if (cpLookup.rows.length > 0) counterpartyId = String(cpLookup.rows[0].id);
+      }
+
+      const customerAccountId = counterpartyId
+        ? await ensureLinkedAccount(client, {
+            branchId,
+            sourceType: 'ic_counterparty',
+            sourceId: counterpartyId,
+            name: customerName,
+            customerId: sale.order_customer_id ? String(sale.order_customer_id) : null,
+          })
+        : await ensureLinkedAccount(client, {
+            branchId,
+            sourceType: 'ic_customer',
+            sourceId: sale.order_customer_id
+              ? String(sale.order_customer_id)
+              : `name:${customerName.toLowerCase()}`,
+            name: customerName,
+            customerId: sale.order_customer_id ? String(sale.order_customer_id) : null,
+          });
 
       const incomeAccountId = await ensureSystemAccount(
         client,

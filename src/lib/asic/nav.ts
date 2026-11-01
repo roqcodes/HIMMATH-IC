@@ -79,8 +79,7 @@ export const ADMIN_SIDEBAR_NAV: AsicAdminSidebarEntry[] = [
     id: 'settings',
     label: 'Settings',
     items: [
-      { id: 'customers', label: L('customers') },
-      { id: 'suppliers', label: L('suppliers') },
+      { id: 'counterparties', label: L('counterparties') },
       { id: 'users', label: L('users') },
       { id: 'backup', label: L('backup') },
     ],
@@ -118,9 +117,8 @@ export const ADMIN_NAV: readonly AsicNavItem[] = [
   { id: 'backup', label: L('backup'), group: 'management' },
   { id: 'account', label: L('account'), group: 'management' },
   // Hidden from menu — routes remain valid for bookmarks / legacy URLs
-  { id: 'customers', label: L('customers'), group: 'master' },
+  { id: 'counterparties', label: L('counterparties'), group: 'master' },
   { id: 'regions', label: L('regions'), group: 'master' },
-  { id: 'suppliers', label: L('suppliers'), group: 'master' },
   { id: 'agents', label: L('agents'), group: 'settings' },
   { id: 'commission', label: L('commission'), group: 'settings' },
 ];

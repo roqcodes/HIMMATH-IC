@@ -9,6 +9,7 @@ export const STAFF_SECTION_LABELS: Record<AsicSectionId, string> = {
   sales: 'Sales',
   purchases: 'Purchases',
   warehouse: 'Warehouses',
+  counterparties: 'Counterparties',
   suppliers: 'Suppliers',
   payments: 'Payments',
   receipts: 'Receipts',
@@ -55,10 +56,10 @@ export const ADMIN_STAFF_PERMISSION_SECTIONS: AsicSectionId[] = [
   'rates',
   'ic-finance',
   'regions',
-  'suppliers',
+  'counterparties',
   'agents',
   'commission',
-  'customers',
+  'counterparties',
   'reconciliation',
   'audit-log',
   'users',
@@ -96,7 +97,7 @@ const ADMIN_STAFF_PERMISSION_GROUPS: StaffPermissionGroup[] = [
   {
     id: 'master',
     label: 'Master data',
-    sections: ['regions', 'suppliers', 'customers', 'agents', 'commission', 'rates'],
+    sections: ['regions', 'counterparties', 'agents', 'commission', 'rates'],
   },
   { id: 'administration', label: 'Administration', sections: ['users', 'global-settings', 'backup'] },
   { id: 'reports', label: 'Reports & audit', sections: ['reports', 'reconciliation', 'audit-log'] },
@@ -133,6 +134,7 @@ const SECTION_TO_LEGACY_KEYS: Partial<Record<AsicSectionId, BranchPageId[]>> = {
   reports: ['ic-funds'],
   rates: ['settings'],
   customers: ['customers'],
+  counterparties: ['customers'],
 };
 
 const LEGACY_TO_SECTION: Partial<Record<BranchPageId, AsicSectionId>> = {
@@ -234,6 +236,10 @@ export function sectionMapToStoredPermissions(
       if (portal === 'admin') {
         result[section] = level;
         if (section === 'entities') result.accounts = level;
+        if (section === 'counterparties') {
+          result.customers = level;
+          result.suppliers = level;
+        }
       } else {
         result = writeSectionAccessToLegacy(result, section, level);
       }

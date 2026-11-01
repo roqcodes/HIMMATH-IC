@@ -38,6 +38,7 @@ export type WarehouseMatrixResult = {
 };
 
 function isActiveOrder(sale: ICSale): boolean {
+  if (sale.settlementMode === 'metal') return false;
   if (isByHandSale(sale)) return false;
   const status = sale.orderStatus || 'pending';
   return !isSaleCompleted(status)
@@ -91,6 +92,15 @@ function computeRow(
     deliveredUnits: computeDeliveredUnits(inRangeSales),
     remainingUnits: computeRemainingUnits(inRangeSales),
   };
+}
+
+/** Available stock for a warehouse (on-hand minus active order reservations). */
+export function computeWarehouseAvailableUnits(warehouse: ICWarehouse, sales: ICSale[]): number {
+  const warehouseSales = sales.filter(s => s.warehouseId === warehouse.id);
+  const activeSales = warehouseSales.filter(isActiveOrder);
+  const currentStock = Number(warehouse.currentStock ?? 0);
+  const reserved = sumUnits(activeSales);
+  return currentStock - reserved;
 }
 
 export function computeWarehouseMatrix(options: {

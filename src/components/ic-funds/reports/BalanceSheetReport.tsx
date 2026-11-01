@@ -123,6 +123,9 @@ export default function BalanceSheetReport({
           ? 'Balance sheet ties: assets equal liabilities plus equity.'
           : `Out of balance by ${fmtLedgerAed(outOfBalance)} — review opening balances or post a journal adjustment.`}
       </p>
+      <p className="px-2.5 pb-2 text-[11px] text-slate-500">
+        IC Inventory (personal ledger) holds unsold purchase value at cost until COGS is posted on sale completion.
+      </p>
     </div>
   );
 }

@@ -3,13 +3,13 @@
 import React, { useMemo, useState } from 'react';
 import Modal from '@/components/ui/Modal';
 import { asicBtnOutline } from '@/components/asic/ui';
-import { btnDangerOutline, btnSuccessSolid, btnWarningSolid } from '@/lib/ui';
+import { btnDangerOutline } from '@/lib/ui';
 import { ICPurchase } from '@/types';
 import { useApp } from '@/context/AppContext';
 import { ConfirmModal } from '@/components/warehouse/shared';
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
 import { formatAmount } from '@/lib/icTransfer/rateCalculations';
-import { getSaleInrAmount } from '@/lib/icTransfer/saleUnits';
+import { formatSettlementModeLabel } from '@/lib/icTransfer/metalSettlement';
 import InrAmountInWords from '../shared/InrAmountInWords';
 import {
   ModalCalcLabel,
@@ -27,36 +27,26 @@ type Props = {
   purchase: ICPurchase | null;
 };
 
-function paymentStatusLabel(status?: ICPurchase['paymentStatus']) {
-  return status === 'paid' ? 'Paid' : 'Pending';
-}
-
 export default function ViewPurchaseModal({ open, onClose, purchase }: Props) {
-  const { icSuppliers, icWarehouses, updateICPurchase, deleteICPurchase } = useApp();
+  const { icSuppliers, icWarehouses, deleteICPurchase } = useApp();
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
-  const [statusLoading, setStatusLoading] = useState(false);
 
   const amounts = useMemo(() => {
     if (!purchase) return null;
-    const inrTotal = purchase.convertedTotal ?? getSaleInrAmount(purchase.units);
+    const inrTotal = purchase.convertedTotal ?? 0;
     const aedTotal = purchase.aedTotal ?? purchase.units * purchase.unitRate;
     return { inrTotal, aedTotal };
   }, [purchase]);
 
   if (!purchase || !amounts) return null;
 
-  const isPaid = purchase.paymentStatus === 'paid';
+  const isMetal = purchase.settlementMode === 'metal';
 
   const getSupplierName = (id?: string) => icSuppliers.find(s => s.id === id)?.name || id || 'Unknown';
-  const getWarehouseName = (id?: string) => icWarehouses.find(w => w.id === id)?.name || id || 'Unknown';
-
-  const handleTogglePaid = async () => {
-    setStatusLoading(true);
-    const newStatus = isPaid ? 'pending' : 'paid';
-    await updateICPurchase(purchase.id, { paymentStatus: newStatus });
-    setStatusLoading(false);
-    onClose();
+  const getWarehouseName = (id?: string) => {
+    if (!id) return '—';
+    return icWarehouses.find(w => w.id === id)?.name || '—';
   };
 
   const handleDelete = async () => {
@@ -80,32 +70,13 @@ export default function ViewPurchaseModal({ open, onClose, purchase }: Props) {
               type="button"
               onClick={() => setConfirmDeleteOpen(true)}
               className={btnDangerOutline}
-              disabled={deleteLoading || statusLoading}
+              disabled={deleteLoading}
             >
               Delete
             </button>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                className={asicBtnOutline}
-                onClick={onClose}
-                disabled={deleteLoading || statusLoading}
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                onClick={handleTogglePaid}
-                disabled={deleteLoading || statusLoading}
-                className={isPaid ? btnWarningSolid : btnSuccessSolid}
-              >
-                {statusLoading
-                  ? 'Updating…'
-                  : isPaid
-                    ? 'Mark as pending'
-                    : 'Mark as paid'}
-              </button>
-            </div>
+            <button type="button" className={asicBtnOutline} onClick={onClose} disabled={deleteLoading}>
+              Close
+            </button>
           </div>
         }
       >
@@ -124,14 +95,18 @@ export default function ViewPurchaseModal({ open, onClose, purchase }: Props) {
               value={<ModalRecordedOnValue iso={purchase.createdAt} />}
             />
             <ModalDetailRow
-              label="Payment status"
+              label="Status"
               value={
-                <span
-                  className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                    isPaid ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                  }`}
-                >
-                  {paymentStatusLabel(purchase.paymentStatus)}
+                <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">
+                  Completed
+                </span>
+              }
+            />
+            <ModalDetailRow
+              label="Settlement"
+              value={
+                <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-700">
+                  {formatSettlementModeLabel(purchase.settlementMode)}
                 </span>
               }
             />
@@ -145,6 +120,13 @@ export default function ViewPurchaseModal({ open, onClose, purchase }: Props) {
           </div>
 
           <div className="space-y-3">
+            {isMetal ? (
+              <div className={`grid grid-cols-2 gap-4 sm:grid-cols-3 ${modalCalcPanelClass}`}>
+                <ModalDetailRow label="Weight (g)" value={formatAmount(purchase.metalWeightG ?? 0, 4)} />
+                <ModalDetailRow label="Rate / g (INR)" value={formatAmount(purchase.metalRateInrPerG ?? 0)} />
+                <ModalDetailRow label="Rate / g (AED)" value={formatAmount(purchase.metalRateAedPerG ?? 0)} />
+              </div>
+            ) : (
             <div className={`grid grid-cols-2 gap-4 ${modalCalcPanelClass}`}>
               <div>
                 <ModalCalcLabel>Units</ModalCalcLabel>
@@ -159,43 +141,34 @@ export default function ViewPurchaseModal({ open, onClose, purchase }: Props) {
                 </p>
               </div>
             </div>
+            )}
 
-            <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${modalCalcPanelClass}`}>
+            <div className={`grid grid-cols-1 gap-4 ${isMetal ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} ${modalCalcPanelClass}`}>
+              {isMetal ? (
+                <div>
+                  <ModalCalcLabel>Stock units</ModalCalcLabel>
+                  <p className="mt-0.5 text-sm font-bold tabular-nums text-slate-900">
+                    {formatAmount(purchase.units, 4)}
+                  </p>
+                </div>
+              ) : null}
               <div>
                 <ModalCalcLabel>Total (INR)</ModalCalcLabel>
                 <p className="mt-0.5 text-sm font-bold tabular-nums text-slate-900">
                   {formatModalInrTotal(amounts.inrTotal)}
                 </p>
-                <InrAmountInWords
-                  amount={amounts.inrTotal}
-                  className="mt-0.5 text-sm font-medium leading-snug text-slate-500"
-                />
+                <InrAmountInWords amount={amounts.inrTotal} className="mt-1" />
               </div>
               <div>
                 <ModalCalcLabel>Total (AED)</ModalCalcLabel>
-                <p className="mt-0.5 text-sm font-bold tabular-nums text-accent">
+                <p className="mt-0.5 text-sm font-bold tabular-nums text-slate-900">
                   {formatModalAedTotal(amounts.aedTotal)}
                 </p>
               </div>
             </div>
-          </div>
 
-          <div className="grid grid-cols-1 gap-4 border-t border-slate-100 pt-5 sm:grid-cols-2">
-            <ModalDetailRow
-              label="Payment method"
-              value={
-                <span className="font-medium capitalize text-slate-700">
-                  {purchase.paymentMethod?.trim() || 'Not recorded'}
-                </span>
-              }
-            />
-            {purchase.notes?.trim() ? (
-              <div className="sm:col-span-2">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Notes</p>
-                <p className="mt-1.5 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2.5 text-sm leading-relaxed text-slate-700 whitespace-pre-wrap">
-                  {purchase.notes.trim()}
-                </p>
-              </div>
+            {purchase.notes ? (
+              <ModalDetailRow label="Notes" value={purchase.notes} />
             ) : null}
           </div>
         </div>
@@ -203,13 +176,12 @@ export default function ViewPurchaseModal({ open, onClose, purchase }: Props) {
 
       <ConfirmModal
         open={confirmDeleteOpen}
-        title="Delete purchase"
-        message="Are you sure you want to delete this purchase? This action cannot be undone."
-        confirmLabel="Delete purchase"
-        variant="danger"
-        loading={deleteLoading}
-        onConfirm={handleDelete}
         onCancel={() => setConfirmDeleteOpen(false)}
+        onConfirm={handleDelete}
+        title="Delete purchase?"
+        message="This will remove the purchase and reverse its ledger entries."
+        confirmLabel="Delete"
+        loading={deleteLoading}
       />
     </>
   );

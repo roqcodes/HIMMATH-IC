@@ -1,6 +1,7 @@
 'use server';
 
 import { cookies } from 'next/headers';
+import type { PoolClient } from 'pg';
 import { query, withTransaction } from '@/lib/db';
 import { DbActionResult } from './dbActions';
 import { getCurrentUserAction } from './auth';
@@ -22,8 +23,16 @@ import {
   mapICPurchaseRow,
   mapICSaleRow,
 } from '@/lib/icTransferMappers';
-import { adjustWarehouseStock, logWarehouseStockTransaction } from '@/lib/warehouse/stockDb';
-import { assertICTransferSalesEnabledAction } from '@/app/actions/icTransferSettingsActions';
+import { resolveNormalizedPurchase, resolveNormalizedSale } from '@/lib/icTransfer/metalSettlement';
+import {
+  formatMetalLotLabel,
+  isFullRemainingSell,
+  normalizeMetalLotSale,
+  remainingMetalGramsOnLot,
+} from '@/lib/icTransfer/metalInventory';
+import { sqlExcludeVoidIcSales } from '@/lib/icFunds/icTransferReportFilters';
+import { adjustWarehouseMetalStock, adjustWarehouseStock, logWarehouseStockTransaction } from '@/lib/warehouse/stockDb';
+import { assertICTransferSalesEnabledAction, getICTransferSettingsFromDb, assertWarehouseFulfillmentWorkflowAction } from '@/app/actions/icTransferSettingsActions';
 import {
   hasICSaleEditableFieldsChanged,
   type ICSaleContentFields,
@@ -49,6 +58,7 @@ import {
 import { canEditOrder, canDeleteOrder } from '@/lib/icTransfer/orderWorkflowRules';
 import { validateSubCustomerForOrder } from '@/app/actions/subCustomerActions';
 import { transactionTypeRequiresBank } from '@/lib/icTransfer/transactionTypes';
+import { SELECT_RATE_GROUPS_BY_IDS_WITH_MEMBERS } from '@/lib/icTransfer/rateGroupQueries';
 import { normalizePricingConfig, validatePricingConfig } from '@/lib/icTransfer/ratePricing';
 import { logger } from '@/lib/logger';
 import {
@@ -58,6 +68,7 @@ import {
   removeICPurchaseFundLedger,
 } from '@/lib/icTransfer/fundLedgerSync';
 import { syncICSupplierFundAccount, syncICWarehouseFundAccount } from '@/lib/icFunds/icTransferFundSync';
+import { loadCounterpartyLink } from '@/lib/counterparties/db';
 import {
   addRegionSchema,
   updateRegionSchema,
@@ -77,7 +88,14 @@ import {
   addSaleSchema,
   updateSaleSchema,
 } from '@/lib/validations/icTransfer';
+import { entityCodeConflictMessage } from '@/lib/validations/entityCode';
 import { z } from 'zod';
+
+async function loadRateGroupsWithMembers(groupIds: string[]) {
+  if (groupIds.length === 0) return [];
+  const res = await query(SELECT_RATE_GROUPS_BY_IDS_WITH_MEMBERS, [groupIds]);
+  return res.rows.map(mapICRateGroupRow);
+}
 
 type BranchPortalLoad = {
   branchId: string | null;
@@ -137,11 +155,17 @@ async function loadBranchPortalContext(
 
 // ── Column whitelists to prevent SQL injection in dynamic updates ────
 const PURCHASE_COLUMNS: Record<string, string> = {
+  counterpartyId: 'counterparty_id',
   supplierId: 'supplier_id',
   locationId: 'location_id',
   warehouseId: 'warehouse_id',
+  settlementMode: 'settlement_mode',
   unitRate: 'unit_rate',
   units: 'units',
+  metalWeightG: 'metal_weight_g',
+  metalRateInrPerG: 'metal_rate_inr_per_g',
+  metalRateAedPerG: 'metal_rate_aed_per_g',
+  inrTotal: 'inr_total',
   paymentMethod: 'payment_method',
   notes: 'notes',
   aedTotal: 'aed_total',
@@ -152,12 +176,20 @@ const SALE_COLUMNS: Record<string, string> = {
   customerName: 'customer_name',
   orderCustomerName: 'order_customer_name',
   orderCustomerId: 'order_customer_id',
+  counterpartyId: 'counterparty_id',
   subCustomerId: 'sub_customer_id',
   subCustomerName: 'sub_customer_name',
   warehouseId: 'warehouse_id',
+  settlementMode: 'settlement_mode',
   transactionType: 'transaction_type',
   units: 'units',
   unitRate: 'unit_rate',
+  metalWeightG: 'metal_weight_g',
+  metalRateInrPerG: 'metal_rate_inr_per_g',
+  metalRateAedPerG: 'metal_rate_aed_per_g',
+  inrTotal: 'inr_total',
+  metalPurchaseId: 'metal_purchase_id',
+  metalPaymentMethod: 'metal_payment_method',
   aedAmount: 'aed_amount',
   bank: 'bank',
   address: 'address',
@@ -174,6 +206,51 @@ const SALE_COLUMNS: Record<string, string> = {
   deliveryAgentId: 'delivery_agent_id',
   deliveryImageUrl: 'delivery_image_url',
 };
+
+type MetalSaleStockRow = {
+  id?: unknown;
+  warehouse_id?: string | null;
+  settlement_mode?: string | null;
+  metal_weight_g?: unknown;
+  metal_payment_method?: string | null;
+  units?: unknown;
+};
+
+async function applyMetalSaleStock(
+  client: PoolClient,
+  warehouseId: string,
+  saleId: string,
+  grams: number,
+  paymentMethod: 'INR' | 'AED',
+  units: number,
+): Promise<void> {
+  if (grams > 0) {
+    await logWarehouseStockTransaction(client, warehouseId, 'clear', grams, 'metal_sale', saleId);
+    await adjustWarehouseMetalStock(client, warehouseId, -grams);
+  }
+  if (paymentMethod === 'INR' && units > 0) {
+    await logWarehouseStockTransaction(
+      client,
+      warehouseId,
+      'receive',
+      units,
+      'metal_sale_inr_units',
+      saleId,
+    );
+    await adjustWarehouseStock(client, warehouseId, units);
+  }
+}
+
+async function reverseMetalSaleStock(client: PoolClient, sale: MetalSaleStockRow): Promise<void> {
+  if (sale.settlement_mode !== 'metal' || !sale.warehouse_id) return;
+  const warehouseId = String(sale.warehouse_id);
+  const grams = Number(sale.metal_weight_g) || 0;
+  const units = Number(sale.units) || 0;
+  if (grams > 0) await adjustWarehouseMetalStock(client, warehouseId, grams);
+  if (sale.metal_payment_method === 'INR' && units > 0) {
+    await adjustWarehouseStock(client, warehouseId, -units);
+  }
+}
 
 async function resolveEnteredByForBranch(branchSlug?: string) {
   const slug = branchSlug && branchSlug !== 'superadmin' ? branchSlug : undefined;
@@ -268,16 +345,32 @@ export async function dbDeleteICRegionAction(id: string): Promise<DbActionResult
 
 export async function dbAddICSupplierAction(
   name: string,
+  code?: string | null,
   phone?: string,
   commission?: number | null,
   regionId?: string,
   email?: string,
   address?: string,
+  country?: string,
+  subdivision?: string,
+  locality?: string,
   branchId?: string | null,
   branchSlug?: string,
 ): Promise<DbActionResult<ICSupplier>> {
   try {
-    const parsed = addSupplierSchema.parse({ name, phone, commission, regionId, email, address, branchId });
+    const parsed = addSupplierSchema.parse({
+      name,
+      code,
+      phone,
+      commission,
+      regionId,
+      email,
+      address,
+      country,
+      subdivision,
+      locality,
+      branchId,
+    });
 
     if (parsed.branchId) {
       const user = await resolveICTransferAdminUser(branchSlug);
@@ -293,22 +386,28 @@ export async function dbAddICSupplierAction(
 
     const id = crypto.randomUUID();
     const res = await query(
-      `INSERT INTO ic_suppliers (id, name, phone, commission, region_id, email, address, branch_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      `INSERT INTO ic_counterparties (id, name, code, phone, commission, region_id, email, address, country, subdivision, locality, branch_id, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'active') RETURNING *`,
       [
         id,
         parsed.name,
+        parsed.code,
         parsed.phone || null,
         parsed.commission || 0,
         parsed.regionId || null,
         parsed.email || null,
         parsed.address || null,
+        parsed.country?.trim() || null,
+        parsed.subdivision?.trim() || null,
+        parsed.locality?.trim() || null,
         parsed.branchId || null,
       ],
     );
     await syncICSupplierFundAccount(id);
     return { success: true, data: mapICSupplierRow(res.rows[0]) };
   } catch (error: unknown) {
+    const conflict = entityCodeConflictMessage(error);
+    if (conflict) return { success: false, error: conflict };
     logger.error({ error, name, email }, 'Error in dbAddICSupplierAction');
     return { success: false, error: error instanceof Error ? error.message : 'Database error' };
   }
@@ -317,26 +416,56 @@ export async function dbAddICSupplierAction(
 export async function dbUpdateICSupplierAction(
   id: string,
   name: string,
+  code?: string | null,
   phone?: string,
   commission?: number | null,
   regionId?: string,
   email?: string,
   address?: string,
+  country?: string,
+  subdivision?: string,
+  locality?: string,
   branchSlug?: string,
 ): Promise<DbActionResult<ICSupplier>> {
   try {
-    const parsed = updateSupplierSchema.parse({ id, name, phone, commission, regionId, email, address });
+    const parsed = updateSupplierSchema.parse({
+      id,
+      name,
+      code,
+      phone,
+      commission,
+      regionId,
+      email,
+      address,
+      country,
+      subdivision,
+      locality,
+    });
     const ownershipCheck = await assertSupplierMutationAllowed(parsed.id, branchSlug);
     if (ownershipCheck) return { success: false, error: ownershipCheck.error };
 
     const res = await query(
-      `UPDATE ic_suppliers SET name=$1, phone=$2, commission=$3, region_id=$4, email=$5, address=$6 WHERE id=$7 RETURNING *`,
-      [parsed.name, parsed.phone || null, parsed.commission || 0, parsed.regionId || null, parsed.email || null, parsed.address || null, parsed.id]
+      `UPDATE ic_counterparties SET name=$1, code=$2, phone=$3, commission=$4, region_id=$5, email=$6, address=$7, country=$8, subdivision=$9, locality=$10 WHERE id=$11 RETURNING *`,
+      [
+        parsed.name,
+        parsed.code,
+        parsed.phone || null,
+        parsed.commission || 0,
+        parsed.regionId || null,
+        parsed.email || null,
+        parsed.address || null,
+        parsed.country?.trim() || null,
+        parsed.subdivision?.trim() || null,
+        parsed.locality?.trim() || null,
+        parsed.id,
+      ],
     );
     if (res.rowCount === 0) return { success: false, error: 'Supplier not found' };
     await syncICSupplierFundAccount(parsed.id);
     return { success: true, data: mapICSupplierRow(res.rows[0]) };
   } catch (error: unknown) {
+    const conflict = entityCodeConflictMessage(error);
+    if (conflict) return { success: false, error: conflict };
     logger.error({ error, id, name }, 'Error in dbUpdateICSupplierAction');
     return { success: false, error: error instanceof Error ? error.message : 'Database error' };
   }
@@ -348,8 +477,8 @@ export async function dbDeleteICSupplierAction(id: string, branchSlug?: string):
     const ownershipCheck = await assertSupplierMutationAllowed(parsedId, branchSlug);
     if (ownershipCheck) return { success: false, error: ownershipCheck.error };
 
-    const res = await query(`DELETE FROM ic_suppliers WHERE id=$1`, [parsedId]);
-    if (res.rowCount === 0) return { success: false, error: 'Supplier not found' };
+    const res = await query(`DELETE FROM ic_counterparties WHERE id=$1`, [parsedId]);
+    if (res.rowCount === 0) return { success: false, error: 'Counterparty not found' };
     return { success: true };
   } catch (error: unknown) {
     logger.error({ error, id }, 'Error in dbDeleteICSupplierAction');
@@ -359,38 +488,48 @@ export async function dbDeleteICSupplierAction(id: string, branchSlug?: string):
 
 export async function dbAddICWarehouseAction(
   name: string,
+  code?: string | null,
   phone?: string,
   commission?: number | null,
   regionId?: string,
   email?: string,
   address?: string,
+  indiaState?: string,
+  indiaCity?: string,
   sendDeliveryProofToCustomer: boolean = true,
   branchId?: string | null,
 ): Promise<DbActionResult<ICWarehouse>> {
   try {
     const parsed = addWarehouseSchema.parse({
       name,
+      code,
       phone,
       commission,
       regionId,
       email,
       address,
+      indiaState,
+      indiaCity,
       sendDeliveryProofToCustomer,
       branchId,
     });
     const id = crypto.randomUUID();
     const res = await query(
       `INSERT INTO ic_warehouses (
-         id, name, phone, commission, region_id, email, address, send_delivery_proof_to_customer, branch_id
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+         id, name, code, phone, commission, region_id, email, address, india_state, india_city,
+         send_delivery_proof_to_customer, branch_id
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
       [
         id,
         parsed.name,
+        parsed.code,
         parsed.phone || null,
         parsed.commission || 0,
         parsed.regionId || null,
         parsed.email || null,
         parsed.address || null,
+        parsed.indiaState?.trim() || null,
+        parsed.indiaCity?.trim() || null,
         parsed.sendDeliveryProofToCustomer ?? true,
         parsed.branchId || null,
       ],
@@ -398,6 +537,8 @@ export async function dbAddICWarehouseAction(
     await syncICWarehouseFundAccount(id);
     return { success: true, data: mapICWarehouseRow(res.rows[0]) };
   } catch (error: unknown) {
+    const conflict = entityCodeConflictMessage(error);
+    if (conflict) return { success: false, error: conflict };
     logger.error({ error, name, email }, 'Error in dbAddICWarehouseAction');
     return { success: false, error: error instanceof Error ? error.message : 'Database error' };
   }
@@ -406,36 +547,45 @@ export async function dbAddICWarehouseAction(
 export async function dbUpdateICWarehouseAction(
   id: string,
   name: string,
+  code?: string | null,
   phone?: string,
   commission?: number | null,
   regionId?: string,
   email?: string,
   address?: string,
+  indiaState?: string,
+  indiaCity?: string,
   sendDeliveryProofToCustomer: boolean = true,
 ): Promise<DbActionResult<ICWarehouse>> {
   try {
     const parsed = updateWarehouseSchema.parse({
       id,
       name,
+      code,
       phone,
       commission,
       regionId,
       email,
       address,
+      indiaState,
+      indiaCity,
       sendDeliveryProofToCustomer,
     });
     const res = await query(
       `UPDATE ic_warehouses
-       SET name=$1, phone=$2, commission=$3, region_id=$4, email=$5, address=$6,
-           send_delivery_proof_to_customer=$7
-       WHERE id=$8 RETURNING *`,
+       SET name=$1, code=$2, phone=$3, commission=$4, region_id=$5, email=$6, address=$7,
+           india_state=$8, india_city=$9, send_delivery_proof_to_customer=$10
+       WHERE id=$11 RETURNING *`,
       [
         parsed.name,
+        parsed.code,
         parsed.phone || null,
         parsed.commission || 0,
         parsed.regionId || null,
         parsed.email || null,
         parsed.address || null,
+        parsed.indiaState?.trim() || null,
+        parsed.indiaCity?.trim() || null,
         parsed.sendDeliveryProofToCustomer ?? true,
         parsed.id,
       ],
@@ -444,6 +594,8 @@ export async function dbUpdateICWarehouseAction(
     await syncICWarehouseFundAccount(parsed.id);
     return { success: true, data: mapICWarehouseRow(res.rows[0]) };
   } catch (error: unknown) {
+    const conflict = entityCodeConflictMessage(error);
+    if (conflict) return { success: false, error: conflict };
     logger.error({ error, id, name }, 'Error in dbUpdateICWarehouseAction');
     return { success: false, error: error instanceof Error ? error.message : 'Database error' };
   }
@@ -490,10 +642,11 @@ export async function dbAddICRateGroupAction(
     const id = crypto.randomUUID();
     const res = await query(
       `INSERT INTO ic_rate_groups (id, name, country, sale_rate)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
+       VALUES ($1, $2, $3, $4) RETURNING id`,
       [id, parsed.name, parsed.country, parsed.saleRate],
     );
-    return { success: true, data: mapICRateGroupRow(res.rows[0]) };
+    const loaded = await loadRateGroupsWithMembers([String(res.rows[0].id)]);
+    return { success: true, data: loaded[0]! };
   } catch (error: unknown) {
     logger.error({ error, name, country }, 'Error in dbAddICRateGroupAction');
     return { success: false, error: error instanceof Error ? error.message : 'Database error' };
@@ -510,11 +663,12 @@ export async function dbUpdateICRateGroupAction(
       `UPDATE ic_rate_groups
        SET name = $1, country = $2, sale_rate = $3, updated_at = CURRENT_TIMESTAMP
        WHERE id = $4
-       RETURNING *`,
+       RETURNING id`,
       [parsed.name, parsed.country, parsed.saleRate, parsed.id],
     );
     if (res.rowCount === 0) return { success: false, error: 'Group not found' };
-    return { success: true, data: mapICRateGroupRow(res.rows[0]) };
+    const loaded = await loadRateGroupsWithMembers([parsed.id]);
+    return { success: true, data: loaded[0]! };
   } catch (error: unknown) {
     logger.error({ error, id, name }, 'Error in dbUpdateICRateGroupAction');
     return { success: false, error: error instanceof Error ? error.message : 'Database error' };
@@ -554,11 +708,13 @@ export async function dbBulkUpdateICRateGroupRatesAction(
       `UPDATE ic_rate_groups
        SET sale_rate = $1, pricing_config = $2::jsonb, updated_at = CURRENT_TIMESTAMP
        WHERE id = ANY($3::text[])
-       RETURNING *`,
+       RETURNING id`,
       [parsed.saleRate, configPayload, parsed.groupIds],
     );
     if (res.rowCount === 0) return { success: false, error: 'No groups were updated' };
-    return { success: true, data: res.rows.map(mapICRateGroupRow) };
+    const ids = res.rows.map(r => String(r.id));
+    const loaded = await loadRateGroupsWithMembers(ids);
+    return { success: true, data: loaded };
   } catch (error: unknown) {
     logger.error({ error, groupIds }, 'Error in dbBulkUpdateICRateGroupRatesAction');
     return { success: false, error: error instanceof Error ? error.message : 'Database error' };
@@ -598,11 +754,12 @@ export async function dbUpdateICRateGroupPricingAction(
       `UPDATE ic_rate_groups
        SET sale_rate = $1, pricing_config = $2::jsonb, updated_at = CURRENT_TIMESTAMP
        WHERE id = $3
-       RETURNING *`,
+       RETURNING id`,
       [parsed.saleRate, configPayload, parsed.groupId],
     );
     if (res.rowCount === 0) return { success: false, error: 'Group not found' };
-    return { success: true, data: mapICRateGroupRow(res.rows[0]) };
+    const loaded = await loadRateGroupsWithMembers([parsed.groupId]);
+    return { success: true, data: loaded[0]! };
   } catch (error: unknown) {
     logger.error({ error, groupId }, 'Error in dbUpdateICRateGroupPricingAction');
     return { success: false, error: error instanceof Error ? error.message : 'Database error' };
@@ -657,7 +814,17 @@ export async function dbSetICRateGroupCustomersAction(groupId: string, customerI
 
 export async function dbSetICRateGroupBranchesAction(groupId: string, branchIds: string[]): Promise<DbActionResult<void>> {
   try {
-    setRateGroupBranchesSchema.parse({ groupId, branchIds });
+    const parsed = setRateGroupBranchesSchema.parse({ groupId, branchIds });
+    await withTransaction(async (client) => {
+      await client.query('DELETE FROM ic_rate_group_branches WHERE group_id = $1', [parsed.groupId]);
+      if (parsed.branchIds.length > 0) {
+        await client.query(
+          `INSERT INTO ic_rate_group_branches (group_id, branch_id)
+           SELECT $1, unnest($2::text[])`,
+          [parsed.groupId, parsed.branchIds],
+        );
+      }
+    });
     return { success: true };
   } catch (err: unknown) {
     logger.error({ err, groupId, branchIds }, 'Error in dbSetICRateGroupBranchesAction');
@@ -671,38 +838,68 @@ export async function dbAddICPurchaseAction(
 ): Promise<DbActionResult<ICPurchase>> {
   try {
     const parsed = addPurchaseSchema.parse(purchase);
-    const warehouseCheck = await assertBranchManagerPurchaseWarehouse(parsed.warehouseId, branchSlug);
+    const normalized = resolveNormalizedPurchase(parsed);
+    if (!parsed.warehouseId?.trim()) {
+      return { success: false, error: 'Warehouse is required for inventory and ledger stock.' };
+    }
+    const warehouseCheck = parsed.warehouseId
+      ? await assertBranchManagerPurchaseWarehouse(parsed.warehouseId, branchSlug)
+      : null;
     if (warehouseCheck) return { success: false, error: warehouseCheck.error };
-    const supplierCheck = await assertBranchManagerPurchaseSupplier(parsed.supplierId, branchSlug);
+    const supplierCheck = await assertBranchManagerPurchaseSupplier(parsed.counterpartyId, branchSlug);
     if (supplierCheck) return { success: false, error: supplierCheck.error };
 
     const row = await withTransaction(async (client) => {
+      const party = await loadCounterpartyLink(client, String(parsed.counterpartyId));
+      if (!party) throw new Error('Counterparty not found');
+
       const res = await client.query(
-        `INSERT INTO ic_purchases (supplier_id, location_id, warehouse_id, unit_rate, units, payment_method, notes, aed_total)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        `INSERT INTO ic_purchases (
+           counterparty_id, supplier_id, location_id, warehouse_id, unit_rate, units, payment_method, notes, aed_total, payment_status,
+           settlement_mode, metal_weight_g, metal_rate_inr_per_g, metal_rate_aed_per_g, inr_total
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'paid', $10, $11, $12, $13, $14) RETURNING *`,
         [
-          parsed.supplierId || null,
+          party.counterpartyId,
+          party.legacySupplierId,
           parsed.locationId || null,
           parsed.warehouseId || null,
-          parsed.unitRate,
-          parsed.units,
-          parsed.paymentMethod || null,
+          normalized.unitRate,
+          normalized.units,
+          parsed.paymentMethod || normalized.settlementMode,
           parsed.notes || null,
-          parsed.aedTotal || null
-        ]
+          normalized.aedTotal,
+          normalized.settlementMode,
+          normalized.metalWeightG,
+          normalized.metalRateInrPerG,
+          normalized.metalRateAedPerG,
+          normalized.inrTotal,
+        ],
       );
 
-      // Log receive transaction and increment warehouse stock
       if (parsed.warehouseId) {
-        await logWarehouseStockTransaction(
-          client,
-          parsed.warehouseId,
-          'receive',
-          parsed.units,
-          'purchase',
-          res.rows[0].id,
-        );
-        await adjustWarehouseStock(client, parsed.warehouseId, parsed.units);
+        if (normalized.settlementMode === 'metal') {
+          const grams = normalized.metalWeightG;
+          await logWarehouseStockTransaction(
+            client,
+            parsed.warehouseId,
+            'receive',
+            grams,
+            'metal_purchase',
+            res.rows[0].id,
+          );
+          await adjustWarehouseMetalStock(client, parsed.warehouseId, grams);
+        } else {
+          await logWarehouseStockTransaction(
+            client,
+            parsed.warehouseId,
+            'receive',
+            normalized.units,
+            'purchase',
+            res.rows[0].id,
+          );
+          await adjustWarehouseStock(client, parsed.warehouseId, normalized.units);
+        }
       }
 
       return res.rows[0];
@@ -716,6 +913,70 @@ export async function dbAddICPurchaseAction(
   }
 }
 
+export type AvailableMetalLot = {
+  id: string;
+  warehouseId: string;
+  remainingG: number;
+  metalWeightG: number;
+  metalRateInrPerG: number;
+  metalRateAedPerG: number;
+  inrTotal: number;
+  aedTotal: number;
+  createdAt?: string;
+  label: string;
+};
+
+export async function listAvailableMetalLotsAction(
+  warehouseId: string,
+  excludeSaleId?: string,
+): Promise<AvailableMetalLot[]> {
+  if (!warehouseId?.trim()) return [];
+  try {
+    const res = await query(
+      `SELECT p.id, p.warehouse_id, p.metal_weight_g, p.metal_rate_inr_per_g, p.metal_rate_aed_per_g,
+              p.inr_total, p.aed_total, p.created_at,
+              COALESCE((
+                SELECT SUM(s.metal_weight_g)
+                FROM ic_sales s
+                WHERE s.metal_purchase_id = p.id
+                  ${sqlExcludeVoidIcSales('s')}
+                  AND ($2::uuid IS NULL OR s.id <> $2::uuid)
+              ), 0) AS sold_g
+       FROM ic_purchases p
+       WHERE p.warehouse_id = $1
+         AND p.settlement_mode = 'metal'
+       ORDER BY p.created_at DESC`,
+      [warehouseId, excludeSaleId?.trim() || null],
+    );
+    return res.rows
+      .map(row => {
+        const metalWeightG = Number(row.metal_weight_g) || 0;
+        const remainingG = remainingMetalGramsOnLot(metalWeightG, [
+          { metalWeightG: Number(row.sold_g) || 0, orderStatus: 'completed' },
+        ]);
+        const mapped = {
+          id: String(row.id),
+          warehouseId: String(row.warehouse_id),
+          remainingG,
+          metalWeightG,
+          metalRateInrPerG: Number(row.metal_rate_inr_per_g) || 0,
+          metalRateAedPerG: Number(row.metal_rate_aed_per_g) || 0,
+          inrTotal: Number(row.inr_total) || 0,
+          aedTotal: Number(row.aed_total) || 0,
+          createdAt: row.created_at ? new Date(row.created_at).toISOString() : undefined,
+        };
+        return {
+          ...mapped,
+          label: formatMetalLotLabel(mapped),
+        };
+      })
+      .filter(lot => lot.remainingG > 0.0001);
+  } catch (err) {
+    logger.error({ err, warehouseId }, 'listAvailableMetalLotsAction failed');
+    return [];
+  }
+}
+
 export async function dbAddICSaleAction(
   sale: Omit<ICSale, 'id' | 'createdAt' | 'enteredBy' | 'enteredByName' | 'enteredByUserId'>,
   branchSlug?: string,
@@ -726,10 +987,15 @@ export async function dbAddICSaleAction(
       return { success: false, error: salesGuard.error };
     }
 
+    const transferSettings = await getICTransferSettingsFromDb();
     const parsed = addSaleSchema.parse(sale);
     const slug = branchSlug && branchSlug !== 'superadmin' ? branchSlug : undefined;
     const userRes = slug ? await getCurrentUserAction(slug) : await getCurrentUserAction();
     const user = userRes.success ? userRes.data : null;
+
+    if (user?.role !== 'customer' && !parsed.warehouseId?.trim()) {
+      return { success: false, error: 'Warehouse is required.' };
+    }
 
     let salePayload = { ...parsed };
     let branchName = '';
@@ -772,6 +1038,13 @@ export async function dbAddICSaleAction(
         subCustomerName: subCustomer.name,
         warehouseId: undefined,
       };
+      const cpRes = await query(
+        `SELECT id FROM ic_counterparties WHERE legacy_customer_id = $1 LIMIT 1`,
+        [user.customerId],
+      );
+      if (cpRes.rows.length > 0) {
+        salePayload = { ...salePayload, counterpartyId: String(cpRes.rows[0].id) };
+      }
     } else if (user && slug && (user.role === 'branch_manager' || user.role === 'staff') && branchName) {
       salePayload = {
         ...salePayload,
@@ -786,6 +1059,17 @@ export async function dbAddICSaleAction(
       salePayload = { ...salePayload, bank: undefined };
     }
 
+    if (user?.role !== 'customer' && parsed.counterpartyId) {
+      const cp = await loadCounterpartyLink({ query }, String(parsed.counterpartyId));
+      if (!cp) return { success: false, error: 'Counterparty not found' };
+      salePayload = {
+        ...salePayload,
+        counterpartyId: cp.counterpartyId,
+        orderCustomerId: cp.legacyCustomerId ?? salePayload.orderCustomerId ?? undefined,
+        orderCustomerName: salePayload.orderCustomerName || cp.name,
+      };
+    }
+
     const { enteredBy, enteredByName, enteredByUserId } = user
       ? {
           enteredBy: user.email || 'system',
@@ -794,32 +1078,75 @@ export async function dbAddICSaleAction(
         }
       : await resolveEnteredByForBranch(branchSlug);
     const isCustomerOrder = user?.role === 'customer';
-    let initialOrderStatus = salePayload.warehouseId ? 'accepted' : 'pending';
+    const isMetalSale = (salePayload.settlementMode ?? parsed.settlementMode) === 'metal';
+    const metalLotSale = isMetalSale
+      ? normalizeMetalLotSale({
+          metalPurchaseId: String(salePayload.metalPurchaseId || parsed.metalPurchaseId || ''),
+          paymentMethod: salePayload.metalPaymentMethod === 'INR' ? 'INR' : 'AED',
+          input: {
+            metalWeightG: Number(salePayload.metalWeightG ?? parsed.metalWeightG),
+            metalRateInrPerG: Number(salePayload.metalRateInrPerG ?? parsed.metalRateInrPerG),
+            metalRateAedPerG: Number(salePayload.metalRateAedPerG ?? parsed.metalRateAedPerG),
+            totalInr: Number(salePayload.inrTotal ?? parsed.inrTotal),
+            totalAed: Number(salePayload.aedAmount ?? parsed.aedAmount),
+          },
+        })
+      : null;
+    const instantComplete = isMetalSale || !transferSettings.warehouseFulfillmentEnabled;
+    let initialOrderStatus = instantComplete ? 'completed' : salePayload.warehouseId ? 'accepted' : 'pending';
     let fulfillmentHandler = salePayload.fulfillmentHandler === 'branch' ? 'branch' : 'hq_admin';
+    const statusUpdatedBy = instantComplete ? enteredBy : null;
 
-    if (isCustomerOrder) {
+    if (isCustomerOrder && !instantComplete) {
       initialOrderStatus = customerOrderInitialStatus(branchPortalConfig);
       fulfillmentHandler = 'hq_admin';
+    } else if (isCustomerOrder && instantComplete) {
+      fulfillmentHandler = 'hq_admin';
     }
+
+    if (user?.role !== 'customer' && !salePayload.warehouseId?.trim()) {
+      return { success: false, error: 'Warehouse is required.' };
+    }
+
+    const normalized = metalLotSale
+      ? metalLotSale
+      : resolveNormalizedSale({
+          settlementMode: salePayload.settlementMode ?? parsed.settlementMode,
+          units: salePayload.units ?? parsed.units,
+          unitRate: salePayload.unitRate ?? parsed.unitRate,
+          aedAmount: salePayload.aedAmount ?? parsed.aedAmount,
+          aedTotal: salePayload.aedAmount ?? parsed.aedAmount,
+          metalWeightG: salePayload.metalWeightG ?? parsed.metalWeightG,
+          metalRateInrPerG: salePayload.metalRateInrPerG ?? parsed.metalRateInrPerG,
+          metalRateAedPerG: salePayload.metalRateAedPerG ?? parsed.metalRateAedPerG,
+          inrTotal: salePayload.inrTotal ?? parsed.inrTotal,
+          serviceCharge: salePayload.serviceCharge ?? parsed.serviceCharge,
+        });
+
+    const collectedUnitsFinal = instantComplete ? normalized.units : null;
 
     const row = await withTransaction(async (client) => {
       const res = await client.query(
         `INSERT INTO ic_sales (
-          customer_name, order_customer_name, order_customer_id, sub_customer_id, sub_customer_name,
+          customer_name, order_customer_name, order_customer_id, counterparty_id, sub_customer_id, sub_customer_name,
           warehouse_id, transaction_type, units, unit_rate, aed_amount,
-          entered_by, entered_by_name, entered_by_user_id, address, location, district, image_url, service_charge, order_status, priority, bank, fulfillment_handler
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22) RETURNING *`,
+          entered_by, entered_by_name, entered_by_user_id, address, location, district, image_url, service_charge, order_status, priority, bank, fulfillment_handler,
+          collected_units, status_updated_at, status_updated_by,
+          settlement_mode, metal_weight_g, metal_rate_inr_per_g, metal_rate_aed_per_g, inr_total,
+          metal_purchase_id, metal_payment_method
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33) RETURNING *`,
         [
           salePayload.customerName,
           salePayload.orderCustomerName || null,
           salePayload.orderCustomerId || null,
+          salePayload.counterpartyId || parsed.counterpartyId || null,
           salePayload.subCustomerId || null,
           salePayload.subCustomerName || null,
           salePayload.warehouseId || null,
-          salePayload.transactionType || null,
-          salePayload.units,
-          salePayload.unitRate,
-          salePayload.aedAmount || null,
+          normalized.settlementMode === 'metal' ? null : salePayload.transactionType || null,
+          normalized.units,
+          normalized.unitRate,
+          normalized.aedAmount,
           enteredBy,
           enteredByName,
           enteredByUserId,
@@ -827,13 +1154,68 @@ export async function dbAddICSaleAction(
           salePayload.location || null,
           salePayload.district || null,
           salePayload.imageUrl || null,
-          salePayload.serviceCharge || 0.00,
+          salePayload.serviceCharge || 0.0,
           initialOrderStatus,
           salePayload.priority || 'Normal',
           salePayload.bank || null,
           fulfillmentHandler,
+          collectedUnitsFinal,
+          instantComplete ? new Date() : null,
+          statusUpdatedBy,
+          normalized.settlementMode,
+          normalized.metalWeightG,
+          normalized.metalRateInrPerG,
+          normalized.metalRateAedPerG,
+          normalized.inrTotal,
+          metalLotSale?.metalPurchaseId ?? null,
+          metalLotSale?.metalPaymentMethod ?? null,
         ],
       );
+
+      if (metalLotSale && salePayload.warehouseId) {
+        const lotId = metalLotSale.metalPurchaseId;
+        const lotRes = await client.query(
+          `SELECT id, warehouse_id, metal_weight_g FROM ic_purchases WHERE id = $1 LIMIT 1`,
+          [lotId],
+        );
+        if (lotRes.rows.length === 0) throw new Error('Metal purchase not found.');
+        const lot = lotRes.rows[0];
+        if (String(lot.warehouse_id) !== String(salePayload.warehouseId)) {
+          throw new Error('Metal purchase is not in the selected warehouse.');
+        }
+        const soldRes = await client.query(
+          `SELECT metal_weight_g, order_status FROM ic_sales
+           WHERE metal_purchase_id = $1 AND id <> $2::uuid`,
+          [lotId, res.rows[0].id],
+        );
+        const remaining = remainingMetalGramsOnLot(Number(lot.metal_weight_g) || 0, soldRes.rows);
+        const sellG = metalLotSale.metalWeightG;
+        if (sellG - remaining > 0.0001) {
+          throw new Error('Not enough metal remaining on this purchase.');
+        }
+        if (!isFullRemainingSell(sellG, remaining)) {
+          throw new Error('This draft sells the full remaining lot only.');
+        }
+        await applyMetalSaleStock(
+          client,
+          salePayload.warehouseId,
+          String(res.rows[0].id),
+          sellG,
+          metalLotSale.metalPaymentMethod,
+          metalLotSale.units,
+        );
+      } else if (instantComplete && salePayload.warehouseId && normalized.units > 0) {
+        await logWarehouseStockTransaction(
+          client,
+          salePayload.warehouseId,
+          'clear',
+          normalized.units,
+          'sale',
+          res.rows[0].id,
+        );
+        await adjustWarehouseStock(client, salePayload.warehouseId, -normalized.units);
+      }
+
       return res.rows[0];
     });
 
@@ -852,7 +1234,12 @@ export async function dbUpdateICPurchaseAction(
 ): Promise<DbActionResult<ICPurchase>> {
   try {
     const parsedId = z.string().min(1).parse(id);
+    const existingRes = await query(`SELECT * FROM ic_purchases WHERE id = $1 LIMIT 1`, [parsedId]);
+    if (existingRes.rows.length === 0) return { success: false, error: 'Purchase not found' };
+    const existingRow = existingRes.rows[0];
+
     const parsedUpdates = updatePurchaseSchema.parse(updates);
+    delete (parsedUpdates as { paymentStatus?: string }).paymentStatus;
 
     const modifyCheck = await assertBranchManagerCanModifyPurchase(parsedId, branchSlug);
     if (modifyCheck) return { success: false, error: modifyCheck.error };
@@ -865,39 +1252,105 @@ export async function dbUpdateICPurchaseAction(
       if (warehouseCheck) return { success: false, error: warehouseCheck.error };
     }
 
-    if (parsedUpdates.supplierId) {
-      const supplierCheck = await assertBranchManagerPurchaseSupplier(
-        parsedUpdates.supplierId,
-        branchSlug,
-      );
+    if (parsedUpdates.counterpartyId ?? parsedUpdates.supplierId) {
+      const cpId = String(parsedUpdates.counterpartyId ?? parsedUpdates.supplierId);
+      const supplierCheck = await assertBranchManagerPurchaseSupplier(cpId, branchSlug);
       if (supplierCheck) return { success: false, error: supplierCheck.error };
+      const party = await loadCounterpartyLink({ query }, cpId);
+      if (!party) return { success: false, error: 'Counterparty not found' };
+      parsedUpdates.counterpartyId = party.counterpartyId;
+      parsedUpdates.supplierId = party.legacySupplierId ?? undefined;
     }
 
-    const keys = Object.keys(parsedUpdates);
+    const mergedForm = {
+      settlementMode: parsedUpdates.settlementMode ?? existingRow.settlement_mode,
+      units: parsedUpdates.units ?? Number(existingRow.units),
+      unitRate: parsedUpdates.unitRate ?? Number(existingRow.unit_rate),
+      aedTotal:
+        parsedUpdates.aedTotal ??
+        (existingRow.aed_total != null ? Number(existingRow.aed_total) : null),
+      metalWeightG:
+        parsedUpdates.metalWeightG ??
+        (existingRow.metal_weight_g != null ? Number(existingRow.metal_weight_g) : undefined),
+      metalRateInrPerG:
+        parsedUpdates.metalRateInrPerG ??
+        (existingRow.metal_rate_inr_per_g != null ? Number(existingRow.metal_rate_inr_per_g) : undefined),
+      metalRateAedPerG:
+        parsedUpdates.metalRateAedPerG ??
+        (existingRow.metal_rate_aed_per_g != null ? Number(existingRow.metal_rate_aed_per_g) : undefined),
+      inrTotal:
+        parsedUpdates.inrTotal ??
+        (existingRow.inr_total != null ? Number(existingRow.inr_total) : undefined),
+    };
+
+    const normalized = resolveNormalizedPurchase(mergedForm, existingRow.settlement_mode);
+
+    const dbUpdates: Record<string, unknown> = {
+      ...parsedUpdates,
+      settlementMode: normalized.settlementMode,
+      units: normalized.units,
+      unitRate: normalized.unitRate,
+      aedTotal: normalized.aedTotal,
+      inrTotal: normalized.inrTotal,
+      metalWeightG: normalized.metalWeightG,
+      metalRateInrPerG: normalized.metalRateInrPerG,
+      metalRateAedPerG: normalized.metalRateAedPerG,
+    };
+
+    const keys = Object.keys(dbUpdates).filter(k => (dbUpdates as Record<string, unknown>)[k] !== undefined);
     if (keys.length === 0) return { success: false, error: 'No fields to update' };
 
-    const setClauses: string[] = [];
-    const values: unknown[] = [];
-    let idx = 1;
-    for (const key of keys) {
-      const dbKey = PURCHASE_COLUMNS[key];
-      if (!dbKey) continue;
-      setClauses.push(`${dbKey} = $${idx}`);
-      let val = (parsedUpdates as Record<string, unknown>)[key];
-      if (key.endsWith('Id') && val === '') val = null;
-      values.push(val);
-      idx++;
-    }
-    if (setClauses.length === 0) return { success: false, error: 'No valid fields to update' };
-    values.push(parsedId);
+    const oldWarehouseId = existingRow.warehouse_id ? String(existingRow.warehouse_id) : null;
+    const oldUnits = Number(existingRow.units) || 0;
+    const newWarehouseId = (dbUpdates.warehouseId as string | undefined) ?? oldWarehouseId;
+    const newUnits = normalized.units;
+    const isMetalPurchase = normalized.settlementMode === 'metal';
+    const oldGrams = Number(existingRow.metal_weight_g) || 0;
+    const newGrams = isMetalPurchase ? Number(normalized.metalWeightG) || 0 : 0;
 
-    const res = await query(
-      `UPDATE ic_purchases SET ${setClauses.join(', ')} WHERE id = $${idx} RETURNING *`,
-      values,
-    );
-    if (res.rows.length === 0) return { success: false, error: 'Purchase not found' };
+    const res = await withTransaction(async (client) => {
+      const setClauses: string[] = [];
+      const values: unknown[] = [];
+      let idx = 1;
+      for (const key of keys) {
+        const dbKey = PURCHASE_COLUMNS[key];
+        if (!dbKey) continue;
+        setClauses.push(`${dbKey} = $${idx}`);
+        let val = (dbUpdates as Record<string, unknown>)[key];
+        if (key.endsWith('Id') && val === '') val = null;
+        values.push(val);
+        idx++;
+      }
+      if (setClauses.length === 0) throw new Error('No valid fields to update');
+      values.push(parsedId);
+
+      const updateRes = await client.query(
+        `UPDATE ic_purchases SET ${setClauses.join(', ')} WHERE id = $${idx} RETURNING *`,
+        values,
+      );
+      if (updateRes.rows.length === 0) throw new Error('Purchase not found');
+
+      if (isMetalPurchase) {
+        if (oldWarehouseId && oldGrams) {
+          await adjustWarehouseMetalStock(client, oldWarehouseId, -oldGrams);
+        }
+        if (newWarehouseId && newGrams) {
+          await adjustWarehouseMetalStock(client, newWarehouseId, newGrams);
+        }
+      } else {
+        if (oldWarehouseId && oldUnits) {
+          await adjustWarehouseStock(client, oldWarehouseId, -oldUnits);
+        }
+        if (newWarehouseId && newUnits) {
+          await adjustWarehouseStock(client, newWarehouseId, newUnits);
+        }
+      }
+
+      return updateRes.rows[0];
+    });
+
     await syncICPurchaseFundLedger(parsedId);
-    return { success: true, data: mapICPurchaseRow(res.rows[0]) };
+    return { success: true, data: mapICPurchaseRow(res) };
   } catch (err: unknown) {
     logger.error({ err, id, updates }, 'Error in dbUpdateICPurchaseAction');
     return { success: false, error: err instanceof Error ? err.message : 'Database error' };
@@ -919,32 +1372,118 @@ export async function dbUpdateICSaleAction(
       };
     }
 
+    const existingRes = await query(`SELECT * FROM ic_sales WHERE id = $1 LIMIT 1`, [parsedId]);
+    const existingRow = existingRes.rows[0];
+
     const parsedUpdates = updateSaleSchema.parse(updates);
-    const keys = Object.keys(parsedUpdates);
+    const mergedForm = {
+      settlementMode: parsedUpdates.settlementMode ?? existingRow.settlement_mode,
+      units: parsedUpdates.units ?? Number(existingRow.units),
+      unitRate: parsedUpdates.unitRate ?? Number(existingRow.unit_rate),
+      aedAmount:
+        parsedUpdates.aedAmount ??
+        (existingRow.aed_amount != null ? Number(existingRow.aed_amount) : null),
+      metalWeightG:
+        parsedUpdates.metalWeightG ??
+        (existingRow.metal_weight_g != null ? Number(existingRow.metal_weight_g) : undefined),
+      metalRateInrPerG:
+        parsedUpdates.metalRateInrPerG ??
+        (existingRow.metal_rate_inr_per_g != null ? Number(existingRow.metal_rate_inr_per_g) : undefined),
+      metalRateAedPerG:
+        parsedUpdates.metalRateAedPerG ??
+        (existingRow.metal_rate_aed_per_g != null ? Number(existingRow.metal_rate_aed_per_g) : undefined),
+      inrTotal:
+        parsedUpdates.inrTotal ??
+        (existingRow.inr_total != null ? Number(existingRow.inr_total) : undefined),
+      serviceCharge:
+        parsedUpdates.serviceCharge ??
+        (existingRow.service_charge != null ? Number(existingRow.service_charge) : 0),
+    };
+    const isMetalSale = (mergedForm.settlementMode ?? existingRow.settlement_mode) === 'metal';
+    const metalLotSale = isMetalSale
+      ? normalizeMetalLotSale({
+          metalPurchaseId: String(
+            parsedUpdates.metalPurchaseId ?? existingRow.metal_purchase_id ?? '',
+          ),
+          paymentMethod:
+            (parsedUpdates.metalPaymentMethod ?? existingRow.metal_payment_method) === 'INR'
+              ? 'INR'
+              : 'AED',
+          input: {
+            metalWeightG: Number(mergedForm.metalWeightG),
+            metalRateInrPerG: Number(mergedForm.metalRateInrPerG),
+            metalRateAedPerG: Number(mergedForm.metalRateAedPerG),
+            totalInr: Number(mergedForm.inrTotal),
+            totalAed: Number(mergedForm.aedAmount),
+          },
+        })
+      : null;
+    const normalized = metalLotSale ?? resolveNormalizedSale(mergedForm, existingRow.settlement_mode);
+
+    const dbUpdates: Record<string, unknown> = {
+      ...parsedUpdates,
+      settlementMode: normalized.settlementMode,
+      units: normalized.units,
+      unitRate: normalized.unitRate,
+      aedAmount: normalized.aedAmount,
+      inrTotal: normalized.inrTotal,
+      metalWeightG: normalized.metalWeightG,
+      metalRateInrPerG: normalized.metalRateInrPerG,
+      metalRateAedPerG: normalized.metalRateAedPerG,
+    };
+    if (metalLotSale) {
+      dbUpdates.metalPurchaseId = metalLotSale.metalPurchaseId;
+      dbUpdates.metalPaymentMethod = metalLotSale.metalPaymentMethod;
+      dbUpdates.collectedUnits = metalLotSale.units;
+    }
+
+    const keys = Object.keys(dbUpdates).filter(k => (dbUpdates as Record<string, unknown>)[k] !== undefined);
     if (keys.length === 0) return { success: false, error: 'No fields to update' };
 
-    const setClauses: string[] = [];
-    const values: unknown[] = [];
-    let idx = 1;
-    for (const key of keys) {
-      const dbKey = SALE_COLUMNS[key];
-      if (!dbKey) continue;
-      setClauses.push(`${dbKey} = $${idx}`);
-      let val = (parsedUpdates as Record<string, unknown>)[key];
-      if (key.endsWith('Id') && val === '') val = null;
-      values.push(val);
-      idx++;
-    }
-    if (setClauses.length === 0) return { success: false, error: 'No valid fields to update' };
-    values.push(parsedId);
+    const row = await withTransaction(async (client) => {
+      const setClauses: string[] = [];
+      const values: unknown[] = [];
+      let idx = 1;
+      for (const key of keys) {
+        const dbKey = SALE_COLUMNS[key];
+        if (!dbKey) continue;
+        setClauses.push(`${dbKey} = $${idx}`);
+        let val = (dbUpdates as Record<string, unknown>)[key];
+        if (key.endsWith('Id') && val === '') val = null;
+        values.push(val);
+        idx++;
+      }
+      if (setClauses.length === 0) throw new Error('No valid fields to update');
+      values.push(parsedId);
 
-    const res = await query(
-      `UPDATE ic_sales SET ${setClauses.join(', ')} WHERE id = $${idx} RETURNING *`,
-      values,
-    );
-    if (res.rows.length === 0) return { success: false, error: 'Sale not found' };
+      const updateRes = await client.query(
+        `UPDATE ic_sales SET ${setClauses.join(', ')} WHERE id = $${idx} RETURNING *`,
+        values,
+      );
+      if (updateRes.rows.length === 0) throw new Error('Sale not found');
+
+      if (metalLotSale && existingRow.order_status === 'completed') {
+        await reverseMetalSaleStock(client, existingRow);
+        const warehouseId = String(
+          parsedUpdates.warehouseId ?? existingRow.warehouse_id ?? '',
+        );
+        if (warehouseId) {
+          await applyMetalSaleStock(
+            client,
+            warehouseId,
+            parsedId,
+            metalLotSale.metalWeightG,
+            metalLotSale.metalPaymentMethod,
+            metalLotSale.units,
+          );
+        }
+      }
+
+      return updateRes.rows[0];
+    });
+
     await syncICSaleFundLedger(parsedId);
-    return { success: true, data: mapICSaleRow(res.rows[0]) };
+    return { success: true, data: mapICSaleRow(row) };
   } catch (err: unknown) {
     logger.error({ err, id, updates }, 'Error in dbUpdateICSaleAction');
     return { success: false, error: err instanceof Error ? err.message : 'Database error' };
@@ -956,18 +1495,29 @@ export async function dbDeleteICPurchaseAction(id: string): Promise<DbActionResu
     const parsedId = z.string().min(1).parse(id);
     await withTransaction(async (client) => {
       const purchaseRes = await client.query(
-        `SELECT warehouse_id, units FROM ic_purchases WHERE id = $1`,
+        `SELECT warehouse_id, units, settlement_mode, metal_weight_g FROM ic_purchases WHERE id = $1`,
         [parsedId],
       );
       if (purchaseRes.rows.length === 0) throw new Error('Purchase not found');
-      const { warehouse_id, units } = purchaseRes.rows[0];
+      const { warehouse_id, units, settlement_mode, metal_weight_g } = purchaseRes.rows[0];
+
+      const linkedSales = await client.query(
+        `SELECT id FROM ic_sales WHERE metal_purchase_id = $1 LIMIT 1`,
+        [parsedId],
+      );
+      if (linkedSales.rows.length > 0) {
+        throw new Error('Cannot delete a metal purchase that already has sales.');
+      }
 
       await client.query(
-        `DELETE FROM ic_warehouse_transactions WHERE reference_type = 'purchase' AND reference_id = $1`,
+        `DELETE FROM ic_warehouse_transactions
+         WHERE reference_id = $1 AND reference_type IN ('purchase', 'metal_purchase')`,
         [parsedId],
       );
 
-      if (warehouse_id && units) {
+      if (warehouse_id && settlement_mode === 'metal') {
+        await adjustWarehouseMetalStock(client, warehouse_id, -(Number(metal_weight_g) || 0));
+      } else if (warehouse_id && units) {
         await adjustWarehouseStock(client, warehouse_id, -Number(units));
       }
 
@@ -985,24 +1535,36 @@ export async function dbDeleteICSaleAction(id: string): Promise<DbActionResult<n
   try {
     const parsedId = z.string().min(1).parse(id);
     const saleRes = await query(
-      `SELECT order_status, fulfillment_handler FROM ic_sales WHERE id = $1 LIMIT 1`,
+      `SELECT * FROM ic_sales WHERE id = $1 LIMIT 1`,
       [parsedId],
     );
     if (saleRes.rows.length === 0) {
       return { success: false, error: 'Sale not found' };
     }
-    if (saleRes.rows[0].fulfillment_handler === 'branch') {
+    const saleRow = saleRes.rows[0];
+    if (saleRow.fulfillment_handler === 'branch') {
       return { success: false, error: 'Branch-managed orders must be deleted by the branch manager' };
     }
-    if (saleRes.rows[0].order_status === 'completed') {
+    const isMetalSale = saleRow.settlement_mode === 'metal';
+    const transferSettings = await getICTransferSettingsFromDb();
+    if (
+      !isMetalSale &&
+      saleRow.order_status === 'completed' &&
+      transferSettings.warehouseFulfillmentEnabled
+    ) {
       return { success: false, error: 'Completed orders cannot be deleted' };
     }
 
     await withTransaction(async (client) => {
       await client.query(
-        `DELETE FROM ic_warehouse_transactions WHERE reference_type = 'sale' AND reference_id = $1`,
+        `DELETE FROM ic_warehouse_transactions
+         WHERE reference_id = $1
+           AND reference_type IN ('sale', 'metal_sale', 'metal_sale_inr_units')`,
         [parsedId],
       );
+      if (isMetalSale) {
+        await reverseMetalSaleStock(client, saleRow);
+      }
       await client.query('DELETE FROM ic_sales WHERE id = $1', [parsedId]);
     });
     await removeICSaleFundLedger(parsedId);
@@ -1153,6 +1715,12 @@ async function assertBranchManagerCanReviewCustomerOrder(
   };
 }
 
+async function blockWarehouseWorkflowWhenDisabled(): Promise<{ success: false; error: string } | null> {
+  const guard = await assertWarehouseFulfillmentWorkflowAction();
+  if (!guard.success) return { success: false, error: guard.error ?? 'Workflow disabled' };
+  return null;
+}
+
 /** Branch manager accepts a customer order and routes it to admin or branch fulfillment. */
 export async function branchReviewAcceptICSaleAction(
   id: string,
@@ -1160,6 +1728,8 @@ export async function branchReviewAcceptICSaleAction(
   branchSlug?: string,
 ): Promise<DbActionResult<ICSale>> {
   try {
+    const blocked = await blockWarehouseWorkflowWhenDisabled();
+    if (blocked) return blocked;
     const parsed = z
       .object({
         id: z.string().min(1),
@@ -1246,11 +1816,11 @@ async function assertBranchWarehouseForBranch(
 }
 
 async function assertSupplierMutationAllowed(
-  supplierId: string,
+  counterpartyId: string,
   branchSlug?: string,
 ): Promise<{ error: string } | null> {
-  const res = await query(`SELECT branch_id FROM ic_suppliers WHERE id = $1 LIMIT 1`, [supplierId]);
-  if (res.rows.length === 0) return { error: 'Supplier not found' };
+  const res = await query(`SELECT branch_id FROM ic_counterparties WHERE id = $1 LIMIT 1`, [counterpartyId]);
+  if (res.rows.length === 0) return { error: 'Counterparty not found' };
 
   const supplierBranchId = res.rows[0].branch_id ? String(res.rows[0].branch_id) : null;
   const user = branchSlug ? await resolveICTransferAdminUser(branchSlug) : null;
@@ -1292,19 +1862,19 @@ async function resolveBranchManagerBranchId(
 }
 
 async function assertBranchManagerPurchaseSupplier(
-  supplierId: string | null | undefined,
+  counterpartyId: string | null | undefined,
   branchSlug?: string,
 ): Promise<{ error: string } | null> {
-  if (!supplierId) return null;
+  if (!counterpartyId) return null;
 
   const resolved = await resolveBranchManagerBranchId(branchSlug);
   if (!resolved) return null;
   if ('error' in resolved) return { error: resolved.error };
 
-  const res = await query(`SELECT branch_id FROM ic_suppliers WHERE id = $1 LIMIT 1`, [supplierId]);
-  if (res.rows.length === 0) return { error: 'Supplier not found' };
+  const res = await query(`SELECT branch_id FROM ic_counterparties WHERE id = $1 LIMIT 1`, [counterpartyId]);
+  if (res.rows.length === 0) return { error: 'Counterparty not found' };
   if (!res.rows[0].branch_id || String(res.rows[0].branch_id) !== resolved.branchId) {
-    return { error: 'Supplier must belong to your branch' };
+    return { error: 'Counterparty must belong to your branch' };
   }
 
   return null;

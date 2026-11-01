@@ -137,7 +137,11 @@ export function canAdminResolveCustomerCancellation(sale: ICSale): boolean {
   );
 }
 
-export function hasAdminWorkflowActions(sale: ICSale): boolean {
+export function hasAdminWorkflowActions(
+  sale: ICSale,
+  options?: { warehouseFulfillmentEnabled?: boolean },
+): boolean {
+  if (options?.warehouseFulfillmentEnabled === false) return false;
   if (normalizeOrderStatus(sale.orderStatus) === 'unknown') return false;
   if (isBranchHandledSale(sale)) return false;
 

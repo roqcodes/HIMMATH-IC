@@ -8,8 +8,10 @@ import { assertStaffWriteAccess } from '@/app/actions/permissionActions';
 import { createCustomerCognitoUser, deleteCognitoUserByEmail, resetCustomerCognitoPasswordAction, updateCognitoUserName } from '@/app/actions/cognitoActions';
 import { PASSWORD_INVALID_MESSAGE, validatePassword } from '@/lib/passwordValidation';
 import { syncCustomerFundAccount, deactivateCustomerFundAccount } from '@/lib/icFunds/customerFundSync';
+import { syncICCounterpartyFundAccount } from '@/lib/icFunds/icTransferFundSync';
 import { isHqAdminStaff } from '@/lib/icFunds/hqBranch';
 import { readSectionAccess } from '@/lib/staffSectionPermissions';
+import { entityCodeSchema, entityCodeConflictMessage } from '@/lib/validations/entityCode';
 
 function revalidateCustomerPaths(slug: string) {
   revalidatePath(`/${slug}/customers`);
@@ -34,10 +36,14 @@ function mapCustomerRow(r: Record<string, unknown>) {
     id: String(r.id),
     branchId: String(r.branch_id),
     name: String(r.name),
+    code: r.code ? String(r.code) : undefined,
     phone: r.phone ? String(r.phone) : undefined,
     email: r.email ? String(r.email) : undefined,
     balance: parseFloat(String(r.balance ?? 0)),
     status: String(r.status ?? 'active'),
+    country: r.country ? String(r.country) : undefined,
+    subdivision: r.subdivision ? String(r.subdivision) : undefined,
+    locality: r.locality ? String(r.locality) : undefined,
     createdAt: r.created_at ? new Date(String(r.created_at)).toISOString() : undefined,
     cognitoUserId: r.auth_user_id ? String(r.auth_user_id) : undefined,
     hasOrders: Boolean(r.has_orders),
@@ -177,6 +183,10 @@ export async function saveCustomer(
     balance?: number | string;
     status?: string;
     enablePortalLogin?: boolean;
+    country?: string;
+    subdivision?: string;
+    locality?: string;
+    code?: string | null;
   },
 ) {
   try {
@@ -219,6 +229,20 @@ export async function saveCustomer(
     const id = data.id || `cust_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const balance = data.balance !== undefined && data.balance !== '' ? Number(data.balance) : 0;
     const status = data.status || 'active';
+    const country = data.country?.trim() || '';
+    const subdivision = data.subdivision?.trim() || null;
+    const locality = data.locality?.trim() || null;
+    if (!country) {
+      return { success: false, error: 'Country is required.' };
+    }
+
+    let parsedCode: string | null = null;
+    const codeResult = entityCodeSchema.safeParse(data.code);
+    if (!codeResult.success) {
+      return { success: false, error: codeResult.error.issues[0]?.message || 'Invalid code.' };
+    }
+    parsedCode = codeResult.data;
+
     let cognitoUserId = existingCognitoUserId;
 
     if (isNew && enablePortalLogin) {
@@ -255,28 +279,88 @@ export async function saveCustomer(
 
     await query(
       `
-      INSERT INTO customers (id, branch_id, name, phone, email, balance, status, auth_user_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      INSERT INTO customers (id, branch_id, name, code, phone, email, balance, status, auth_user_id, country, subdivision, locality)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
+        code = EXCLUDED.code,
         phone = EXCLUDED.phone,
         email = EXCLUDED.email,
         balance = EXCLUDED.balance,
         status = EXCLUDED.status,
-        auth_user_id = COALESCE(EXCLUDED.auth_user_id, customers.auth_user_id)
+        auth_user_id = COALESCE(EXCLUDED.auth_user_id, customers.auth_user_id),
+        country = EXCLUDED.country,
+        subdivision = EXCLUDED.subdivision,
+        locality = EXCLUDED.locality
     `,
       [
         id,
         branchId,
         data.name.trim(),
+        parsedCode,
         data.phone?.trim() || null,
         email || null,
         balance,
         status,
         cognitoUserId,
+        country,
+        subdivision,
+        locality,
       ],
     );
 
+    const cpExisting = await query(
+      `SELECT id FROM ic_counterparties WHERE legacy_customer_id = $1 LIMIT 1`,
+      [id],
+    );
+    let counterpartyId: string;
+    if (cpExisting.rows.length > 0) {
+      counterpartyId = String(cpExisting.rows[0].id);
+      await query(
+        `UPDATE ic_counterparties
+         SET branch_id = $1, name = $2, code = $3, phone = $4, email = $5, country = $6,
+             subdivision = $7, locality = $8, status = $9, auth_user_id = COALESCE($10, auth_user_id)
+         WHERE id = $11`,
+        [
+          branchId,
+          data.name.trim(),
+          parsedCode,
+          data.phone?.trim() || null,
+          email || null,
+          country,
+          subdivision,
+          locality,
+          status,
+          cognitoUserId,
+          counterpartyId,
+        ],
+      );
+    } else {
+      counterpartyId = crypto.randomUUID();
+      await query(
+        `INSERT INTO ic_counterparties (
+           id, branch_id, name, code, phone, email, country, subdivision, locality, status, auth_user_id, legacy_customer_id
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [
+          counterpartyId,
+          branchId,
+          data.name.trim(),
+          parsedCode,
+          data.phone?.trim() || null,
+          email || null,
+          country,
+          subdivision,
+          locality,
+          status,
+          cognitoUserId,
+          id,
+        ],
+      );
+    }
+
+    await query(`UPDATE customers SET counterparty_id = $1 WHERE id = $2`, [counterpartyId, id]);
+
+    await syncICCounterpartyFundAccount(counterpartyId);
     await syncCustomerFundAccount(id);
     if (cognitoUserId) {
       await query(`UPDATE profiles SET customer_id = $1 WHERE id = $2`, [id, cognitoUserId]);
@@ -285,6 +369,8 @@ export async function saveCustomer(
     revalidateCustomerPaths(slug);
     return { success: true, id };
   } catch (err: unknown) {
+    const conflict = entityCodeConflictMessage(err);
+    if (conflict) return { success: false, error: conflict };
     const message = err instanceof Error ? err.message : 'Unknown error';
     logger.error({ error: err, slug, data }, 'saveCustomer error');
     return { success: false, error: message };

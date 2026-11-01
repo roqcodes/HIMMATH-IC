@@ -1,0 +1,10 @@
+ALTER TABLE public.customers
+  ADD COLUMN IF NOT EXISTS country VARCHAR(100),
+  ADD COLUMN IF NOT EXISTS subdivision VARCHAR(255);
+
+ALTER TABLE public.ic_suppliers
+  ADD COLUMN IF NOT EXISTS subdivision VARCHAR(255);
+
+ALTER TABLE public.ic_warehouses
+  ADD COLUMN IF NOT EXISTS india_state VARCHAR(100),
+  ADD COLUMN IF NOT EXISTS india_city VARCHAR(100);

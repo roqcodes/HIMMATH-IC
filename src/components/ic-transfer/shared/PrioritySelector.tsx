@@ -27,7 +27,7 @@ const STYLES: Record<OrderPriority, { active: string; idle: string }> = {
 
 export default function PrioritySelector({ value, onChange, disabled }: Props) {
   return (
-    <div className="flex h-10 w-full items-stretch gap-1 rounded-lg border border-[var(--theme-border-subtle)] bg-slate-100 p-1 shadow-surface-xs sm:h-11 dark:bg-[var(--theme-surface-muted)]">
+    <div className="flex h-8 w-full max-md:h-9 items-stretch gap-1 rounded-lg border border-[var(--theme-border-subtle)] bg-slate-100 p-0.5 shadow-surface-xs dark:bg-[var(--theme-surface-muted)]">
       {ORDER_PRIORITIES.map(priority => {
         const isActive = value === priority;
         const style = STYLES[priority];
@@ -37,7 +37,7 @@ export default function PrioritySelector({ value, onChange, disabled }: Props) {
             type="button"
             disabled={disabled}
             onClick={() => onChange(priority)}
-            className={`flex-1 text-center text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1 border border-transparent ${
+            className={`flex-1 text-center text-[11px] font-semibold rounded-md transition-all flex items-center justify-center gap-1 border border-transparent sm:text-xs ${
               isActive ? style.active : style.idle
             } disabled:opacity-50 disabled:cursor-not-allowed`}
           >

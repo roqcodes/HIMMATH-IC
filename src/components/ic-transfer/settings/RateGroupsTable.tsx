@@ -158,7 +158,7 @@ export default function RateGroupsTable({
         </thead>
         <tbody>
           {groups.map(group => {
-            const branchCount = 0;
+            const branchCount = group.branchIds?.length ?? 0;
             const customerCount = group.customerIds?.length ?? 0;
             const stale = !isRateGroupUpdatedToday(group.updatedAt);
             const cellBg = stale ? 'bg-transparent' : 'bg-white';

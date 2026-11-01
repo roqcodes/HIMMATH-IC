@@ -4,7 +4,7 @@ import React, { useMemo, useState } from 'react';
 import { notFound } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
 import WarehouseUsersManagement from '@/components/ic-transfer/settings/WarehouseUsersManagement';
-import AddUserModal from '@/components/ic-transfer/settings/AddUserModal';
+import WarehouseModal from '@/components/ic-transfer/settings/WarehouseModal';
 import { CognitoUser } from '@/app/actions/cognitoActions';
 import { findWarehouseByRouteParam } from '@/lib/icTransfer/warehouseSlug';
 import { computeSingleWarehouseMetrics } from '@/lib/icTransfer/warehouseMatrixMetrics';
@@ -17,6 +17,8 @@ import AsicPageHeader from '@/components/asic/AsicPageHeader';
 import WarehouseKpiGrid from '@/components/warehouse/WarehouseKpiGrid';
 import ICTransferDateFilterBar from '@/components/ic-transfer/shared/ICTransferDateFilterBar';
 import { useICTransferFilters } from '@/components/ic-transfer/ui';
+import AddPurchaseModal from '@/components/ic-transfer/purchase/AddPurchaseModal';
+import AddSaleModal from '@/components/ic-transfer/sales/AddSaleModal';
 import { asicBtnOutline, asicCard, asicFormGridLoose } from '@/components/asic/ui';
 import { useWriteAccess } from '@/context/RbacWriteContext';
 
@@ -27,6 +29,13 @@ interface Props {
   usersError?: string;
   portalMode?: ICTransferPortalMode;
 }
+
+const subtleTxnBtnBase =
+  'inline-flex h-8 max-md:h-9 items-center justify-center gap-1.5 rounded-lg border px-3 text-sm font-medium shadow-surface-xs transition-colors disabled:pointer-events-none disabled:opacity-45';
+
+const subtlePurchaseBtnClass = `${subtleTxnBtnBase} border-sky-200/90 bg-sky-50/70 text-sky-900 hover:border-sky-300 hover:bg-sky-100/80 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-100 dark:hover:bg-sky-950/50`;
+
+const subtleSaleBtnClass = `${subtleTxnBtnBase} border-emerald-200/90 bg-emerald-50/70 text-emerald-900 hover:border-emerald-300 hover:bg-emerald-100/80 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-100 dark:hover:bg-emerald-950/50`;
 
 function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -44,9 +53,13 @@ export default function WarehouseDetailsClient({
   usersError,
   portalMode = 'admin',
 }: Props) {
-  const { icWarehouses, icRegions, icSales, updateICWarehouse } = useApp();
+  const { icWarehouses, icRegions, icSales, icTransferSettings } = useApp();
   const { canWrite, buttonProps: wp } = useWriteAccess();
   const [editOpen, setEditOpen] = useState(false);
+  const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
+  const [saleModalOpen, setSaleModalOpen] = useState(false);
+
+  const salesPaused = !icTransferSettings.salesEnabled;
 
   const {
     dateFilter,
@@ -91,42 +104,20 @@ export default function WarehouseDetailsClient({
     return computeSingleWarehouseMetrics(warehouse, icRegions, scopedSales, range);
   }, [warehouse, icRegions, scopedSales, range]);
 
+  const purchaseBranchId =
+    portalMode === 'branch' && warehouse?.branchId ? warehouse.branchId : undefined;
+
   if (!warehouse && icWarehouses.length > 0) {
     return notFound();
   }
 
   if (!warehouse) return null;
 
-  const regionName = icRegions.find(r => r.id === warehouse.regionId)?.name || '—';
   const warehouseListHref = getICTransferWarehouseBase(portalMode, branchSlug);
-  const deliveryProofLabel =
-    warehouse.sendDeliveryProofToCustomer === false
-      ? 'Admin verifies delivery'
-      : 'Customer verifies delivery';
+  const indiaLocationLabel = [warehouse.indiaCity, warehouse.indiaState].filter(Boolean).join(', ') || '—';
 
-  const handleSave = async (data: {
-    id?: string;
-    name: string;
-    phone: string;
-    commission: number | null;
-    regionId: string;
-    email: string;
-    address: string;
-    sendDeliveryProofToCustomer?: boolean;
-  }) => {
-    if (!data.id) return;
-    await updateICWarehouse(
-      data.id,
-      data.name,
-      data.phone,
-      data.commission,
-      '',
-      data.email,
-      data.address,
-      data.sendDeliveryProofToCustomer,
-    );
-    setEditOpen(false);
-  };
+  const purchaseBlocked = !canWrite;
+  const saleBlocked = !canWrite || salesPaused;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -136,14 +127,34 @@ export default function WarehouseDetailsClient({
           { label: warehouse.name },
         ]}
         actions={
-          <button
-            type="button"
-            className={`${asicBtnOutline}${!canWrite ? ' cursor-not-allowed opacity-50' : ''}`}
-            onClick={canWrite ? () => setEditOpen(true) : undefined}
-            {...wp()}
-          >
-            Edit warehouse
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className={`${subtlePurchaseBtnClass}${purchaseBlocked ? ' cursor-not-allowed' : ''}`}
+              onClick={purchaseBlocked ? undefined : () => setPurchaseModalOpen(true)}
+              aria-label="Add purchase for this warehouse"
+              {...wp({ disabled: purchaseBlocked })}
+            >
+              Add purchase
+            </button>
+            <button
+              type="button"
+              className={`${subtleSaleBtnClass}${saleBlocked ? ' cursor-not-allowed' : ''}`}
+              onClick={saleBlocked ? undefined : () => setSaleModalOpen(true)}
+              aria-label="Add sale for this warehouse"
+              {...wp({ disabled: saleBlocked })}
+            >
+              Add sale
+            </button>
+            <button
+              type="button"
+              className={`${asicBtnOutline}${!canWrite ? ' cursor-not-allowed opacity-50' : ''}`}
+              onClick={canWrite ? () => setEditOpen(true) : undefined}
+              {...wp()}
+            >
+              Edit warehouse
+            </button>
+          </div>
         }
       />
 
@@ -164,16 +175,24 @@ export default function WarehouseDetailsClient({
         </div>
         <div className={`${asicFormGridLoose} p-3 sm:p-4`}>
           <DetailRow
-            label="Current stock"
+            label="Current stock (units)"
             value={
               <span className={(warehouse.currentStock ?? 0) < 0 ? 'font-semibold text-red-600' : 'font-semibold tabular-nums'}>
                 {(warehouse.currentStock ?? 0).toLocaleString('en-US', { maximumFractionDigits: 4 })}
               </span>
             }
           />
+          <DetailRow
+            label="Metal on hand"
+            value={
+              <span className="font-semibold tabular-nums">
+                {(warehouse.currentMetalG ?? 0).toLocaleString('en-US', { maximumFractionDigits: 4 })} g
+              </span>
+            }
+          />
           <DetailRow label="Reserved" value={<span className="font-semibold tabular-nums text-amber-700">{kpiMetrics.reserved.toLocaleString()}</span>} />
           <DetailRow label="Available" value={<span className="font-semibold tabular-nums text-emerald-700">{kpiMetrics.remaining.toLocaleString()}</span>} />
-          <DetailRow label="Region" value={regionName} />
+          <DetailRow label="Location (India)" value={indiaLocationLabel} />
           <DetailRow label="Phone" value={warehouse.phone || '—'} />
           <DetailRow label="Email" value={warehouse.email || '—'} />
           <DetailRow
@@ -192,7 +211,6 @@ export default function WarehouseDetailsClient({
             label="Commission"
             value={warehouse.commission != null ? `${warehouse.commission}%` : '—'}
           />
-          <DetailRow label="Delivery proof" value={deliveryProofLabel} />
         </div>
       </div>
 
@@ -204,17 +222,24 @@ export default function WarehouseDetailsClient({
         branchSlug={branchSlug}
       />
 
-      <AddUserModal
+      <WarehouseModal
         open={editOpen}
+        warehouse={warehouse}
         onClose={() => setEditOpen(false)}
-        title="Edit Warehouse"
-        showCommission={false}
-        showDeliveryProofToggle
-        showRate={false}
-        showPassword={false}
-        showRegion={false}
-        initialData={warehouse}
-        onAdd={handleSave}
+        onSaved={() => setEditOpen(false)}
+      />
+
+      <AddPurchaseModal
+        open={purchaseModalOpen}
+        onClose={() => setPurchaseModalOpen(false)}
+        branchId={purchaseBranchId}
+        warehouses={[warehouse]}
+        lockedWarehouseId={warehouse.id}
+      />
+      <AddSaleModal
+        open={saleModalOpen}
+        onClose={() => setSaleModalOpen(false)}
+        lockedWarehouseId={warehouse.id}
       />
     </div>
   );

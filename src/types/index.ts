@@ -134,10 +134,14 @@ export interface Customer {
   id: string;
   branchId: string;
   name: string;
+  code?: string;
   phone?: string;
   email?: string;
   balance: number;
   status: 'active' | 'inactive' | string;
+  country?: string;
+  subdivision?: string;
+  locality?: string;
   createdAt?: string;
   /** Supabase Auth user id when this customer has portal login credentials. */
   cognitoUserId?: string;
@@ -626,25 +630,37 @@ export interface ICRegion {
 export interface ICSupplier {
   id: string;
   name: string;
+  code?: string;
   phone?: string;
   commission?: number;
   regionId?: string;
   email?: string;
   address?: string;
+  country?: string;
+  subdivision?: string;
+  locality?: string;
   /** When set, supplier is owned by a branch portal (exclusive to that branch). */
   branchId?: string;
+  status?: 'active' | 'inactive';
+  legacyCustomerId?: string | null;
+  legacySupplierId?: string | null;
   createdAt?: string;
 }
 
 export interface ICWarehouse {
   id: string;
   name: string;
+  code?: string;
   phone?: string;
   commission?: number;
   regionId?: string;
   email?: string;
   address?: string;
+  indiaState?: string;
+  indiaCity?: string;
   currentStock?: number;
+  /** Physical metal on hand (grams). Separate from IC unit stock. */
+  currentMetalG?: number;
   /** When set, warehouse is owned by a branch portal (exclusive to that branch). */
   branchId?: string;
   /** When true, delivery proof goes straight to customer on agent completion. */
@@ -686,6 +702,7 @@ export interface ICRateGroup {
   country: string;
   saleRate: number;
   customerIds?: string[];
+  branchIds?: string[];
   pricingConfig?: ICRateGroupPricingConfig;
   createdAt?: string;
   updatedAt?: string;
@@ -694,17 +711,26 @@ export interface ICRateGroup {
 export interface ICTransferSettings {
   salesEnabled: boolean;
   autoRateResetEnabled: boolean;
+  /** When true, sales go through warehouse / delivery workflow; when false, sales complete on create. */
+  warehouseFulfillmentEnabled: boolean;
   updatedAt?: string;
   updatedBy?: string;
 }
 
 export interface ICPurchase {
   id: string;
+  /** Unified trading partner (same id on sales). */
+  counterpartyId?: string;
   supplierId?: string;
   locationId?: string;
   warehouseId?: string;
+  settlementMode?: 'cash' | 'metal';
   unitRate: number;
   units: number;
+  metalWeightG?: number | null;
+  metalRateInrPerG?: number | null;
+  metalRateAedPerG?: number | null;
+  inrTotal?: number | null;
   paymentMethod?: string;
   notes?: string;
   convertedTotal?: number;
@@ -733,13 +759,23 @@ export interface ICSale {
   /** End-customer chosen by the branch manager (falls back to customerName when absent). */
   orderCustomerName?: string;
   orderCustomerId?: string;
+  /** Unified trading partner (same id on purchases). */
+  counterpartyId?: string;
   /** Portal customer's third-party recipient (customer portal only). */
   subCustomerId?: string;
   subCustomerName?: string;
   warehouseId?: string;
+  settlementMode?: 'cash' | 'metal';
   transactionType?: ICSaleTransactionType;
   units: number;
   unitRate: number;
+  metalWeightG?: number | null;
+  metalRateInrPerG?: number | null;
+  metalRateAedPerG?: number | null;
+  inrTotal?: number | null;
+  /** Metal sale: which purchase lot this sale closes (partial sells later). */
+  metalPurchaseId?: string | null;
+  metalPaymentMethod?: 'INR' | 'AED' | null;
   aedAmount?: number;
   enteredBy?: string;
   enteredByName?: string;

@@ -18,6 +18,8 @@ export type ICFundAccountRelatedPurchase = {
   date: string;
   units: number;
   aedAmount: number;
+  inrTotal?: number;
+  settlementMode?: 'cash' | 'metal';
   paymentMethod?: string;
   warehouseName?: string;
 };
@@ -155,6 +157,7 @@ export function buildAccountDetailStats(
 
 export function accountSourceLabel(sourceType?: string): string | null {
   if (!sourceType) return null;
+  if (sourceType === 'ic_counterparty') return 'Trading partner';
   if (sourceType === 'ic_supplier') return 'IC Transfer supplier';
   if (sourceType === 'ic_warehouse') return 'IC Transfer warehouse';
   if (sourceType === 'ic_customer') return 'Customer';

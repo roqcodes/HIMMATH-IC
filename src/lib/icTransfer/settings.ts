@@ -5,12 +5,14 @@ export const IC_TRANSFER_SETTINGS_ID = 'global';
 export const DEFAULT_IC_TRANSFER_SETTINGS: ICTransferSettings = {
   salesEnabled: true,
   autoRateResetEnabled: false,
+  warehouseFulfillmentEnabled: false,
 };
 
 export function mapICTransferSettingsRow(
   row: {
     sales_enabled?: boolean | null;
     auto_rate_reset_enabled?: boolean | null;
+    warehouse_fulfillment_enabled?: boolean | null;
     updated_at?: string | Date | null;
     updated_by?: string | null;
   } | null | undefined,
@@ -19,6 +21,7 @@ export function mapICTransferSettingsRow(
   return {
     salesEnabled: row.sales_enabled !== false,
     autoRateResetEnabled: row.auto_rate_reset_enabled === true,
+    warehouseFulfillmentEnabled: row.warehouse_fulfillment_enabled === true,
     updatedAt: row.updated_at ? String(row.updated_at) : undefined,
     updatedBy: row.updated_by ?? undefined,
   };

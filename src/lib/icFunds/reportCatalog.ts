@@ -36,7 +36,7 @@ export const REPORT_CATALOG_GROUPS: ReadonlyArray<{
       {
         id: 'd-expenses',
         title: 'Direct costs register',
-        description: 'Vouchers touching direct expense accounts (including purchase cost).',
+        description: 'Vouchers on direct expense accounts — mainly WAC COGS when IC sales complete.',
       },
     ],
   },
@@ -70,24 +70,39 @@ export const REPORT_CATALOG_GROUPS: ReadonlyArray<{
       {
         id: 'profit-loss',
         title: 'Profit & loss',
-        description: 'Sales, direct costs, operating expenses, and net result for the period.',
+        description:
+          'Ledger P&L: sales, WAC COGS on completed IC sales, operating expenses, and net result. Unsold stock sits in IC Inventory on the balance sheet.',
       },
       {
         id: 'balance-sheet',
         title: 'Balance sheet',
-        description: 'Assets, liabilities, and equity as at the end date.',
+        description:
+          'Assets (cash, receivables, IC inventory), liabilities, and equity as at the end date.',
+      },
+      {
+        id: 'fund-trades',
+        title: 'Fund purchase & sales',
+        description:
+          'Cash (AED fund) IC buy/sell register — date, counterparty, units, rates, amounts, and settlement status.',
+      },
+      {
+        id: 'metal-trades',
+        title: 'Metal purchase & sales',
+        description:
+          'Metal-settled IC register — fine weight, INR/AED metal rates, INR value, IC units, and party detail.',
       },
     ],
   },
   {
     id: 'operational',
     title: 'Operational analysis',
-    description: 'Inventory-based gross profit — not the same as HQ ledger COGS timing.',
+    description: 'Unit-level gross profit (cash and metal settlement) — reconciles to WAC COGS journals.',
     reports: [
       {
         id: 'warehouse-pl',
         title: 'Warehouse gross profit',
-        description: 'Weighted-average COGS on completed deliveries by warehouse.',
+        description:
+          'Weighted-average COGS on completed deliveries by warehouse (all settlement modes).',
       },
     ],
   },

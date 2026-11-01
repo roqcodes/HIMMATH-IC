@@ -38,7 +38,7 @@ export default function SearchInput({
         placeholder={placeholder}
         value={value}
         onChange={e => onChange(e.target.value)}
-        className={`${formInput} !py-2 !pl-10 !pr-4 !text-sm`}
+        className={`${formInput} w-full !py-2 !pl-10 !pr-4 !text-sm`}
       />
     </div>
   );

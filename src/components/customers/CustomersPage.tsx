@@ -24,6 +24,9 @@ type CustomerRow = {
   email?: string | null;
   balance: string | number;
   status: string;
+  country?: string | null;
+  subdivision?: string | null;
+  locality?: string | null;
   created_at?: string;
   hasOrders?: boolean;
 };
@@ -303,6 +306,7 @@ export default function CustomersPage() {
                           Email <SortIcon field="email" />
                         </div>
                       </th>
+                      <th className={getThClass('left')}>Location</th>
                       <th className={getThClass('right')} onClick={() => handleSort('balance')}>
                         <div className="flex items-center justify-end gap-1">
                           Balance <SortIcon field="balance" />
@@ -334,6 +338,9 @@ export default function CustomersPage() {
                         </td>
                         <td className={`${asicTd} text-slate-600`}>
                           {customer.email || '—'}
+                        </td>
+                        <td className={`${asicTd} text-slate-600`}>
+                          {[customer.locality, customer.subdivision, customer.country].filter(Boolean).join(', ') || '—'}
                         </td>
                         <td className={`${asicTd} text-right font-mono font-medium`}>
                           {fmtBalance(customer.balance)}

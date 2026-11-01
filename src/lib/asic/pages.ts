@@ -15,6 +15,7 @@ const LEGACY_PAGE_TO_SECTION: Record<string, AsicSectionId> = {
   'ic-transfer-admin': 'sales',
   'ic-funds': 'payments',
   customers: 'customers',
+  counterparties: 'counterparties',
   warehouse: 'warehouse',
   settings: 'rates',
 };
@@ -28,6 +29,26 @@ export function isAuditorRole(role: UserRole | string | undefined): boolean {
 }
 
 export function getEffectiveSectionAccess(
+  user: Pick<User, 'role' | 'permissions'> | null | undefined,
+  section: AsicSectionId,
+  portal: AsicPortal,
+): PageAccessLevel {
+  if (section === 'counterparties') {
+    return mergeSectionAccess(
+      getEffectiveSectionAccessInner(user, 'customers', portal),
+      getEffectiveSectionAccessInner(user, 'suppliers', portal),
+    );
+  }
+  return getEffectiveSectionAccessInner(user, section, portal);
+}
+
+function mergeSectionAccess(a: PageAccessLevel, b: PageAccessLevel): PageAccessLevel {
+  if (a === 'write' || b === 'write') return 'write';
+  if (a === 'read' || b === 'read') return 'read';
+  return 'none';
+}
+
+function getEffectiveSectionAccessInner(
   user: Pick<User, 'role' | 'permissions'> | null | undefined,
   section: AsicSectionId,
   portal: AsicPortal,

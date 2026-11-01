@@ -48,7 +48,7 @@ const LEGACY_IC_ADMIN_SEGMENT: Record<string, string> = {
 };
 
 const LEGACY_IC_ADMIN_SETTINGS: Record<string, string> = {
-  suppliers: 'suppliers',
+  suppliers: 'counterparties',
   rates: 'rates',
   agents: 'agents',
   commission: 'commission',
@@ -111,7 +111,7 @@ export function normalizeAsicPath(pathname: string): string {
 
   const legacyCustomers = clean.match(/^\/([^/]+)\/customers\/?$/);
   if (legacyCustomers && !RESERVED_BRANCH_SLUGS.has(legacyCustomers[1])) {
-    return `/admin/customers`;
+    return `/admin/counterparties`;
   }
 
   return clean;

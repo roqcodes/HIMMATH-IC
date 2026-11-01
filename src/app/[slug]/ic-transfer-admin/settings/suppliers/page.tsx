@@ -1,17 +1,11 @@
 import { getSessionUser } from '@/lib/auth';
-import ICTransferSuppliersPage from '@/components/ic-transfer/settings/ICTransferSuppliersPage';
+import CounterpartiesPage from '@/components/counterparties/CounterpartiesPage';
 
 export default async function SupplierManagementPage({
   params,
 }: {
   params: Promise<{ slug: string }>;
 }) {
-  const { slug } = await params;
-  const user = await getSessionUser(slug);
-
-  if (user?.role === 'branch_manager' && user.branchId) {
-    return <ICTransferSuppliersPage portalMode="branch" branchId={user.branchId} />;
-  }
-
-  return <ICTransferSuppliersPage portalMode="admin" />;
+  await getSessionUser((await params).slug);
+  return <CounterpartiesPage />;
 }

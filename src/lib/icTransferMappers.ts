@@ -8,7 +8,8 @@ import {
   ICSubCustomer,
   ICWarehouseTransaction,
 } from '@/types';
-import { getSaleInrAmount } from '@/lib/icTransfer/saleUnits';
+import { resolvePurchaseInrDisplay } from '@/lib/icTransfer/metalSettlement';
+import { mapICCounterpartyRow } from '@/lib/counterparties/mapper';
 
 export function mapICRegionRow(row: any): ICRegion {
   return {
@@ -20,30 +21,24 @@ export function mapICRegionRow(row: any): ICRegion {
 }
 
 export function mapICSupplierRow(row: any): ICSupplier {
-  return {
-    id: row.id,
-    name: row.name,
-    phone: row.phone,
-    commission: row.commission ? parseFloat(row.commission) : undefined,
-    regionId: row.region_id,
-    email: row.email,
-    address: row.address,
-    branchId: row.branch_id ?? undefined,
-    createdAt: row.created_at ? new Date(row.created_at).toISOString() : undefined,
-  };
+  return mapICCounterpartyRow(row);
 }
 
 export function mapICWarehouseRow(row: any): ICWarehouse {
   return {
     id: row.id,
     name: row.name,
+    code: row.code ? String(row.code) : undefined,
     phone: row.phone,
     commission: row.commission ? parseFloat(row.commission) : undefined,
     regionId: row.region_id,
     email: row.email,
     address: row.address,
+    indiaState: row.india_state ? String(row.india_state) : undefined,
+    indiaCity: row.india_city ? String(row.india_city) : undefined,
     branchId: row.branch_id ?? undefined,
     currentStock: row.current_stock != null ? parseFloat(row.current_stock) : 0,
+    currentMetalG: row.current_metal_g != null ? parseFloat(row.current_metal_g) : 0,
     sendDeliveryProofToCustomer: row.send_delivery_proof_to_customer !== false,
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : undefined,
   };
@@ -54,6 +49,18 @@ function parsePricingConfig(raw: unknown): ICRateGroup['pricingConfig'] {
   return raw as ICRateGroup['pricingConfig'];
 }
 
+export function mergeICRateGroupRowPreservingMembers(
+  previous: ICRateGroup,
+  next: ICRateGroup,
+): ICRateGroup {
+  return {
+    ...next,
+    customerIds:
+      next.customerIds && next.customerIds.length > 0 ? next.customerIds : previous.customerIds,
+    branchIds: next.branchIds && next.branchIds.length > 0 ? next.branchIds : previous.branchIds,
+  };
+}
+
 export function mapICRateGroupRow(row: any): ICRateGroup {
   return {
     id: row.id,
@@ -61,6 +68,7 @@ export function mapICRateGroupRow(row: any): ICRateGroup {
     country: row.country,
     saleRate: parseFloat(row.sale_rate),
     customerIds: row.customer_ids || [],
+    branchIds: row.branch_ids || [],
     pricingConfig: parsePricingConfig(row.pricing_config),
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : undefined,
     updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : undefined,
@@ -69,34 +77,56 @@ export function mapICRateGroupRow(row: any): ICRateGroup {
 
 export function mapICPurchaseRow(row: any): ICPurchase {
   const units = parseFloat(row.units);
+  const settlementMode = row.settlement_mode === 'metal' ? 'metal' : 'cash';
+  const inrTotal = row.inr_total != null ? parseFloat(row.inr_total) : null;
   return {
     id: row.id,
-    supplierId: row.supplier_id,
+    counterpartyId: row.counterparty_id ? String(row.counterparty_id) : undefined,
+    supplierId: row.supplier_id ? String(row.supplier_id) : undefined,
     locationId: row.location_id,
     warehouseId: row.warehouse_id,
+    settlementMode,
     unitRate: parseFloat(row.unit_rate),
     units,
+    metalWeightG: row.metal_weight_g != null ? parseFloat(row.metal_weight_g) : null,
+    metalRateInrPerG: row.metal_rate_inr_per_g != null ? parseFloat(row.metal_rate_inr_per_g) : null,
+    metalRateAedPerG: row.metal_rate_aed_per_g != null ? parseFloat(row.metal_rate_aed_per_g) : null,
+    inrTotal,
     paymentMethod: row.payment_method,
     notes: row.notes,
-    convertedTotal: getSaleInrAmount(units),
+    convertedTotal: resolvePurchaseInrDisplay({ settlementMode, inrTotal, units }),
     aedTotal: row.aed_total ? parseFloat(row.aed_total) : undefined,
-    paymentStatus: row.payment_status || 'pending',
+    paymentStatus: row.payment_status === 'pending' ? 'paid' : row.payment_status || 'paid',
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : undefined,
   };
 }
 
 export function mapICSaleRow(row: any): ICSale {
+  const units = parseFloat(row.units);
+  const settlementMode = row.settlement_mode === 'metal' ? 'metal' : 'cash';
+  const inrTotal = row.inr_total != null ? parseFloat(row.inr_total) : null;
   return {
     id: row.id,
     customerName: row.customer_name,
     orderCustomerName: row.order_customer_name || undefined,
     orderCustomerId: row.order_customer_id || undefined,
+    counterpartyId: row.counterparty_id ? String(row.counterparty_id) : undefined,
     subCustomerId: row.sub_customer_id || undefined,
     subCustomerName: row.sub_customer_name || undefined,
     warehouseId: row.warehouse_id,
+    settlementMode,
     transactionType: row.transaction_type,
-    units: parseFloat(row.units),
+    units,
     unitRate: parseFloat(row.unit_rate),
+    metalWeightG: row.metal_weight_g != null ? parseFloat(row.metal_weight_g) : null,
+    metalRateInrPerG: row.metal_rate_inr_per_g != null ? parseFloat(row.metal_rate_inr_per_g) : null,
+    metalRateAedPerG: row.metal_rate_aed_per_g != null ? parseFloat(row.metal_rate_aed_per_g) : null,
+    inrTotal,
+    metalPurchaseId: row.metal_purchase_id ? String(row.metal_purchase_id) : null,
+    metalPaymentMethod:
+      row.metal_payment_method === 'INR' || row.metal_payment_method === 'AED'
+        ? row.metal_payment_method
+        : null,
     aedAmount: row.aed_amount ? parseFloat(row.aed_amount) : undefined,
     enteredBy: row.entered_by,
     enteredByName: row.entered_by_name,

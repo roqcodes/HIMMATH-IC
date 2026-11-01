@@ -5,6 +5,7 @@ import { fmtLedgerAed } from '@/lib/icFunds/format';
 import type { ICFundAccountDetailStats } from '@/lib/icFunds/accountDetailAnalytics';
 import type { ICFundsReportId } from '@/lib/icFunds/nav';
 import type { ICWarehousePLReport } from '@/lib/icFunds/warehouseProfit';
+import type { ICSettlementTradeReport } from '@/lib/icFunds/settlementTradeReport';
 import type { ICFundAccount, ICFundTrialBalanceLine } from '@/types';
 
 import type { PlStatement } from '@/lib/icFunds/reportPresentation';
@@ -28,7 +29,7 @@ function computePlKpisFromStatement(statement: PlStatement, voucherCount?: numbe
     {
       label: 'Direct costs',
       value: fmtLedgerAed(statement.directCostsTotal),
-      hint: 'Purchase & direct deal costs',
+      hint: 'COGS on completed sales (WAC); unsold stock stays in inventory',
       tone: statement.directCostsTotal > 0 ? 'red' : 'slate',
     },
     {
@@ -55,6 +56,7 @@ type BalanceSheetSummary = {
   receivables: number;
   payables: number;
   equity: number;
+  inventoryOnHand?: number;
   accumulatedPL: number;
   totalAssets: number;
   totalLiabilitiesEquity: number;
@@ -277,6 +279,7 @@ export function computeBooksKpis(input: {
   receivables?: ICFundAccount[];
   payables?: ICFundAccount[];
   warehousePl?: ICWarehousePLReport | null;
+  settlementTradeReport?: ICSettlementTradeReport | null;
   statement?: { opening: number; closing: number; lines: Array<{ debit: number; credit: number; status?: string }> } | null;
 }): AsicKpiMetric[] {
   const {
@@ -290,6 +293,7 @@ export function computeBooksKpis(input: {
     receivables = [],
     payables = [],
     warehousePl,
+    settlementTradeReport,
     statement,
   } = input;
 
@@ -303,11 +307,15 @@ export function computeBooksKpis(input: {
 
   if (reportView === 'balance-sheet' && balanceSheet) {
     const ob = balanceSheet.outOfBalance ?? 0;
+    const inventory = balanceSheet.inventoryOnHand ?? 0;
     return [
       {
         label: 'Total assets',
         value: fmtLedgerAed(balanceSheet.totalAssets),
-        hint: `Cash ${fmtLedgerAed(balanceSheet.bank)} · AR ${fmtLedgerAed(balanceSheet.receivables)}`,
+        hint:
+          inventory > 0.005
+            ? `Cash ${fmtLedgerAed(balanceSheet.bank)} · AR ${fmtLedgerAed(balanceSheet.receivables)} · IC stock ${fmtLedgerAed(inventory)}`
+            : `Cash ${fmtLedgerAed(balanceSheet.bank)} · AR ${fmtLedgerAed(balanceSheet.receivables)}`,
         tone: 'emerald',
       },
       {
@@ -439,6 +447,71 @@ export function computeBooksKpis(input: {
     ];
   }
 
+  if ((reportView === 'fund-trades' || reportView === 'metal-trades') && settlementTradeReport) {
+    const s = settlementTradeReport.summary;
+    const isMetal = settlementTradeReport.settlementMode === 'metal';
+    if (isMetal) {
+      return [
+        {
+          label: 'Purchases',
+          value: fmtLedgerAed(s.purchaseAed),
+          hint: `${s.purchaseCount} buys · ${s.metalWeightPurchasedG.toLocaleString(undefined, { maximumFractionDigits: 2 })} g`,
+          tone: 'amber',
+        },
+        {
+          label: 'Sales',
+          value: fmtLedgerAed(s.saleAed),
+          hint: `${s.saleCount} sells · ${s.metalWeightSoldG.toLocaleString(undefined, { maximumFractionDigits: 2 })} g`,
+          tone: 'emerald',
+        },
+        {
+          label: 'INR purchased',
+          value: `${s.purchaseInr.toLocaleString(undefined, { maximumFractionDigits: 2 })} INR`,
+          hint: 'Metal settlement value (buy side)',
+          tone: 'indigo',
+        },
+        {
+          label: 'INR sold',
+          value: `${s.saleInr.toLocaleString(undefined, { maximumFractionDigits: 2 })} INR`,
+          hint: 'Metal settlement value (sell side)',
+          tone: 'slate',
+        },
+        {
+          label: 'Booked P&L',
+          value: `${s.bookedInrProfit.toLocaleString(undefined, { maximumFractionDigits: 2 })} INR`,
+          hint: `AED lots ${fmtLedgerAed(s.bookedAedProfit)} · pay currency of each sale`,
+          tone: s.bookedInrProfit + s.bookedAedProfit >= 0 ? 'emerald' : 'red',
+        },
+      ];
+    }
+    return [
+      {
+        label: 'Purchase (fund)',
+        value: fmtLedgerAed(s.purchaseAed),
+        hint: `${s.purchaseCount} entries · ${s.purchaseUnits.toLocaleString(undefined, { maximumFractionDigits: 2 })} units`,
+        tone: 'amber',
+      },
+      {
+        label: 'Sales (fund)',
+        value: fmtLedgerAed(s.saleAed),
+        hint: `${s.saleCount} entries · ${s.saleUnits.toLocaleString(undefined, { maximumFractionDigits: 2 })} units`,
+        tone: 'emerald',
+      },
+      {
+        label: 'Net movement',
+        value: fmtLedgerAed(s.saleAed - s.purchaseAed),
+        hint: 'Cash AED in minus out — not gross profit (see P&L / warehouse GP)',
+        tone: s.saleAed - s.purchaseAed >= 0 ? 'emerald' : 'red',
+      },
+      {
+        label: 'Total entries',
+        value: (s.purchaseCount + s.saleCount).toLocaleString(),
+        hint: 'Buy + sell lines in register',
+        tone: 'indigo',
+      },
+    ];
+  }
+
   if (reportView === 'warehouse-pl' && warehousePl) {
     return [
       {
@@ -506,7 +579,7 @@ export function computeBooksKpis(input: {
       {
         label: 'Direct expense',
         value: fmtLedgerAed(rollup.postedTotal),
-        hint: 'Posted d-expense vouchers',
+        hint: 'Posted COGS (WAC on completed sales) and other d-expense',
         tone: 'red',
       },
       {

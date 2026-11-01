@@ -27,6 +27,7 @@ import {
 import { getCurrentUserAction, logoutAction } from '@/app/actions/auth';
 import { fetchAsicInitialDataAction, fetchAsicTransactionalDataAction } from '@/app/actions/asicDataActions';
 import { parseAsicPath } from '@/lib/asic/routing';
+import { mergeICRateGroupRowPreservingMembers } from '@/lib/icTransferMappers';
 import { authSessionSlug } from '@/lib/icTransfer/warehouseSlug';
 import {
   dbAddICRegionAction,
@@ -58,6 +59,7 @@ import {
 import {
   updateICTransferSalesEnabledAction,
   updateICTransferAutoRateResetAction,
+  updateICTransferWarehouseFulfillmentAction,
 } from '@/app/actions/icTransferSettingsActions';
 import { DEFAULT_IC_TRANSFER_SETTINGS } from '@/lib/icTransfer/settings';
 import { isBranchScopedUser, isBranchPortalRole } from '@/lib/rbac';
@@ -112,41 +114,55 @@ interface AppContextType extends AppState {
   deleteICRegion: (id: string) => Promise<boolean>;
   addICSupplier: (
     name: string,
+    code: string,
     phone: string,
     commission: number | null,
     regionId: string,
     email: string,
     address: string,
+    country: string,
+    subdivision: string,
+    locality: string,
     branchId?: string | null,
   ) => Promise<boolean>;
   updateICSupplier: (
     id: string,
     name: string,
+    code: string,
     phone: string,
     commission: number | null,
     regionId: string,
     email: string,
     address: string,
+    country: string,
+    subdivision: string,
+    locality: string,
   ) => Promise<boolean>;
   deleteICSupplier: (id: string) => Promise<boolean>;
   addICWarehouse: (
     name: string,
+    code: string,
     phone: string,
     commission: number | null,
     regionId: string,
     email: string,
     address: string,
+    indiaState: string,
+    indiaCity: string,
     sendDeliveryProofToCustomer?: boolean,
     branchId?: string | null,
   ) => Promise<boolean>;
   updateICWarehouse: (
     id: string,
     name: string,
+    code: string,
     phone: string,
     commission: number | null,
     regionId: string,
     email: string,
     address: string,
+    indiaState: string,
+    indiaCity: string,
     sendDeliveryProofToCustomer?: boolean,
   ) => Promise<boolean>;
   deleteICWarehouse: (id: string) => Promise<boolean>;
@@ -183,6 +199,7 @@ interface AppContextType extends AppState {
   setICRateGroupBranches: (groupId: string, branchIds: string[]) => Promise<boolean>;
   updateICTransferSalesEnabled: (enabled: boolean) => Promise<boolean>;
   updateICTransferAutoRateReset: (enabled: boolean) => Promise<boolean>;
+  updateICTransferWarehouseFulfillment: (enabled: boolean) => Promise<boolean>;
   addICPurchase: (purchase: Omit<ICPurchase, 'id' | 'createdAt'>) => Promise<boolean>;
   updateICPurchase: (
     id: string,
@@ -479,21 +496,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const addICSupplier = useTrackedCallback(async (
     name: string,
+    code: string,
     phone: string,
     commission: number | null,
     regionId: string,
     email: string,
     address: string,
+    country: string,
+    subdivision: string,
+    locality: string,
     branchId?: string | null,
   ) => {
     try {
       const res = await dbAddICSupplierAction(
         name,
+        code.trim() || null,
         phone,
         commission,
         regionId,
         email,
         address,
+        country,
+        subdivision,
+        locality,
         branchId,
         branchId ? currentSlug ?? undefined : undefined,
       );
@@ -513,21 +538,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateICSupplier = useTrackedCallback(async (
     id: string,
     name: string,
+    code: string,
     phone: string,
     commission: number | null,
     regionId: string,
     email: string,
     address: string,
+    country: string,
+    subdivision: string,
+    locality: string,
   ) => {
     try {
       const res = await dbUpdateICSupplierAction(
         id,
         name,
+        code.trim() || null,
         phone,
         commission,
         regionId,
         email,
         address,
+        country,
+        subdivision,
+        locality,
         currentSlug ?? undefined,
       );
       if (res.success && res.data) {
@@ -561,22 +594,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const addICWarehouse = useTrackedCallback(async (
     name: string,
+    code: string,
     phone: string,
     commission: number | null,
     regionId: string,
     email: string,
     address: string,
+    indiaState: string,
+    indiaCity: string,
     sendDeliveryProofToCustomer: boolean = true,
     branchId?: string | null,
   ) => {
     try {
       const res = await dbAddICWarehouseAction(
         name,
+        code.trim() || null,
         phone,
         commission,
         regionId,
         email,
         address,
+        indiaState,
+        indiaCity,
         sendDeliveryProofToCustomer,
         branchId,
       );
@@ -596,22 +635,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateICWarehouse = useTrackedCallback(async (
     id: string,
     name: string,
+    code: string,
     phone: string,
     commission: number | null,
     regionId: string,
     email: string,
     address: string,
+    indiaState: string,
+    indiaCity: string,
     sendDeliveryProofToCustomer: boolean = true,
   ) => {
     try {
       const res = await dbUpdateICWarehouseAction(
         id,
         name,
+        code.trim() || null,
         phone,
         commission,
         regionId,
         email,
         address,
+        indiaState,
+        indiaCity,
         sendDeliveryProofToCustomer,
       );
       if (res.success && res.data) {
@@ -685,7 +730,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const res = await dbUpdateICRateGroupAction(id, name, country, currency, saleRate, conversionRate);
       if (res.success && res.data) {
-        setState(s => ({ ...s, icRateGroups: s.icRateGroups.map(g => g.id === id ? res.data! : g) }));
+        setState(s => ({
+          ...s,
+          icRateGroups: s.icRateGroups.map(g =>
+            g.id === id ? mergeICRateGroupRowPreservingMembers(g, res.data!) : g,
+          ),
+        }));
         showToast('Rate group updated successfully');
         return true;
       }
@@ -711,7 +761,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ...s,
           icRateGroups: s.icRateGroups.map(g => {
             const updated = updatedMap.get(g.id);
-            return updated ?? g;
+            return updated ? mergeICRateGroupRowPreservingMembers(g, updated) : g;
           }),
         }));
         showToast(`Updated ${res.data.length} rate group${res.data.length === 1 ? '' : 's'}`);
@@ -736,7 +786,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (res.success && res.data) {
         setState(s => ({
           ...s,
-          icRateGroups: s.icRateGroups.map(g => (g.id === groupId ? res.data! : g)),
+          icRateGroups: s.icRateGroups.map(g =>
+            g.id === groupId ? mergeICRateGroupRowPreservingMembers(g, res.data!) : g,
+          ),
         }));
         showToast('Rate pricing updated');
         return true;
@@ -843,6 +895,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [showToast]);
 
+  const updateICTransferWarehouseFulfillment = useTrackedCallback(async (enabled: boolean) => {
+    try {
+      const res = await updateICTransferWarehouseFulfillmentAction(enabled);
+      if (res.success && res.data) {
+        setState(s => ({ ...s, icTransferSettings: res.data! }));
+        showToast(
+          enabled
+            ? 'Warehouse portal & delivery workflow enabled'
+            : 'Warehouse portal & delivery workflow disabled — sales complete on create',
+        );
+        return true;
+      }
+      showToast(res.error || 'Failed to update fulfillment setting', 'error');
+      return false;
+    } catch {
+      showToast('Error updating fulfillment setting', 'error');
+      return false;
+    }
+  }, [showToast]);
+
   const addICPurchase = useTrackedCallback(async (purchase: Omit<ICPurchase, 'id' | 'createdAt'>) => {
     try {
       const branchSlug = currentSlug !== 'superadmin' ? currentSlug : undefined;
@@ -851,13 +923,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setState(s => ({
           ...s,
           icPurchases: [res.data!, ...s.icPurchases],
-          icWarehouses: purchase.warehouseId
-            ? s.icWarehouses.map(w =>
-                w.id === purchase.warehouseId
-                  ? { ...w, currentStock: (w.currentStock ?? 0) + purchase.units }
-                  : w,
-              )
-            : s.icWarehouses,
+          icWarehouses:
+            purchase.warehouseId
+              ? s.icWarehouses.map(w => {
+                  if (w.id !== purchase.warehouseId) return w;
+                  if (purchase.settlementMode === 'metal') {
+                    return {
+                      ...w,
+                      currentMetalG: (w.currentMetalG ?? 0) + (purchase.metalWeightG || 0),
+                    };
+                  }
+                  return { ...w, currentStock: (w.currentStock ?? 0) + purchase.units };
+                })
+              : s.icWarehouses,
         }));
         showToast('Purchase recorded successfully');
         return true;
@@ -876,7 +954,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const res = await dbAddICSaleAction(sale, currentSlug);
       if (res.success && res.data) {
-        setState(s => ({ ...s, icSales: [res.data!, ...s.icSales] }));
+        setState(s => ({
+          ...s,
+          icSales: [res.data!, ...s.icSales],
+          icWarehouses: res.data!.warehouseId
+            ? s.icWarehouses.map(w => {
+                if (w.id !== res.data!.warehouseId) return w;
+                if (res.data!.settlementMode === 'metal') {
+                  const grams = res.data!.metalWeightG || 0;
+                  const addUnits =
+                    res.data!.metalPaymentMethod === 'INR' ? res.data!.units || 0 : 0;
+                  return {
+                    ...w,
+                    currentMetalG: (w.currentMetalG ?? 0) - grams,
+                    currentStock: (w.currentStock ?? 0) + addUnits,
+                  };
+                }
+                return w;
+              })
+            : s.icWarehouses,
+        }));
         showToast('Sale recorded successfully');
         return true;
       }
@@ -1018,10 +1115,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const res = await dbDeleteICSaleAction(id);
       if (res.success) {
-        setState(s => ({
-          ...s,
-          icSales: s.icSales.filter(sale => sale.id !== id),
-        }));
+        setState(s => {
+          const deleted = s.icSales.find(sale => sale.id === id);
+          return {
+            ...s,
+            icSales: s.icSales.filter(sale => sale.id !== id),
+            icWarehouses:
+              deleted?.settlementMode === 'metal' && deleted.warehouseId
+                ? s.icWarehouses.map(w => {
+                    if (w.id !== deleted.warehouseId) return w;
+                    const restoreG = deleted.metalWeightG || 0;
+                    const reverseUnits =
+                      deleted.metalPaymentMethod === 'INR' ? deleted.units || 0 : 0;
+                    return {
+                      ...w,
+                      currentMetalG: (w.currentMetalG ?? 0) + restoreG,
+                      currentStock: (w.currentStock ?? 0) - reverseUnits,
+                    };
+                  })
+                : s.icWarehouses,
+          };
+        });
         showToast('Sale deleted successfully');
         return true;
       }
@@ -1110,6 +1224,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setICRateGroupBranches,
       updateICTransferSalesEnabled,
       updateICTransferAutoRateReset,
+      updateICTransferWarehouseFulfillment,
       addICPurchase,
       updateICPurchase,
       addICSale,
@@ -1148,6 +1263,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setICRateGroupBranches,
     updateICTransferSalesEnabled,
     updateICTransferAutoRateReset,
+    updateICTransferWarehouseFulfillment,
     addICPurchase,
     updateICPurchase,
     addICSale,

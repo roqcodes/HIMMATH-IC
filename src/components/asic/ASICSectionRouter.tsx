@@ -14,15 +14,12 @@ const ICTransferSales = dynamic(() => import('@/components/ic-transfer/sales/ICT
 const ICTransferPurchase = dynamic(() => import('@/components/ic-transfer/purchase/ICTransferPurchase'));
 const ICTransferWarehouse = dynamic(() => import('@/components/ic-transfer/warehouse/ICTransferWarehouse'));
 const ICTransferRegions = dynamic(() => import('@/components/ic-transfer/regions/ICTransferRegions'));
-const ICTransferSuppliersPage = dynamic(
-  () => import('@/components/ic-transfer/settings/ICTransferSuppliersPage'),
-);
 const ICTransferRatesPage = dynamic(() => import('@/components/ic-transfer/settings/ICTransferRatesPage'));
 const ICTransferSettingsUsersPage = dynamic(
   () => import('@/components/ic-transfer/settings/ICTransferSettingsUsersPage'),
 );
 const ICTransferFinance = dynamic(() => import('@/components/ic-transfer/finance/ICTransferFinance'));
-const CustomersPage = dynamic(() => import('@/components/customers/CustomersPage'));
+const CounterpartiesPage = dynamic(() => import('@/components/counterparties/CounterpartiesPage'));
 const GlobalSettingsScreen = dynamic(() => import('@/modules/admin/screens/GlobalSettingsScreen'));
 const AuditLogScreen = dynamic(() => import('@/modules/admin/screens/AuditLogScreen'));
 const ReconciliationScreen = dynamic(() => import('@/modules/admin/screens/ReconciliationScreen'));
@@ -81,14 +78,13 @@ export default function ASICSectionRouter({
       case 'warehouse':
         body = <ICTransferWarehouse />;
         break;
+      case 'counterparties':
       case 'customers':
-        body = <CustomersPage />;
+      case 'suppliers':
+        body = <CounterpartiesPage />;
         break;
       case 'regions':
         body = <ICTransferRegions />;
-        break;
-      case 'suppliers':
-        body = <ICTransferSuppliersPage />;
         break;
       case 'rates':
         body = <ICTransferRatesPage />;

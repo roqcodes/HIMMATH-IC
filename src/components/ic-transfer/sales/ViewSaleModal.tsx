@@ -14,7 +14,8 @@ import ProofImageActions from '../shared/ProofImageActions';
 import CopyOrderDetailsButton from '../shared/CopyOrderDetailsButton';
 import { canBranchDeleteOrder, canCustomerSeeDeliveryProof } from '@/lib/icTransfer/orderStatus';
 import { canEditOrder, canDeleteOrder, canRequestOrderCancellation } from '@/lib/icTransfer/customerOrderReview';
-import { getDeliveredUnits, getRemainingUnits, getSaleInrAmount } from '@/lib/icTransfer/saleUnits';
+import { getDeliveredUnits, getRemainingUnits } from '@/lib/icTransfer/saleUnits';
+import { resolveSaleInrDisplay } from '@/lib/icTransfer/metalSettlement';
 import { formatAmount } from '@/lib/icTransfer/rateCalculations';
 import { isBranchScopedUser, isCustomerRole } from '@/lib/rbac';
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
@@ -101,6 +102,8 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
 
   const deliveredUnits = getDeliveredUnits(liveSale.units, liveSale.collectedUnits, liveSale.orderStatus);
   const remainingUnits = getRemainingUnits(liveSale.units, liveSale.collectedUnits, liveSale.orderStatus);
+  const isMetalSale = liveSale.settlementMode === 'metal';
+  const saleInr = resolveSaleInrDisplay(liveSale);
   const isBranchPortalView = workflowVariant === 'branch'
     || (workflowVariant === 'auto' && isBranchScopedUser(user));
   const workflowUiVariant = isBranchPortalView ? 'branch' : 'admin';
@@ -196,28 +199,44 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
 
             {/* Calculations Box */}
             <div className="space-y-3">
-              {/* Row 1: Units + AED rate */}
-              <div className="grid grid-cols-2 gap-4 rounded-lg border border-slate-100 bg-slate-50/55 p-4">
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Units</p>
-                  <p className="mt-0.5 text-sm font-bold text-slate-900">{Number(liveSale.units).toLocaleString()}</p>
-                </div>
-                {!isCustomerViewer ? (
+              {isMetalSale ? (
+                <div className="grid grid-cols-2 gap-4 rounded-lg border border-slate-100 bg-slate-50/55 p-4">
                   <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Unit rate (AED)</p>
-                    <p className="mt-0.5 text-sm font-bold text-slate-900">{formatAmount(liveSale.unitRate)}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Weight</p>
+                    <p className="mt-0.5 text-sm font-bold text-slate-900">
+                      {(liveSale.metalWeightG ?? 0).toLocaleString()} g
+                    </p>
                   </div>
-                ) : null}
-              </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Pay</p>
+                    <p className="mt-0.5 text-sm font-bold text-slate-900">
+                      {liveSale.metalPaymentMethod === 'INR' ? 'INR (units)' : 'AED (customer)'}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-4 rounded-lg border border-slate-100 bg-slate-50/55 p-4">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Units</p>
+                    <p className="mt-0.5 text-sm font-bold text-slate-900">{Number(liveSale.units).toLocaleString()}</p>
+                  </div>
+                  {!isCustomerViewer ? (
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Unit rate (AED)</p>
+                      <p className="mt-0.5 text-sm font-bold text-slate-900">{formatAmount(liveSale.unitRate)}</p>
+                    </div>
+                  ) : null}
+                </div>
+              )}
 
               <div className={`grid gap-4 rounded-lg border border-slate-100 bg-slate-50/55 p-4 ${isCustomerViewer ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1 sm:grid-cols-3'}`}>
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total (INR)</p>
                   <p className="mt-0.5 text-sm font-bold tabular-nums text-slate-900">
-                    {getSaleInrAmount(Number(liveSale.units)).toLocaleString()} INR
+                    {saleInr.toLocaleString()} INR
                   </p>
                   <InrAmountInWords
-                    amount={getSaleInrAmount(Number(liveSale.units))}
+                    amount={saleInr}
                     className="mt-0.5 text-sm font-medium leading-snug text-slate-500"
                   />
                 </div>
@@ -225,6 +244,14 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total (AED)</p>
                     <p className="mt-0.5 text-sm font-bold text-accent">{formatAED(liveSale.aedAmount)}</p>
+                  </div>
+                ) : null}
+                {isMetalSale && liveSale.metalPaymentMethod === 'INR' ? (
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">IC units</p>
+                    <p className="mt-0.5 text-sm font-bold text-slate-900">
+                      {Number(liveSale.units).toLocaleString()}
+                    </p>
                   </div>
                 ) : null}
               </div>
