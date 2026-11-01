@@ -298,9 +298,6 @@ export async function saveCustomer(
     );
 
     await syncICCounterpartyFundAccount(id);
-    if (cognitoUserId) {
-      await query(`UPDATE profiles SET counterparty_id = $1 WHERE id = $2`, [id, cognitoUserId]);
-    }
 
     revalidateCustomerPaths(slug);
     return { success: true, id };

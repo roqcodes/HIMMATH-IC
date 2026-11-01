@@ -23,7 +23,7 @@ export async function authenticateWithSupabase(email: string, password: string):
   const admin = createSupabaseAdminClient();
   const { data: profile, error: profileError } = await admin
     .from('profiles')
-    .select('role, branch_id, counterparty_id, warehouse_id, delivery_agent_id, name')
+    .select('role, branch_id, warehouse_id, delivery_agent_id, name')
     .eq('id', data.user.id)
     .maybeSingle();
 
@@ -46,7 +46,6 @@ export async function authenticateWithSupabase(email: string, password: string):
     name: profile?.name || data.user.email?.split('@')[0] || email,
     role,
     branchId: profile?.branch_id || undefined,
-    customerId: profile?.counterparty_id ? String(profile.counterparty_id) : undefined,
     warehouseId: profile?.warehouse_id ? String(profile.warehouse_id) : undefined,
   };
 }
