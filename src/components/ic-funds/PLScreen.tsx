@@ -20,6 +20,7 @@ import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import { BalanceWithPendingCell } from '@/components/ic-funds/BalanceWithPending';
 import { plDisplayBalance, plPeriodMovement } from '@/lib/icFunds/accountBalance';
 import { resolveAccountDetailHref } from '@/lib/icFunds/accountNavigation';
+import { computeDealProfit } from '@/lib/icTransfer/dealProfit';
 import { useApp } from '@/context/AppContext';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { logClientActionError } from '@/lib/errors/actionError';
@@ -65,7 +66,7 @@ export default function PLScreen({
   slug: string;
   portal?: 'admin' | 'branch';
 }) {
-  const { branches } = useApp();
+  const { branches, icPurchases, icSales } = useApp();
   const { alert } = useConfirmDialog();
   const branch = branches.find(b => b.slug === slug);
   const {
@@ -135,6 +136,34 @@ export default function PLScreen({
     [summary, plVouchers.length],
   );
 
+  const dealPl = useMemo(
+    () =>
+      computeDealProfit({
+        purchases: icPurchases,
+        sales: icSales,
+        range: { startDate: startDate || null, endDate: endDate || null },
+      }),
+    [icPurchases, icSales, startDate, endDate],
+  );
+
+  const dealKpiMetrics = useMemo(
+    () => [
+      {
+        label: 'IC gross profit',
+        value: fmtLedgerAed(dealPl.cashGrossProfitAed),
+        hint: 'Operational WAC on cash IC sales',
+        tone: dealPl.cashGrossProfitAed >= 0 ? ('emerald' as const) : ('red' as const),
+      },
+      {
+        label: 'Metal P&L',
+        value: fmtLedgerAed(dealPl.metalProfitAed),
+        hint: `${dealPl.metalSoldG.toLocaleString(undefined, { maximumFractionDigits: 2 })} g · ${dealPl.metalSaleCount} sales`,
+        tone: dealPl.metalProfitAed >= 0 ? ('emerald' as const) : ('red' as const),
+      },
+    ],
+    [dealPl],
+  );
+
   return (
     <div className="space-y-4">
       <ICFundsDateFilterBar
@@ -153,13 +182,13 @@ export default function PLScreen({
       ) : bundle ? (
         <>
           {plKpiMetrics.length > 0 ? <AsicKpiStrip metrics={plKpiMetrics} /> : null}
+          <AsicKpiStrip metrics={dealKpiMetrics} columns={3} />
 
           <div className={icfCard}>
             <div className="border-b border-slate-200 px-2.5 py-2">
               <h3 className="text-sm font-semibold text-slate-900">Profit & loss accounts</h3>
               <p className="text-[11px] text-slate-500">
-                Period activity with signed P&L amounts — income and profit positive, expenses
-                negative.
+                Ledger amounts in AED. IC and metal operational P&amp;L is in the strip above (cash WAC + metal lots).
               </p>
             </div>
             <div className={icfTableWrap}>

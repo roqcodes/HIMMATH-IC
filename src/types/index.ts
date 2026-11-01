@@ -642,8 +642,6 @@ export interface ICSupplier {
   /** When set, supplier is owned by a branch portal (exclusive to that branch). */
   branchId?: string;
   status?: 'active' | 'inactive';
-  legacyCustomerId?: string | null;
-  legacySupplierId?: string | null;
   createdAt?: string;
 }
 

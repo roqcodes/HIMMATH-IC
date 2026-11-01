@@ -6,7 +6,7 @@ import { query, runQueryBatch } from '@/lib/db';
 import { ensureDbSchema } from '@/lib/dbSchema';
 import { resolveBranchTimeZone } from '@/lib/businessTime';
 import { normalizeHiddenPages } from '@/lib/branchPages';
-import { isBranchScopedUser, isCustomerRole } from '@/lib/rbac';
+import { isBranchScopedUser } from '@/lib/rbac';
 import { PRODUCT_NAME } from '@/lib/brand';
 import { mapICCounterpartyRow, COUNTERPARTY_SELECT } from '@/lib/counterparties/mapper';
 import {
@@ -18,7 +18,6 @@ import {
   mapICWarehouseTransactionRow,
 } from '@/lib/icTransferMappers';
 import { mapICTransferSettingsRow } from '@/lib/icTransfer/settings';
-import { filterRateGroupsForCustomerPortal, stripAdminRatesFromSale } from '@/lib/icTransfer/customerPortalScope';
 import { logger } from '@/lib/logger';
 import type { Branch, User } from '@/types';
 import { ensureHqIcFundsBranch } from '@/lib/icFunds/ensureHqBranch';
@@ -40,7 +39,6 @@ const IC_SALES_SELECT = `
 type FetchContext = {
   currentUser: User | null;
   branchId: string | null;
-  customerSession: boolean;
 };
 
 async function resolveFetchContext(
@@ -56,10 +54,8 @@ async function resolveFetchContext(
   const isBranchScoped =
     !!currentUser && isBranchScopedUser(currentUser) && !!currentUser.branchId;
   const branchId = isBranchScoped ? currentUser!.branchId! : null;
-  const customerSession =
-    !!currentUser && isCustomerRole(currentUser.role) && !!currentUser.customerId;
 
-  return { currentUser, branchId, customerSession };
+  return { currentUser, branchId };
 }
 
 function mapBranchRow(r: Record<string, unknown>): Branch {
@@ -121,15 +117,7 @@ async function loadPurchases(_branchId: string | null) {
   return query('SELECT * FROM ic_purchases ORDER BY created_at DESC LIMIT 500');
 }
 
-async function loadSales(ctx: FetchContext) {
-  if (ctx.customerSession && ctx.currentUser?.customerId) {
-    return query(
-      `${IC_SALES_SELECT}
-       WHERE s.order_customer_id = $1
-       ORDER BY s.created_at DESC LIMIT 200`,
-      [ctx.currentUser.customerId],
-    );
-  }
+async function loadSales(_ctx: FetchContext) {
   return query(`${IC_SALES_SELECT} ORDER BY s.created_at DESC LIMIT 400`);
 }
 
@@ -145,21 +133,10 @@ async function postProcessSalesAndRates(
   let icSales = icSalesRes.rows.map(r => mapICSaleRow(r));
   let icRateGroups = icRateGroupsRes.rows.map(r => mapICRateGroupRow(r));
 
-  if (ctx.customerSession && ctx.currentUser?.customerId) {
-    const parentId = ctx.currentUser.customerId;
-    let custBranchId = ctx.currentUser.branchId || '';
-    if (!custBranchId) {
-      const custBranchRes = await query(`SELECT branch_id FROM customers WHERE id = $1 LIMIT 1`, [parentId]);
-      custBranchId = custBranchRes.rows[0]?.branch_id ? String(custBranchRes.rows[0].branch_id) : '';
-    }
-    icSales = icSales.map(stripAdminRatesFromSale);
-    icRateGroups = filterRateGroupsForCustomerPortal(icRateGroups, parentId, custBranchId || undefined);
-  } else {
-    icSales = icSales.map(sale => {
-      const { subCustomerId: _id, subCustomerName: _name, ...rest } = sale;
-      return rest;
-    });
-  }
+  icSales = icSales.map(sale => {
+    const { subCustomerId: _id, subCustomerName: _name, ...rest } = sale;
+    return rest;
+  });
 
   return { icSales, icRateGroups };
 }

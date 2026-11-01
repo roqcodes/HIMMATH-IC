@@ -21,7 +21,7 @@ import { isBranchHandledSale } from '@/lib/icTransfer/fulfillmentHandler';
 import { normalizeOrderStatus, getCustomerOrderStatus } from '@/lib/icTransfer/orderStatus';
 import { hasAdminWorkflowActions } from '@/lib/icTransfer/orderWorkflowRules';
 import { comparePriority } from '@/lib/icTransfer/orderPriority';
-import { getDeliveredUnits, getRemainingUnits } from '@/lib/icTransfer/saleUnits';
+import { sumMetalSaleWeightG } from '@/lib/icTransfer/warehouseMatrixMetrics';
 import { adminBulkVerifyDeliveryAction } from '@/app/actions/icTransferActions';
 import SalesHeader from './sales-header';
 import { useWriteAccess } from '@/context/RbacWriteContext';
@@ -226,12 +226,12 @@ export default function ICTransferSales() {
       } else if (sortField === 'Total AED') {
         valA = Number(a.aedAmount || 0);
         valB = Number(b.aedAmount || 0);
-      } else if (sortField === 'Delivered Units') {
-        valA = getDeliveredUnits(Number(a.units || 0), a.collectedUnits, a.orderStatus);
-        valB = getDeliveredUnits(Number(b.units || 0), b.collectedUnits, b.orderStatus);
-      } else if (sortField === 'Remaining Units') {
-        valA = getRemainingUnits(Number(a.units || 0), a.collectedUnits, a.orderStatus);
-        valB = getRemainingUnits(Number(b.units || 0), b.collectedUnits, b.orderStatus);
+      } else if (sortField === 'Metal (g)') {
+        valA = Number(a.metalWeightG || 0);
+        valB = Number(b.metalWeightG || 0);
+      } else if (sortField === 'Settlement') {
+        valA = a.settlementMode === 'metal' ? 1 : 0;
+        valB = b.settlementMode === 'metal' ? 1 : 0;
       } else if (sortField === 'Warehouse') {
         valA = getWarehouseName(a.warehouseId);
         valB = getWarehouseName(b.warehouseId);
@@ -259,7 +259,13 @@ export default function ICTransferSales() {
   const stats = useMemo(() => {
     const totalOrders = filteredSales.length;
     const totalValue = filteredSales.reduce((acc: number, s: ICSale) => acc + (s.aedAmount || 0), 0);
-    const totalUnits = filteredSales.reduce((acc: number, s: ICSale) => acc + s.units, 0);
+    const totalUnits = filteredSales.reduce(
+      (acc: number, s: ICSale) => acc + (s.settlementMode === 'metal' ? 0 : s.units),
+      0,
+    );
+    const totalMetalG = sumMetalSaleWeightG(filteredSales);
+    const metalCount = filteredSales.filter(s => s.settlementMode === 'metal').length;
+    const cashCount = filteredSales.length - metalCount;
     const avgRate = totalUnits > 0 ? totalValue / totalUnits : 0;
     const pendingCount = filteredSales.filter(
       (s: ICSale) => normalizeOrderStatus(s.orderStatus) === 'pending',
@@ -270,22 +276,18 @@ export default function ICTransferSales() {
     const partialCount = filteredSales.filter(
       (s: ICSale) => getCustomerOrderStatus(s) === 'Partial',
     ).length;
-    const totalPartialUnitsDelivered = filteredSales
-      .filter((s: ICSale) => getCustomerOrderStatus(s) === 'Partial' || !!s.derivedFromSaleId)
-      .reduce(
-        (acc: number, s: ICSale) => acc + getDeliveredUnits(s.units, s.collectedUnits, s.orderStatus),
-        0,
-      );
 
     return {
       totalOrders,
       totalValue,
       totalUnits,
+      totalMetalG,
+      metalCount,
+      cashCount,
       avgRate,
       pendingCount,
       pendingVerificationCount,
       partialCount,
-      totalPartialUnitsDelivered,
     };
   }, [filteredSales]);
 
@@ -407,6 +409,7 @@ export default function ICTransferSales() {
           setConfirmDeleteOpen(true);
         }}
         getWarehouseName={getWarehouseName}
+        branchSlug={branchSlug}
         branchName={branchName}
         branches={branches}
         txnBranchName={txnBranchName}

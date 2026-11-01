@@ -19,7 +19,7 @@ export type ICSettlementTradeLine = {
   settlementLabel: string;
   metalPaymentMethod?: 'INR' | 'AED';
   bookedProfit?: number;
-  bookedCurrency?: 'INR' | 'AED';
+  bookedCurrency?: 'AED';
   paymentMethod?: string;
   paymentStatus?: string;
   orderStatus?: string;
@@ -80,14 +80,7 @@ export function summarizeSettlementTrades(
   const saleInr = sales.reduce((s, r) => s + (r.inrTotal ?? 0), 0);
   const metalWeightPurchasedG = purchases.reduce((s, r) => s + (r.metalWeightG ?? 0), 0);
   const metalWeightSoldG = sales.reduce((s, r) => s + (r.metalWeightG ?? 0), 0);
-  const bookedInrProfit = sales.reduce(
-    (s, r) => s + (r.bookedCurrency === 'INR' ? r.bookedProfit ?? 0 : 0),
-    0,
-  );
-  const bookedAedProfit = sales.reduce(
-    (s, r) => s + (r.bookedCurrency === 'AED' ? r.bookedProfit ?? 0 : 0),
-    0,
-  );
+  const bookedAedProfit = sales.reduce((s, r) => s + (r.bookedProfit ?? 0), 0);
 
   return {
     purchaseCount: purchases.length,
@@ -100,7 +93,7 @@ export function summarizeSettlementTrades(
     saleInr: round2(saleInr),
     metalWeightPurchasedG: round4(metalWeightPurchasedG),
     metalWeightSoldG: round4(metalWeightSoldG),
-    bookedInrProfit: round2(bookedInrProfit),
+    bookedInrProfit: 0,
     bookedAedProfit: round2(bookedAedProfit),
   };
 }
@@ -111,6 +104,6 @@ export function settlementTradeReportTitle(mode: ICSettlementMode): string {
 
 export function settlementTradeReportSubtitle(mode: ICSettlementMode): string {
   return mode === 'metal'
-    ? 'Metal lots: warehouse grams, supplier AED, sale pay INR or AED. P&L is sale − purchase in the pay currency.'
+    ? 'Metal lots in grams. P&L (AED) = sale total AED − purchase total AED on the lot.'
     : 'Cash (AED fund) IC purchases and sales — units, rates, and ledger amounts.';
 }

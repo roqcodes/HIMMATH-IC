@@ -1,6 +1,7 @@
 'use client';
 
 import { fmtICAmount, fmtICDate, fmtLedgerAed } from '@/lib/icFunds/format';
+import { computeMetalSheetRateAed } from '@/lib/icTransfer/metalSettlement';
 import {
   settlementTradeReportSubtitle,
   settlementTradeReportTitle,
@@ -64,7 +65,7 @@ function TradeTable({
                 <>
                   <th className={icfThAlign('right')}>Fine wt (g)</th>
                   <th className={icfThAlign('right')}>INR / g</th>
-                  <th className={icfThAlign('right')}>AED / g</th>
+                  <th className={icfThAlign('right')}>Rate (AED)</th>
                   <th className={icfThAlign('right')}>INR value</th>
                 </>
               ) : null}
@@ -102,7 +103,11 @@ function TradeTable({
                           {row.metalRateInrPerG ? fmtInr(row.metalRateInrPerG) : '—'}
                         </td>
                         <td className={`${icfTd} text-right font-mono tabular-nums text-slate-600`}>
-                          {row.metalRateAedPerG ? fmtLedgerAed(row.metalRateAedPerG) : '—'}
+                          {row.inrTotal && row.aedTotal
+                            ? fmtLedgerAed(computeMetalSheetRateAed(row.inrTotal, row.aedTotal))
+                            : row.metalRateAedPerG
+                              ? fmtLedgerAed(row.metalRateAedPerG)
+                              : '—'}
                         </td>
                         <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtInr(row.inrTotal)}</td>
                       </>
@@ -116,8 +121,8 @@ function TradeTable({
                     <ReportAmountCell n={row.aedTotal} />
                     {isMetal ? (
                       <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                        {row.bookedProfit != null && row.bookedCurrency
-                          ? `${row.bookedProfit.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${row.bookedCurrency}`
+                        {row.bookedProfit != null
+                          ? fmtLedgerAed(row.bookedProfit)
                           : '—'}
                       </td>
                     ) : null}
@@ -208,14 +213,11 @@ export default function SettlementTradeReport({
               <p className="text-xs text-slate-500">{fmtInr(summary.saleInr)}</p>
             </div>
             <div className="border-t border-slate-100 px-2.5 py-2 sm:col-span-2 lg:col-span-4 dark:border-[var(--theme-border)]">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Note</p>
-              <p className="mt-0.5 text-xs text-slate-600 dark:text-[var(--theme-text-secondary)]">
-                INR pay: P&amp;L = sale INR − lot purchase INR (units return to the warehouse). AED pay: P&amp;L =
-                sale AED − lot purchase AED (customer billed in AED).
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Booked P&amp;L</p>
+              <p className="mt-0.5 text-sm font-semibold tabular-nums text-slate-900 dark:text-[var(--theme-text)]">
+                {fmtLedgerAed(summary.bookedAedProfit)}
               </p>
-              <p className="mt-1 text-xs font-medium tabular-nums text-slate-700">
-                Booked P&amp;L · {fmtInr(summary.bookedInrProfit)} · {fmtLedgerAed(summary.bookedAedProfit)}
-              </p>
+              <p className="text-xs text-slate-500">Sale AED total − purchase AED total on matched lots</p>
             </div>
           </>
         ) : (

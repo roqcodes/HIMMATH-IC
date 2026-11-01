@@ -84,8 +84,9 @@ export default function ProfitLossReport({
         </p>
       ) : null}
       <p className="px-2.5 py-2 text-[11px] text-slate-500">
-        Direct costs are WAC COGS on completed IC sales (cash and metal). Purchases capitalize to{' '}
-        <span className="font-medium">IC Inventory</span> until sold; see balance sheet for unsold stock.
+        Ledger P&amp;L is AED books: cash IC sales post WAC COGS and profit reserve; metal AED lots post supplier
+        cost and customer bill. Metal INR profit is operational (sale INR − purchase INR) and is shown on warehouse
+        gross profit and the metal trade register — it is not a second AED income line.
       </p>
       <p className="px-2.5 pb-2 text-[11px] text-slate-500">
         Voucher detail:{' '}

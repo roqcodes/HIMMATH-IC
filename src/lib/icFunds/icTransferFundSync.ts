@@ -115,7 +115,6 @@ export async function ensureLinkedAccount(
     sourceId: string;
     name: string;
     phone?: string | null;
-    customerId?: string | null;
   },
 ): Promise<string | null> {
   if (!params.name.trim()) return null;
@@ -138,10 +137,9 @@ export async function ensureLinkedAccount(
       `UPDATE ic_fund_accounts
        SET source_type = COALESCE(source_type, $1),
            source_id = COALESCE(source_id, $2),
-           phone = COALESCE($3, phone),
-           customer_id = COALESCE($4, customer_id)
-       WHERE id = $5`,
-      [params.sourceType, sourceId, params.phone || null, params.customerId || null, accountId],
+           phone = COALESCE($3, phone)
+       WHERE id = $4`,
+      [params.sourceType, sourceId, params.phone || null, accountId],
     );
     return accountId;
   }
@@ -149,8 +147,8 @@ export async function ensureLinkedAccount(
   const id = `ICFA-${crypto.randomUUID().slice(0, 10).toUpperCase()}`;
   const insertSql = `INSERT INTO ic_fund_accounts (
          id, branch_id, name, account_type, opening_balance, notes,
-         source_type, source_id, phone, customer_id
-       ) VALUES ($1, $2, $3, 'personal', 0, $4, $5, $6, $7, $8)`;
+         source_type, source_id, phone
+       ) VALUES ($1, $2, $3, 'personal', 0, $4, $5, $6, $7)`;
   const insertParams = [
     id,
     params.branchId,
@@ -159,7 +157,6 @@ export async function ensureLinkedAccount(
     params.sourceType,
     sourceId,
     params.phone || null,
-    params.customerId || null,
   ];
 
   const inserted = await insertIgnoringUnique(client, 'sp_link_acct', insertSql, insertParams);
@@ -182,7 +179,6 @@ export async function ensureLinkedAccount(
     insertParams[4],
     insertParams[5],
     insertParams[6],
-    insertParams[7],
   ]);
   if (altInserted) return id;
 
@@ -502,11 +498,6 @@ async function postMetalLotMarginVouchers(
   branchId: string,
 ): Promise<void> {
   const saleRef = String(sale.id);
-  const paymentMethod = sale.metal_payment_method === 'INR' ? 'INR' : 'AED';
-  if (paymentMethod === 'INR') {
-    await voidSaleMarginVouchers(client, branchId, saleRef);
-    return;
-  }
 
   const purchaseId = sale.metal_purchase_id ? String(sale.metal_purchase_id) : '';
   let purchaseAed = 0;
@@ -540,13 +531,7 @@ async function postMetalLotMarginVouchers(
     'd_expense',
     'ic_purchase_cost',
   );
-  const inventoryAccountId = await ensureSystemAccount(
-    client,
-    branchId,
-    'IC Inventory',
-    'personal',
-    'ic_inventory',
-  );
+  const inventoryAccountId = await ensureInventoryAccount(client, branchId, true);
   const incomeAccountId = await ensureSystemAccount(
     client,
     branchId,
@@ -721,6 +706,21 @@ async function postSaleMarginVouchers(
   }
 }
 
+function isMetalSettlement(mode: unknown): boolean {
+  return String(mode || '') === 'metal';
+}
+
+async function ensureInventoryAccount(
+  client: DbClient,
+  branchId: string,
+  metal: boolean,
+): Promise<string> {
+  if (metal) {
+    return ensureSystemAccount(client, branchId, 'Metal Inventory', 'personal', 'metal_inventory');
+  }
+  return ensureSystemAccount(client, branchId, 'IC Inventory', 'personal', 'ic_inventory');
+}
+
 async function voidVoucherByReference(
   client: DbClient,
   branchId: string,
@@ -851,11 +851,10 @@ function resolveIcFundsLedgerBranchId(explicitBranchId?: string | null): string 
 
 async function resolvePurchaseBranchId(client: DbClient, purchaseId: string): Promise<string> {
   const res = await client.query(
-    `SELECT COALESCE(w.branch_id, cp.branch_id, cp_sup.branch_id) AS branch_id
+    `SELECT COALESCE(w.branch_id, cp.branch_id) AS branch_id
      FROM ic_purchases p
      LEFT JOIN ic_warehouses w ON w.id = p.warehouse_id
      LEFT JOIN ic_counterparties cp ON cp.id = p.counterparty_id
-     LEFT JOIN ic_counterparties cp_sup ON cp_sup.legacy_supplier_id = p.supplier_id
      WHERE p.id = $1`,
     [purchaseId],
   );
@@ -881,10 +880,10 @@ async function resolveSaleBranchId(client: DbClient, sale: Record<string, unknow
     }
   }
 
-  if (sale.order_customer_id) {
+  if (sale.counterparty_id) {
     const customerRes = await client.query(
-      `SELECT branch_id FROM customers WHERE id = $1 LIMIT 1`,
-      [sale.order_customer_id],
+      `SELECT branch_id FROM ic_counterparties WHERE id = $1 LIMIT 1`,
+      [sale.counterparty_id],
     );
     if (customerRes.rows[0]?.branch_id) {
       return String(customerRes.rows[0].branch_id);
@@ -903,7 +902,7 @@ async function resolveDefaultBranchId(client: DbClient): Promise<string> {
 export async function syncICCounterpartyFundAccount(counterpartyId: string): Promise<void> {
   try {
     const res = await query(
-      `SELECT id, name, phone, email, branch_id, legacy_customer_id FROM ic_counterparties WHERE id = $1 LIMIT 1`,
+      `SELECT id, name, phone, email, branch_id FROM ic_counterparties WHERE id = $1 LIMIT 1`,
       [counterpartyId],
     );
     if (res.rows.length === 0) return;
@@ -916,7 +915,6 @@ export async function syncICCounterpartyFundAccount(counterpartyId: string): Pro
       sourceId: counterpartyId,
       name: String(row.name),
       phone: row.phone ? String(row.phone) : null,
-      customerId: row.legacy_customer_id ? String(row.legacy_customer_id) : null,
     });
   } catch (err) {
     logger.error({ err, counterpartyId }, 'Failed to sync IC counterparty fund account');
@@ -949,35 +947,6 @@ export async function syncICWarehouseFundAccount(warehouseId: string): Promise<v
   }
 }
 
-export async function backfillICTransferFundAccounts(): Promise<void> {
-  try {
-    const counterparties = await query(`SELECT id FROM ic_counterparties ORDER BY created_at ASC`);
-    for (const row of counterparties.rows) {
-      await syncICCounterpartyFundAccount(String(row.id));
-    }
-    const warehouses = await query(`SELECT id FROM ic_warehouses ORDER BY created_at ASC`);
-    for (const row of warehouses.rows) {
-      await syncICWarehouseFundAccount(String(row.id));
-    }
-
-    const purchases = await query(`SELECT id FROM ic_purchases ORDER BY created_at ASC`);
-    for (const row of purchases.rows) {
-      await syncICPurchaseToICFunds(String(row.id));
-    }
-
-    const sales = await query(
-      `SELECT id FROM ic_sales
-       WHERE order_status NOT IN ('pending', 'pending_branch_review', 'branch_rejected', 'admin_rejected', 'cancelled', 'cancellation_pending')
-       ORDER BY created_at ASC`,
-    );
-    for (const row of sales.rows) {
-      await syncICSaleToICFunds(String(row.id));
-    }
-  } catch (err) {
-    logger.error({ err }, 'Failed to backfill IC Transfer fund accounts');
-  }
-}
-
 export async function syncICPurchaseToICFunds(purchaseId: string): Promise<void> {
   try {
     await ensureHqIcFundsBranch();
@@ -986,34 +955,25 @@ export async function syncICPurchaseToICFunds(purchaseId: string): Promise<void>
       if (purchaseRes.rows.length === 0) return;
       const purchase = purchaseRes.rows[0];
       const branchId = await resolvePurchaseBranchId(client, purchaseId);
+      const metal = isMetalSettlement(purchase.settlement_mode);
 
       const units = Number(purchase.units) || 0;
-      const amount = purchaseAedTotal(
-        units,
-        Number(purchase.unit_rate) || 0,
-        purchase.aed_total,
-      );
+      const amount = metal
+        ? roundLedgerAmount(Number(purchase.aed_total) || 0)
+        : roundLedgerAmount(
+            purchaseAedTotal(units, Number(purchase.unit_rate) || 0, purchase.aed_total),
+          );
       if (amount <= 0) {
         await voidVoucherByReference(client, branchId, 'ic_purchase', purchaseId);
         return;
       }
 
       let supplierAccountId: string | null = null;
-      const counterpartyId = purchase.counterparty_id
-        ? String(purchase.counterparty_id)
-        : purchase.supplier_id
-          ? (
-              await client.query(
-                `SELECT id, name, phone, legacy_customer_id FROM ic_counterparties
-                 WHERE legacy_supplier_id = $1 LIMIT 1`,
-                [purchase.supplier_id],
-              )
-            ).rows[0]?.id
-          : null;
+      const counterpartyId = purchase.counterparty_id ? String(purchase.counterparty_id) : null;
 
       if (counterpartyId) {
         const cpRes = await client.query(
-          `SELECT id, name, phone, legacy_customer_id FROM ic_counterparties WHERE id = $1 LIMIT 1`,
+          `SELECT id, name, phone FROM ic_counterparties WHERE id = $1 LIMIT 1`,
           [counterpartyId],
         );
         if (cpRes.rows.length > 0) {
@@ -1024,7 +984,6 @@ export async function syncICPurchaseToICFunds(purchaseId: string): Promise<void>
             sourceId: String(cp.id),
             name: String(cp.name),
             phone: cp.phone ? String(cp.phone) : null,
-            customerId: cp.legacy_customer_id ? String(cp.legacy_customer_id) : null,
           });
         }
       }
@@ -1038,13 +997,7 @@ export async function syncICPurchaseToICFunds(purchaseId: string): Promise<void>
         });
       }
 
-      const inventoryAccountId = await ensureSystemAccount(
-        client,
-        branchId,
-        'IC Inventory',
-        'personal',
-        'ic_inventory',
-      );
+      const inventoryAccountId = await ensureInventoryAccount(client, branchId, metal);
 
       if (!supplierAccountId || !inventoryAccountId) {
         throw new Error('Could not resolve IC Funds accounts for purchase');
@@ -1057,7 +1010,9 @@ export async function syncICPurchaseToICFunds(purchaseId: string): Promise<void>
         debitAccountId: inventoryAccountId,
         creditAccountId: supplierAccountId,
         amount,
-        notes: `IC Purchase inventory ${purchaseId.slice(0, 8)}`,
+        notes: metal
+          ? `Metal purchase ${purchaseId.slice(0, 8)} · AED to counterparty`
+          : `IC Purchase inventory ${purchaseId.slice(0, 8)}`,
         referenceType: 'ic_purchase',
         referenceId: purchaseId,
       });
@@ -1092,11 +1047,7 @@ export async function syncICSaleToICFunds(saleId: string): Promise<void> {
         return;
       }
 
-      const metalInrPay =
-        String(sale.settlement_mode || '') === 'metal' && String(sale.metal_payment_method || '') === 'INR';
-      const amount = metalInrPay
-        ? 0
-        : (Number(sale.aed_amount) || 0) + (Number(sale.service_charge) || 0);
+      const amount = (Number(sale.aed_amount) || 0) + (Number(sale.service_charge) || 0);
       if (amount <= 0 || (!SALE_GHOST_STATUSES.has(orderStatus) && orderStatus !== 'completed')) {
         await voidVoucherByReference(client, branchId, 'ic_sale', saleId);
         if (String(sale.settlement_mode || '') === 'metal' && orderStatus === 'completed') {
@@ -1111,13 +1062,6 @@ export async function syncICSaleToICFunds(saleId: string): Promise<void> {
         String(sale.order_customer_name || sale.customer_name || 'IC Customer').trim();
 
       let counterpartyId = sale.counterparty_id ? String(sale.counterparty_id) : null;
-      if (!counterpartyId && sale.order_customer_id) {
-        const cpLookup = await client.query(
-          `SELECT id FROM ic_counterparties WHERE legacy_customer_id = $1 LIMIT 1`,
-          [sale.order_customer_id],
-        );
-        if (cpLookup.rows.length > 0) counterpartyId = String(cpLookup.rows[0].id);
-      }
 
       const customerAccountId = counterpartyId
         ? await ensureLinkedAccount(client, {
@@ -1125,16 +1069,12 @@ export async function syncICSaleToICFunds(saleId: string): Promise<void> {
             sourceType: 'ic_counterparty',
             sourceId: counterpartyId,
             name: customerName,
-            customerId: sale.order_customer_id ? String(sale.order_customer_id) : null,
           })
         : await ensureLinkedAccount(client, {
             branchId,
-            sourceType: 'ic_customer',
-            sourceId: sale.order_customer_id
-              ? String(sale.order_customer_id)
-              : `name:${customerName.toLowerCase()}`,
+            sourceType: 'ic_counterparty',
+            sourceId: `name:${customerName.toLowerCase()}`,
             name: customerName,
-            customerId: sale.order_customer_id ? String(sale.order_customer_id) : null,
           });
 
       const incomeAccountId = await ensureSystemAccount(
@@ -1150,7 +1090,14 @@ export async function syncICSaleToICFunds(saleId: string): Promise<void> {
       }
 
       const voucherStatus = orderStatus === 'completed' ? 'active' : 'pending';
-      const notesPrefix = voucherStatus === 'active' ? 'IC Sale receivable' : 'IC Sale pending';
+      const notesPrefix =
+        voucherStatus === 'active'
+          ? isMetalSettlement(sale.settlement_mode)
+            ? 'Metal sale receivable'
+            : 'IC Sale receivable'
+          : isMetalSettlement(sale.settlement_mode)
+            ? 'Metal sale pending'
+            : 'IC Sale pending';
 
       await postVoucherInTx(client, {
         branchId,

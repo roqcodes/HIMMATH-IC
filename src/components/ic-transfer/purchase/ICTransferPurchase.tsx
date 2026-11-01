@@ -24,6 +24,8 @@ import {
 } from '@/lib/icTransfer/branchPortalScope';
 import { portalMobileCardFooterClass } from '@/lib/icTransfer/layoutConstants';
 import { effectivePurchaseCounterpartyId } from '@/lib/counterparties/effectiveId';
+import { formatSettlementModeLabel } from '@/lib/icTransfer/metalSettlement';
+import { sumMetalWeightG } from '@/lib/icTransfer/warehouseMatrixMetrics';
 import AddPurchaseModal from './AddPurchaseModal';
 import ViewPurchaseModal from './ViewPurchaseModal';
 import { ICPurchase } from '@/types';
@@ -34,6 +36,8 @@ import ICTransferDataTableShell, {
   type ICTransferTableColumn,
   icTdClass,
 } from '@/components/ic-transfer/shared/ICTransferDataTableShell';
+import CounterpartyLink from '@/components/counterparties/CounterpartyLink';
+import WarehouseLink from '@/components/ic-transfer/warehouse/WarehouseLink';
 import { ICTransferEditIconButton, ICTransferViewIconButton } from '@/components/ic-transfer/shared/ICTransferTableActions';
 
 const fmt = (n: number) => `AED ${n.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`;
@@ -43,7 +47,9 @@ const PURCHASE_TABLE_COLUMNS: ICTransferTableColumn[] = [
   { id: 'ID', label: 'ID', align: 'left' },
   { id: 'Supplier', label: 'Supplier', align: 'left' },
   { id: 'Warehouse', label: 'Warehouse', align: 'left' },
+  { id: 'Settlement', label: 'Settlement', align: 'left' },
   { id: 'Units', label: 'Units', align: 'right' },
+  { id: 'Metal (g)', label: 'Metal (g)', align: 'right' },
   { id: 'Total AED', label: 'AED', align: 'right' },
   { id: 'Actions', label: 'Actions', align: 'center', sortable: false },
 ];
@@ -54,7 +60,9 @@ type Props = {
 };
 
 export default function ICTransferPurchase({ portalMode = 'admin', branchId }: Props) {
-  const { icPurchases, icSuppliers, icWarehouses, user } = useApp();
+  const { icPurchases, icSuppliers, icWarehouses, user, currentSlug } = useApp();
+  const branchSlugForLinks =
+    portalMode === 'branch' && currentSlug !== 'superadmin' ? currentSlug : undefined;
   const scopedBranchId =
     portalMode === 'branch' && branchId
       ? branchId
@@ -180,6 +188,14 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
           valA = getWarehouseName(a.warehouseId);
           valB = getWarehouseName(b.warehouseId);
           break;
+        case 'Metal (g)':
+          valA = Number(a.metalWeightG || 0);
+          valB = Number(b.metalWeightG || 0);
+          break;
+        case 'Settlement':
+          valA = a.settlementMode === 'metal' ? 1 : 0;
+          valB = b.settlementMode === 'metal' ? 1 : 0;
+          break;
         case 'Units':
           valA = Number(a.units || 0);
           valB = Number(b.units || 0);
@@ -204,8 +220,11 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
 
   const stats = React.useMemo(() => {
     const total = filteredPurchases.reduce((acc, p) => acc + (p.aedTotal || 0), 0);
-    const totalUnits = filteredPurchases.reduce((acc, p) => acc + (p.units || 0), 0);
-    return { total, totalUnits };
+    const totalUnits = filteredPurchases.reduce((acc, p) => acc + (p.settlementMode === 'metal' ? 0 : p.units || 0), 0);
+    const totalMetalG = sumMetalWeightG(filteredPurchases);
+    const metalCount = filteredPurchases.filter(p => p.settlementMode === 'metal').length;
+    const cashCount = filteredPurchases.length - metalCount;
+    return { total, totalUnits, totalMetalG, metalCount, cashCount };
   }, [filteredPurchases]);
 
   const handleEdit = (p: ICPurchase) => {
@@ -296,14 +315,20 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
       <AsicKpiStrip
         metrics={[
           {
-            label: 'Total purchases',
+            label: 'Purchase volume',
             value: fmt(stats.total),
-            hint: `${filteredPurchases.length} orders`,
+            hint: `${stats.cashCount} IC · ${stats.metalCount} metal`,
           },
           {
-            label: 'Total units',
+            label: 'IC units purchased',
             value: stats.totalUnits.toLocaleString(),
+            hint: 'Cash settlement',
+          },
+          {
+            label: 'Metal purchased',
+            value: `${stats.totalMetalG.toLocaleString('en-US', { maximumFractionDigits: 4 })} g`,
             hint: 'In selected range',
+            tone: 'amber',
           },
         ]}
       />
@@ -406,13 +431,37 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
               <span className="font-mono text-xs text-slate-500">{getFormattedTxnId(p.id, 'purchase', p)}</span>
             </td>
             <td className={icTdClass('left')}>
-              <span className="font-medium text-slate-900">{getSupplierName(effectivePurchaseCounterpartyId(p) || '')}</span>
+              <CounterpartyLink
+                counterpartyId={effectivePurchaseCounterpartyId(p)}
+                name={getSupplierName(effectivePurchaseCounterpartyId(p) || '')}
+                branchSlug={branchSlugForLinks}
+                stopPropagation
+              />
             </td>
             <td className={icTdClass('left')}>
-              <span className="text-slate-700">{getWarehouseName(p.warehouseId)}</span>
+              <WarehouseLink
+                warehouseId={p.warehouseId}
+                name={getWarehouseName(p.warehouseId)}
+                branchSlug={branchSlugForLinks ?? ''}
+                stopPropagation
+              />
+            </td>
+            <td className={icTdClass('left')}>
+              <span className="text-xs font-medium text-slate-700">
+                {formatSettlementModeLabel(p.settlementMode)}
+              </span>
             </td>
             <td className={icTdClass('right')}>
-              <span className="font-mono tabular-nums">{p.units.toLocaleString()}</span>
+              <span className="font-mono tabular-nums">
+                {p.settlementMode === 'metal' ? '—' : p.units.toLocaleString()}
+              </span>
+            </td>
+            <td className={icTdClass('right')}>
+              <span className="font-mono tabular-nums text-amber-800">
+                {p.settlementMode === 'metal'
+                  ? (p.metalWeightG ?? 0).toLocaleString('en-US', { maximumFractionDigits: 4 })
+                  : '—'}
+              </span>
             </td>
             <td className={icTdClass('right')}>
               <span className="font-mono font-medium tabular-nums text-slate-900">

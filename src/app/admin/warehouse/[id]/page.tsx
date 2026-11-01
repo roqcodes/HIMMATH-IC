@@ -1,5 +1,4 @@
 import { redirect, notFound } from 'next/navigation';
-import { fetchCognitoUsersAction } from '@/app/actions/cognitoActions';
 import AdminWarehouseDetailPageClient from '@/components/ic-transfer/warehouse/AdminWarehouseDetailPageClient';
 import { requirePortalUser } from '@/lib/asic/guards';
 import { fetchWarehouseByRouteParam } from '@/lib/icTransfer/resolveWarehouse';
@@ -28,22 +27,5 @@ export default async function AdminWarehouseDetailsPage({
     redirect(`/admin/warehouse/${canonicalSlug}`);
   }
 
-  const shortWarehouseId = warehouse.id.slice(0, 8);
-  const { success, data, error } = await fetchCognitoUsersAction(undefined);
-  const warehouseUsers =
-    success && data
-      ? data.filter(
-          u =>
-            u.role === `warehouse_${shortWarehouseId}` ||
-            u.role === `delivery_${shortWarehouseId}`,
-        )
-      : [];
-
-  return (
-    <AdminWarehouseDetailPageClient
-      warehouseId={warehouse.id}
-      initialUsers={warehouseUsers}
-      usersError={error}
-    />
-  );
+  return <AdminWarehouseDetailPageClient warehouseId={warehouse.id} />;
 }

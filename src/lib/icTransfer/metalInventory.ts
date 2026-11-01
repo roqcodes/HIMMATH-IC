@@ -1,6 +1,5 @@
 import { isVoidIcSaleOrderStatus } from '../icFunds/icTransferReportFilters';
 import {
-  deriveUnitsFromInrTotal,
   type MetalSettlementInput,
   validateMetalSettlementInput,
 } from './metalSettlement';
@@ -74,7 +73,7 @@ export type MetalLotProfit = {
   profitAed: number;
   /** Booked P&L in the payment currency. */
   bookedProfit: number;
-  bookedCurrency: MetalPaymentMethod;
+  bookedCurrency: 'AED';
 };
 
 export function computeMetalLotProfit(params: {
@@ -101,8 +100,9 @@ export function computeMetalLotProfit(params: {
     saleAed,
     profitInr,
     profitAed,
-    bookedProfit: paymentMethod === 'INR' ? profitInr : profitAed,
-    bookedCurrency: paymentMethod,
+    /** Base currency (AED): sale AED − lot purchase AED. */
+    bookedProfit: profitAed,
+    bookedCurrency: 'AED',
   };
 }
 
@@ -121,12 +121,10 @@ export type NormalizedMetalLotSale = {
 };
 
 /**
- * INR payment: IC units = INR total / 1 lakh (units return to the warehouse).
- * AED payment: customer is billed AED; IC unit stock does not change.
+ * Metal sale: customer pays AED; IC unit stock does not change.
  */
 export function normalizeMetalLotSale(params: {
   metalPurchaseId: string;
-  paymentMethod: MetalPaymentMethod;
   input: MetalSettlementInput;
 }): NormalizedMetalLotSale {
   if (!params.metalPurchaseId.trim()) {
@@ -135,21 +133,18 @@ export function normalizeMetalLotSale(params: {
   validateMetalSettlementInput(params.input);
   const inrTotal = round4(params.input.totalInr);
   const aedTotal = round4(params.input.totalAed);
-  const units =
-    params.paymentMethod === 'INR' ? deriveUnitsFromInrTotal(inrTotal) : 0;
-  const unitRate = units > 0 ? round4(aedTotal / units) : 0;
   return {
     settlementMode: 'metal',
     metalPurchaseId: params.metalPurchaseId,
-    metalPaymentMethod: params.paymentMethod,
+    metalPaymentMethod: 'AED',
     metalWeightG: round4(params.input.metalWeightG),
     metalRateInrPerG: round4(params.input.metalRateInrPerG),
     metalRateAedPerG: round4(params.input.metalRateAedPerG),
     inrTotal,
     aedTotal,
     aedAmount: aedTotal,
-    units,
-    unitRate,
+    units: 0,
+    unitRate: 0,
   };
 }
 

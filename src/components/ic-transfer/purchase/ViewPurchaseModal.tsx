@@ -9,7 +9,7 @@ import { useApp } from '@/context/AppContext';
 import { ConfirmModal } from '@/components/warehouse/shared';
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
 import { formatAmount } from '@/lib/icTransfer/rateCalculations';
-import { formatSettlementModeLabel } from '@/lib/icTransfer/metalSettlement';
+import { computeMetalSheetRateAed, formatSettlementModeLabel } from '@/lib/icTransfer/metalSettlement';
 import InrAmountInWords from '../shared/InrAmountInWords';
 import {
   ModalCalcLabel,
@@ -20,6 +20,9 @@ import {
   modalCalcPanelClass,
   modalCounterpartyPanelClass,
 } from '../shared/modalDetailUi';
+import { effectivePurchaseCounterpartyId } from '@/lib/counterparties/effectiveId';
+import CounterpartyLink from '@/components/counterparties/CounterpartyLink';
+import WarehouseLink from '@/components/ic-transfer/warehouse/WarehouseLink';
 
 type Props = {
   open: boolean;
@@ -114,8 +117,21 @@ export default function ViewPurchaseModal({ open, onClose, purchase }: Props) {
 
           <div className={modalCounterpartyPanelClass}>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <ModalDetailRow label="Supplier" value={getSupplierName(purchase.supplierId)} />
-              <ModalDetailRow label="Warehouse" value={getWarehouseName(purchase.warehouseId)} />
+              <ModalDetailRow
+                label="Supplier"
+                value={
+                  <CounterpartyLink
+                    counterpartyId={effectivePurchaseCounterpartyId(purchase)}
+                    name={getSupplierName(effectivePurchaseCounterpartyId(purchase))}
+                  />
+                }
+              />
+              <ModalDetailRow
+                label="Warehouse"
+                value={
+                  <WarehouseLink warehouseId={purchase.warehouseId} name={getWarehouseName(purchase.warehouseId)} />
+                }
+              />
             </div>
           </div>
 
@@ -123,8 +139,11 @@ export default function ViewPurchaseModal({ open, onClose, purchase }: Props) {
             {isMetal ? (
               <div className={`grid grid-cols-2 gap-4 sm:grid-cols-3 ${modalCalcPanelClass}`}>
                 <ModalDetailRow label="Weight (g)" value={formatAmount(purchase.metalWeightG ?? 0, 4)} />
-                <ModalDetailRow label="Rate / g (INR)" value={formatAmount(purchase.metalRateInrPerG ?? 0)} />
-                <ModalDetailRow label="Rate / g (AED)" value={formatAmount(purchase.metalRateAedPerG ?? 0)} />
+                <ModalDetailRow label="G rate (INR)" value={formatAmount(purchase.metalRateInrPerG ?? 0)} />
+                <ModalDetailRow
+                  label="Rate (AED)"
+                  value={formatAmount(computeMetalSheetRateAed(purchase.inrTotal ?? 0, purchase.aedTotal ?? 0))}
+                />
               </div>
             ) : (
             <div className={`grid grid-cols-2 gap-4 ${modalCalcPanelClass}`}>

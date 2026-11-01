@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
+import { counterpartyListPath } from '@/lib/counterparties/navigation';
 
-export default function LegacyBranchCustomersPage() {
-  redirect('/admin/customers');
+export default async function LegacyBranchCustomersPage() {
+  redirect(counterpartyListPath());
 }

@@ -4,9 +4,8 @@ import React, { useCallback } from 'react';
 import AsicFormField from '@/components/asic/AsicFormField';
 import { asicFormGrid, asicInput } from '@/components/asic/ui';
 import {
-  computeMetalRateAedFromTotal,
-  computeMetalRateInrFromTotal,
-  computeMetalTotalsFromWeight,
+  applyMetalFieldChange,
+  METAL_AED_RATE_DIVISOR,
   type MetalSettlementFields,
 } from '@/lib/icTransfer/metalSettlement';
 import { formatAmount } from '@/lib/icTransfer/rateCalculations';
@@ -15,7 +14,7 @@ import InrAmountInWords from '@/components/ic-transfer/shared/InrAmountInWords';
 export type MetalFieldKey =
   | 'weight'
   | 'rateInr'
-  | 'rateAed'
+  | 'sheetRateAed'
   | 'totalInr'
   | 'totalAed';
 
@@ -32,7 +31,6 @@ function parseNum(raw: string): number {
 }
 
 export default function MetalSettlementFields({ value, onChange, disabled, lockWeight }: Props) {
-
   const apply = useCallback(
     (next: MetalSettlementFields) => {
       onChange(next);
@@ -41,55 +39,7 @@ export default function MetalSettlementFields({ value, onChange, disabled, lockW
   );
 
   const onField = (field: MetalFieldKey, raw: string) => {
-    const num = parseNum(raw);
-    const w = value.metalWeightG;
-    switch (field) {
-      case 'weight': {
-        const weight = num;
-        if (weight <= 0) {
-          apply({ ...value, metalWeightG: weight });
-          return;
-        }
-        const { totalInr, totalAed } = computeMetalTotalsFromWeight(
-          weight,
-          value.metalRateInrPerG,
-          value.metalRateAedPerG,
-        );
-        apply({
-          ...value,
-          metalWeightG: weight,
-          inrTotal: totalInr,
-          aedTotal: totalAed,
-        });
-        break;
-      }
-      case 'rateInr': {
-        const rate = num;
-        const inrTotal = w > 0 ? computeMetalTotalsFromWeight(w, rate, value.metalRateAedPerG).totalInr : value.inrTotal;
-        apply({ ...value, metalRateInrPerG: rate, inrTotal: inrTotal });
-        break;
-      }
-      case 'rateAed': {
-        const rate = num;
-        const aedTotal = w > 0 ? computeMetalTotalsFromWeight(w, value.metalRateInrPerG, rate).totalAed : value.aedTotal;
-        apply({ ...value, metalRateAedPerG: rate, aedTotal: aedTotal });
-        break;
-      }
-      case 'totalInr': {
-        const inrTotal = num;
-        const rateInr = w > 0 ? computeMetalRateInrFromTotal(w, inrTotal) : value.metalRateInrPerG;
-        apply({ ...value, inrTotal, metalRateInrPerG: rateInr });
-        break;
-      }
-      case 'totalAed': {
-        const aedTotal = num;
-        const rateAed = w > 0 ? computeMetalRateAedFromTotal(w, aedTotal) : value.metalRateAedPerG;
-        apply({ ...value, aedTotal, metalRateAedPerG: rateAed });
-        break;
-      }
-      default:
-        break;
-    }
+    apply(applyMetalFieldChange(value, field, parseNum(raw)));
   };
 
   return (
@@ -125,14 +75,18 @@ export default function MetalSettlementFields({ value, onChange, disabled, lockW
             onChange={e => onField('totalInr', e.target.value)}
           />
         </AsicFormField>
-        <AsicFormField label="AED rate / g" colSpan={6}>
+        <AsicFormField
+          label="Rate (AED)"
+          colSpan={6}
+          hint={`AED = INR × rate ÷ ${METAL_AED_RATE_DIVISOR.toLocaleString()}`}
+        >
           <input
             className={asicInput}
             type="number"
             step="0.0001"
             disabled={disabled}
-            value={value.metalRateAedPerG || ''}
-            onChange={e => onField('rateAed', e.target.value)}
+            value={value.metalSheetRateAed || ''}
+            onChange={e => onField('sheetRateAed', e.target.value)}
           />
         </AsicFormField>
         <AsicFormField label="Total (AED)" colSpan={6}>
@@ -174,6 +128,7 @@ export default function MetalSettlementFields({ value, onChange, disabled, lockW
 export const emptyMetalFields = (): MetalSettlementFields => ({
   metalWeightG: 0,
   metalRateInrPerG: 0,
+  metalSheetRateAed: 0,
   metalRateAedPerG: 0,
   inrTotal: 0,
   aedTotal: 0,

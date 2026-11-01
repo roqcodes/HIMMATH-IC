@@ -14,10 +14,9 @@ import ProofImageActions from '../shared/ProofImageActions';
 import CopyOrderDetailsButton from '../shared/CopyOrderDetailsButton';
 import { canBranchDeleteOrder, canCustomerSeeDeliveryProof } from '@/lib/icTransfer/orderStatus';
 import { canEditOrder, canDeleteOrder, canRequestOrderCancellation } from '@/lib/icTransfer/customerOrderReview';
-import { getDeliveredUnits, getRemainingUnits } from '@/lib/icTransfer/saleUnits';
-import { resolveSaleInrDisplay } from '@/lib/icTransfer/metalSettlement';
+import { computeMetalSheetRateAed, resolveSaleInrDisplay } from '@/lib/icTransfer/metalSettlement';
 import { formatAmount } from '@/lib/icTransfer/rateCalculations';
-import { isBranchScopedUser, isCustomerRole } from '@/lib/rbac';
+import { isBranchScopedUser } from '@/lib/rbac';
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
 import { dbGetCustomerPhoneAction } from '@/app/actions/icTransferActions';
 import {
@@ -26,7 +25,9 @@ import {
   getSaleEndCustomerName,
   getSaleOrderImageLabel,
 } from '@/lib/icTransfer/branchOrderOwnership';
-import { getCustomerPortalSubCustomerName } from '@/lib/icTransfer/customerPortalScope';
+import { effectiveSaleCounterpartyId } from '@/lib/counterparties/effectiveId';
+import CounterpartyLink from '@/components/counterparties/CounterpartyLink';
+import WarehouseLink from '@/components/ic-transfer/warehouse/WarehouseLink';
 import { isBranchHandledSale } from '@/lib/icTransfer/fulfillmentHandler';
 import { formatICSaleTransactionTypeLabel } from '@/lib/icTransfer/transactionTypes';
 import InrAmountInWords from '../shared/InrAmountInWords';
@@ -52,13 +53,10 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
   const [phoneChecked, setPhoneChecked] = useState(false);
 
   const branchName = branches.find(b => b.slug === currentSlug)?.name || currentSlug || '';
-  const isCustomerViewer = isCustomerRole(user?.role);
   const isBranchAdminView = currentSlug !== 'superadmin';
   const txnBranchName = isBranchAdminView ? branchName : undefined;
   const displayCustomerName = liveSale
-    ? (isCustomerViewer
-        ? getCustomerPortalSubCustomerName(liveSale)
-        : getAdminSaleCustomerName(liveSale, branchName, branches))
+    ? getAdminSaleCustomerName(liveSale, branchName, branches)
     : '';
   const endCustomerId = liveSale ? getSaleEndCustomerId(liveSale, branchName) : undefined;
   const endCustomerName = liveSale ? getSaleEndCustomerName(liveSale, branchName, branches) : '';
@@ -100,8 +98,6 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
     return Number(val || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' AED';
   };
 
-  const deliveredUnits = getDeliveredUnits(liveSale.units, liveSale.collectedUnits, liveSale.orderStatus);
-  const remainingUnits = getRemainingUnits(liveSale.units, liveSale.collectedUnits, liveSale.orderStatus);
   const isMetalSale = liveSale.settlementMode === 'metal';
   const saleInr = resolveSaleInrDisplay(liveSale);
   const isBranchPortalView = workflowVariant === 'branch'
@@ -181,9 +177,15 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  {isCustomerViewer ? 'Sub Customer' : 'Customer'}
+                  Customer
                 </p>
-                <p className="text-sm font-semibold text-slate-900 mt-0.5">{displayCustomerName}</p>
+                <p className="text-sm font-semibold text-slate-900 mt-0.5">
+                  <CounterpartyLink
+                    counterpartyId={effectiveSaleCounterpartyId(liveSale) || liveSale.orderCustomerId}
+                    name={displayCustomerName}
+                    branchSlug={currentSlug !== 'superadmin' ? currentSlug : undefined}
+                  />
+                </p>
               </div>
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Transaction type</p>
@@ -200,7 +202,7 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
             {/* Calculations Box */}
             <div className="space-y-3">
               {isMetalSale ? (
-                <div className="grid grid-cols-2 gap-4 rounded-lg border border-slate-100 bg-slate-50/55 p-4">
+                <div className="grid grid-cols-2 gap-4 rounded-lg border border-slate-100 bg-slate-50/55 p-4 sm:grid-cols-4">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Weight</p>
                     <p className="mt-0.5 text-sm font-bold text-slate-900">
@@ -208,10 +210,20 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
                     </p>
                   </div>
                   <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Pay</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">G rate (INR)</p>
                     <p className="mt-0.5 text-sm font-bold text-slate-900">
-                      {liveSale.metalPaymentMethod === 'INR' ? 'INR (units)' : 'AED (customer)'}
+                      {formatAmount(liveSale.metalRateInrPerG ?? 0)}
                     </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Rate (AED)</p>
+                    <p className="mt-0.5 text-sm font-bold text-slate-900">
+                      {formatAmount(computeMetalSheetRateAed(saleInr, liveSale.aedAmount ?? 0))}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Receipt</p>
+                    <p className="mt-0.5 text-sm font-bold text-slate-900">AED from customer</p>
                   </div>
                 </div>
               ) : (
@@ -220,16 +232,14 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Units</p>
                     <p className="mt-0.5 text-sm font-bold text-slate-900">{Number(liveSale.units).toLocaleString()}</p>
                   </div>
-                  {!isCustomerViewer ? (
-                    <div>
+                  <div>
                       <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Unit rate (AED)</p>
                       <p className="mt-0.5 text-sm font-bold text-slate-900">{formatAmount(liveSale.unitRate)}</p>
                     </div>
-                  ) : null}
                 </div>
               )}
 
-              <div className={`grid gap-4 rounded-lg border border-slate-100 bg-slate-50/55 p-4 ${isCustomerViewer ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1 sm:grid-cols-3'}`}>
+              <div className="grid gap-4 rounded-lg border border-slate-100 bg-slate-50/55 p-4 grid-cols-1 sm:grid-cols-3">
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total (INR)</p>
                   <p className="mt-0.5 text-sm font-bold tabular-nums text-slate-900">
@@ -240,20 +250,10 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
                     className="mt-0.5 text-sm font-medium leading-snug text-slate-500"
                   />
                 </div>
-                {!isCustomerViewer ? (
-                  <div>
+                <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total (AED)</p>
                     <p className="mt-0.5 text-sm font-bold text-accent">{formatAED(liveSale.aedAmount)}</p>
                   </div>
-                ) : null}
-                {isMetalSale && liveSale.metalPaymentMethod === 'INR' ? (
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">IC units</p>
-                    <p className="mt-0.5 text-sm font-bold text-slate-900">
-                      {Number(liveSale.units).toLocaleString()}
-                    </p>
-                  </div>
-                ) : null}
               </div>
             </div>
 
@@ -285,7 +285,13 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
             ) : !isBranchPortalView ? (
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Warehouse</p>
-                <p className="text-sm font-semibold text-slate-700 mt-0.5 bg-slate-50 p-3 rounded-xl border border-slate-100">{getWarehouseName(liveSale.warehouseId)}</p>
+                <p className="text-sm font-semibold text-slate-700 mt-0.5 bg-slate-50 p-3 rounded-xl border border-slate-100">
+                  <WarehouseLink
+                    warehouseId={liveSale.warehouseId}
+                    name={getWarehouseName(liveSale.warehouseId)}
+                    branchSlug={currentSlug !== 'superadmin' ? currentSlug : ''}
+                  />
+                </p>
               </div>
             ) : null}
 
@@ -327,21 +333,6 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
                   : undefined
               }
             />
-
-            {(deliveredUnits > 0 || remainingUnits < liveSale.units) && (
-              <div className="pt-4 border-t border-slate-100 space-y-3">
-                <div className="flex justify-between items-center bg-emerald-50 p-3 rounded-xl border border-emerald-100">
-                  <span className="text-xs font-semibold text-emerald-700">Delivered Units:</span>
-                  <span className="text-sm font-bold text-emerald-800">{deliveredUnits.toLocaleString()}</span>
-                </div>
-                {remainingUnits > 0 && (
-                  <div className="flex justify-between items-center bg-amber-50 p-3 rounded-xl border border-amber-100">
-                    <span className="text-xs font-semibold text-amber-700">Remaining Units:</span>
-                    <span className="text-sm font-bold text-amber-800">{remainingUnits.toLocaleString()}</span>
-                  </div>
-                )}
-              </div>
-            )}
 
             {liveSale.serviceCharge !== undefined && liveSale.serviceCharge > 0 && (
               <div className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100">

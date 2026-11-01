@@ -64,6 +64,9 @@ export type ICWarehousePLLine = {
   cogs: number;
   grossProfit: number;
   marginPct: number;
+  settlementMode: 'cash' | 'metal';
+  metalWeightG?: number;
+  bookedCurrency?: 'AED';
 };
 
 export type ICWarehousePLWarehouseSummary = {
@@ -76,6 +79,9 @@ export type ICWarehousePLWarehouseSummary = {
   revenue: number;
   cogs: number;
   grossProfit: number;
+  metalProfitAed: number;
+  metalProfitInr: number;
+  metalSoldG: number;
 };
 
 export type ICWarehousePLReport = {
@@ -86,6 +92,9 @@ export type ICWarehousePLReport = {
     revenue: number;
     cogs: number;
     grossProfit: number;
+    metalProfitAed: number;
+    metalProfitInr: number;
+    metalSoldG: number;
   };
 };
 

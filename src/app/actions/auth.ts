@@ -26,6 +26,9 @@ export async function loginAction(email: string, securityKey: string, branchSlug
     }
 
     const user = await authenticateWithPassword(validation.data.email, validation.data.securityKey);
+    if (user.role === 'customer') {
+      return { success: false, error: 'Customer portal login is no longer available.' };
+    }
     const sessionSlug = authSessionSlug(branchSlug);
 
     // ── Authorization gate ──────────────────────────────────────────────
@@ -66,22 +69,6 @@ export async function loginAction(email: string, securityKey: string, branchSlug
     }
 
     const enrichedUser = await createSession(user, sessionSlug);
-
-    if (user.role === 'customer' && user.id) {
-      const customerRes = await query(
-        `SELECT status FROM customers WHERE auth_user_id = $1 LIMIT 1`,
-        [user.id],
-      );
-      if (customerRes.rows.length === 0) {
-        await deleteSession(sessionSlug);
-        return { success: false, error: 'Customer account is not linked to a customer record.' };
-      }
-      if (String(customerRes.rows[0].status) === 'inactive') {
-        await deleteSession(sessionSlug);
-        return { success: false, error: 'Your customer account is inactive. Contact your branch.' };
-      }
-    }
-
     return { success: true, data: enrichedUser };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'An error occurred during authentication.';

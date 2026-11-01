@@ -49,27 +49,6 @@ export async function authenticateWithPassword(email: string, password: string):
   return authenticateWithSupabase(email, password);
 }
 
-async function loadCustomerProfile(user: User): Promise<User> {
-  if (user.role !== 'customer' || !user.id) return user;
-
-  try {
-    const res = await query(
-      `SELECT id, name, branch_id FROM customers WHERE auth_user_id = $1 LIMIT 1`,
-      [user.id],
-    );
-    if (res.rows.length === 0) return user;
-    const branchId = user.branchId || (res.rows[0].branch_id ? String(res.rows[0].branch_id) : undefined);
-    return {
-      ...user,
-      customerId: String(res.rows[0].id),
-      name: String(res.rows[0].name || user.name),
-      branchId,
-    };
-  } catch {
-    return user;
-  }
-}
-
 async function loadStaffPermissions(user: User): Promise<User> {
   if (user.role !== 'staff' || !user.id || !user.branchId) return user;
 
@@ -92,8 +71,6 @@ export async function createSession(user: User, branchSlug?: string): Promise<Us
   let enriched = user;
   if (user.role === 'staff') {
     enriched = await loadStaffPermissions(user);
-  } else if (user.role === 'customer') {
-    enriched = await loadCustomerProfile(user);
   }
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   const session = await encrypt({
@@ -163,10 +140,6 @@ async function getSessionUserUncached(branchSlug?: string): Promise<User | null>
   };
 
   if (baseUser.role === 'staff') return loadStaffPermissions(baseUser);
-  if (baseUser.role === 'customer') {
-    if (baseUser.customerId) return baseUser;
-    return loadCustomerProfile(baseUser);
-  }
   return baseUser;
 }
 

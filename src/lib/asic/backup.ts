@@ -17,17 +17,15 @@ export type BackupGroupId =
 
 export type BackupTableId =
   | 'branches'
-  | 'customers'
+  | 'ic_counterparties'
   | 'user_page_permissions'
   | 'ic_regions'
-  | 'ic_suppliers'
   | 'ic_warehouses'
   | 'ic_rate_groups'
-  | 'ic_rate_group_customers'
+  | 'ic_rate_group_counterparties'
   | 'ic_rate_group_branches'
   | 'ic_warehouse_groups'
   | 'ic_delivery_agents'
-  | 'ic_sub_customers'
   | 'ic_purchases'
   | 'ic_sales'
   | 'ic_warehouse_transactions'
@@ -53,7 +51,7 @@ export type BackupTableDef = {
 
 export const BACKUP_GROUPS: { id: BackupGroupId; label: string; hint: string }[] = [
   { id: 'organization', label: 'Organization', hint: 'Branches, users, page permissions' },
-  { id: 'customers', label: 'Customers', hint: 'Customers and sub-customers' },
+  { id: 'customers', label: 'Counterparties', hint: 'Trading counterparties' },
   { id: 'catalog', label: 'Catalog & settings', hint: 'Regions, suppliers, warehouses, rates' },
   { id: 'purchases', label: 'Purchases', hint: 'Purchase rows (date filter applies)' },
   { id: 'sales', label: 'Sales', hint: 'Sales / orders (date filter applies)' },
@@ -79,15 +77,15 @@ export const BACKUP_TABLES: readonly BackupTableDef[] = [
     ],
   },
   {
-    id: 'customers',
-    label: 'Customers',
+    id: 'ic_counterparties',
+    label: 'Counterparties',
     group: 'customers',
     dated: false,
     insertOrder: 20,
     pk: ['id'],
     columns: [
-      'id', 'branch_id', 'name', 'phone', 'email', 'currency', 'balance', 'status', 'auth_user_id',
-      'created_at',
+      'id', 'branch_id', 'name', 'code', 'phone', 'email', 'address', 'commission', 'region_id',
+      'country', 'subdivision', 'locality', 'status', 'balance', 'created_at',
     ],
   },
   {
@@ -107,15 +105,6 @@ export const BACKUP_TABLES: readonly BackupTableDef[] = [
     insertOrder: 40,
     pk: ['id'],
     columns: ['id', 'name', 'country', 'created_at'],
-  },
-  {
-    id: 'ic_suppliers',
-    label: 'Suppliers',
-    group: 'catalog',
-    dated: false,
-    insertOrder: 50,
-    pk: ['id'],
-    columns: ['id', 'name', 'phone', 'commission', 'region_id', 'email', 'address', 'country', 'branch_id', 'created_at'],
   },
   {
     id: 'ic_warehouses',
@@ -142,13 +131,13 @@ export const BACKUP_TABLES: readonly BackupTableDef[] = [
     ],
   },
   {
-    id: 'ic_rate_group_customers',
-    label: 'Rate group customers',
+    id: 'ic_rate_group_counterparties',
+    label: 'Rate group counterparties',
     group: 'catalog',
     dated: false,
     insertOrder: 80,
-    pk: ['group_id', 'customer_id'],
-    columns: ['group_id', 'customer_id'],
+    pk: ['group_id', 'counterparty_id'],
+    columns: ['group_id', 'counterparty_id'],
   },
   {
     id: 'ic_rate_group_branches',
@@ -179,15 +168,6 @@ export const BACKUP_TABLES: readonly BackupTableDef[] = [
       'id', 'warehouse_id', 'account_id', 'name', 'email', 'phone', 'region_id', 'group_id',
       'status', 'created_at',
     ],
-  },
-  {
-    id: 'ic_sub_customers',
-    label: 'Sub-customers',
-    group: 'customers',
-    dated: false,
-    insertOrder: 120,
-    pk: ['id'],
-    columns: ['id', 'parent_customer_id', 'name', 'contact', 'created_at'],
   },
   {
     id: 'ic_purchases',

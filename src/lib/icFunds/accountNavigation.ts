@@ -1,4 +1,5 @@
 import type { ICFundAccount } from '@/types';
+import { counterpartyListHighlightPath } from '@/lib/counterparties/navigation';
 import { resolveCustomerIdFromFundAccount } from '@/lib/icFunds/customerAccountLink';
 
 export function icFundAccountDetailPath(slug: string, accountId: string): string {
@@ -8,8 +9,10 @@ export function icFundAccountDetailPath(slug: string, accountId: string): string
 /** Where a row click should navigate — customer profile or IC Funds account detail. */
 export function resolveAccountDetailHref(slug: string, account: ICFundAccount): string {
   const customerId = resolveCustomerIdFromFundAccount(account);
+  if (customerId) {
+    return counterpartyListHighlightPath(customerId, { from: 'ic-funds' });
+  }
   const navSlug = account.branchSlug || slug;
-  if (customerId) return `/${navSlug}/customers/${customerId}?from=ic-funds`;
   return icFundAccountDetailPath(navSlug, account.id);
 }
 

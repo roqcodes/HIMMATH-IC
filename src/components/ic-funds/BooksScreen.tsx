@@ -249,6 +249,8 @@ export default function BooksScreen({
             'Units',
             'Rate (AED)',
             'Amount (AED)',
+            'P&L',
+            'P&L currency',
             'Status',
           ]
         : ['Type', 'Date', 'Reference', 'Counterparty', 'Warehouse', 'Units', 'Rate (AED)', 'Amount (AED)', 'Status'];
@@ -269,6 +271,8 @@ export default function BooksScreen({
             r.units,
             r.unitRateAed,
             r.aedTotal,
+            r.bookedProfit ?? '',
+            r.bookedCurrency ?? '',
             status,
           ];
         }
@@ -593,9 +597,8 @@ export default function BooksScreen({
         {warehousePl && reportView === 'warehouse-pl' ? (
           <div>
             <p className="border-b border-slate-200 px-2.5 py-1 text-[11px] text-slate-500">
-              Gross profit on completed deliveries (cash and metal settlement): sale revenue minus COGS using
-              weighted-average cost on remaining stock in that warehouse. HQ journals post WAC COGS and profit reserve
-              on completion.
+              IC (cash) gross profit uses weighted-average AED cost on remaining unit stock. Metal P&amp;L is sale
+              AED minus purchase AED on the matched lot (grams pro-rata).
             </p>
             <div className={icfTableWrap}>
               <table className="w-full min-w-[720px] text-left text-sm">
@@ -608,12 +611,13 @@ export default function BooksScreen({
                     <th className={icfThAlign('right')}>{icfLedgerColumnLabel.revenue}</th>
                     <th className={icfThAlign('right')}>{icfLedgerColumnLabel.cogs}</th>
                     <th className={icfThAlign('right')}>{icfLedgerColumnLabel.grossProfit}</th>
+                    <th className={icfThAlign('right')}>Metal P&amp;L</th>
                   </tr>
                 </thead>
                 <tbody>
                   {warehousePl.warehouses.length === 0 ? (
                     <tr>
-                      <td className={`${icfTd} py-6 text-center text-slate-500`} colSpan={7}>
+                      <td className={`${icfTd} py-6 text-center text-slate-500`} colSpan={8}>
                         No completed warehouse sales in this period.
                       </td>
                     </tr>
@@ -633,6 +637,7 @@ export default function BooksScreen({
                         <AmountCell n={row.revenue} />
                         <AmountCell n={row.cogs} />
                         <AmountCell n={row.grossProfit} danger={row.grossProfit < 0} />
+                        <AmountCell n={row.metalProfitAed} danger={row.metalProfitAed < 0} />
                       </tr>
                     ))
                   )}
@@ -649,6 +654,7 @@ export default function BooksScreen({
                       <AmountCell n={warehousePl.totals.revenue} />
                       <AmountCell n={warehousePl.totals.cogs} />
                       <AmountCell n={warehousePl.totals.grossProfit} danger={warehousePl.totals.grossProfit < 0} />
+                      <AmountCell n={warehousePl.totals.metalProfitAed} danger={warehousePl.totals.metalProfitAed < 0} />
                     </tr>
                   </tfoot>
                 ) : null}
@@ -664,7 +670,8 @@ export default function BooksScreen({
                     <th className={icfTh}>Date</th>
                     <th className={icfTh}>Warehouse</th>
                     <th className={icfTh}>Customer</th>
-                    <th className={icfThAlign('right')}>Units</th>
+                    <th className={icfTh}>Deal</th>
+                    <th className={icfThAlign('right')}>Units / g</th>
                     <th className={icfThAlign('right')}>{icfLedgerColumnLabel.saleRate}</th>
                     <th className={icfThAlign('right')}>{icfLedgerColumnLabel.avgCost}</th>
                     <th className={icfThAlign('right')}>Revenue</th>
@@ -675,7 +682,7 @@ export default function BooksScreen({
                 <tbody>
                   {warehousePl.lines.length === 0 ? (
                     <tr>
-                      <td className={`${icfTd} py-6 text-center text-slate-500`} colSpan={9}>
+                      <td className={`${icfTd} py-6 text-center text-slate-500`} colSpan={10}>
                         No completed sales in this period.
                       </td>
                     </tr>
@@ -685,16 +692,27 @@ export default function BooksScreen({
                         <td className={icfTd}>{fmtICDate(line.saleDate)}</td>
                         <td className={icfTd}>{line.warehouseName}</td>
                         <td className={`${icfTd} max-w-[10rem] truncate`}>{line.customerName}</td>
-                        <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                          {line.units.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                        <td className={icfTd}>
+                          {line.settlementMode === 'metal' ? 'Metal' : 'IC cash'}
                         </td>
-                        <td className={`${icfTd} text-right font-mono tabular-nums`}>{`${fmtICAmount(line.saleRate)} AED`}</td>
+                        <td className={`${icfTd} text-right font-mono tabular-nums`}>
+                          {line.settlementMode === 'metal'
+                            ? `${(line.metalWeightG ?? line.units).toLocaleString(undefined, { maximumFractionDigits: 4 })} g`
+                            : line.units.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                        </td>
+                        <td className={`${icfTd} text-right font-mono tabular-nums`}>
+                          {line.settlementMode === 'metal' || line.saleRate === 0
+                            ? '—'
+                            : `${fmtICAmount(line.saleRate)} AED`}
+                        </td>
                         <td className={`${icfTd} text-right font-mono tabular-nums`}>
                           {line.avgPurchaseRate > 0 ? `${fmtICAmount(line.avgPurchaseRate)} AED` : '—'}
                         </td>
                         <AmountCell n={line.revenue} />
                         <AmountCell n={line.cogs} />
-                        <AmountCell n={line.grossProfit} danger={line.grossProfit < 0} />
+                        <td className={`${icfTd} text-right font-mono tabular-nums ${line.grossProfit < 0 ? 'text-red-600' : ''}`}>
+                          {fmtLedgerAed(line.grossProfit)}
+                        </td>
                       </tr>
                     ))
                   )}

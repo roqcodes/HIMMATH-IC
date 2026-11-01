@@ -7,7 +7,6 @@ import { getSessionUser } from '@/lib/auth';
 import { assertStaffWriteAccess } from '@/app/actions/permissionActions';
 import { createCustomerCognitoUser, deleteCognitoUserByEmail, resetCustomerCognitoPasswordAction, updateCognitoUserName } from '@/app/actions/cognitoActions';
 import { PASSWORD_INVALID_MESSAGE, validatePassword } from '@/lib/passwordValidation';
-import { syncCustomerFundAccount, deactivateCustomerFundAccount } from '@/lib/icFunds/customerFundSync';
 import { syncICCounterpartyFundAccount } from '@/lib/icFunds/icTransferFundSync';
 import { isHqAdminStaff } from '@/lib/icFunds/hqBranch';
 import { readSectionAccess } from '@/lib/staffSectionPermissions';
@@ -22,12 +21,13 @@ function revalidateCustomerPaths(slug: string) {
 const CUSTOMER_DELETE_BLOCKED_MESSAGE =
   'This customer cannot be deleted because they have existing orders or transactions.';
 
-function customerHasOrdersExpr(customerIdRef: string): string {
-  return `(EXISTS (SELECT 1 FROM ic_sales WHERE order_customer_id = ${customerIdRef} LIMIT 1))`;
+function customerHasOrdersExpr(counterpartyIdRef: string): string {
+  return `(EXISTS (SELECT 1 FROM ic_sales WHERE counterparty_id = ${counterpartyIdRef} LIMIT 1)
+    OR EXISTS (SELECT 1 FROM ic_purchases WHERE counterparty_id = ${counterpartyIdRef} LIMIT 1))`;
 }
 
-async function customerHasAnyOrders(customerId: string): Promise<boolean> {
-  const res = await query(`SELECT ${customerHasOrdersExpr('$1')} AS has_orders`, [customerId]);
+async function customerHasAnyOrders(counterpartyId: string): Promise<boolean> {
+  const res = await query(`SELECT ${customerHasOrdersExpr('$1')} AS has_orders`, [counterpartyId]);
   return Boolean(res.rows[0]?.has_orders);
 }
 
@@ -47,7 +47,7 @@ function mapCustomerRow(r: Record<string, unknown>) {
     createdAt: r.created_at ? new Date(String(r.created_at)).toISOString() : undefined,
     cognitoUserId: r.auth_user_id ? String(r.auth_user_id) : undefined,
     hasOrders: Boolean(r.has_orders),
-    netUsdt: r.net_usdt != null ? parseFloat(String(r.net_usdt)) : 0,
+    netUsdt: 0,
   };
 }
 
@@ -74,18 +74,12 @@ export async function getCustomersBySlug(slug: string) {
   try {
     const res = await query(
       `
-      SELECT c.*,
-        COALESCE(h.has_orders, false) AS has_orders,
-        0 AS net_usdt
-      FROM customers c
-      LEFT JOIN branches b ON c.branch_id = b.id
-      LEFT JOIN (
-        SELECT DISTINCT order_customer_id AS customer_id, true AS has_orders
-        FROM ic_sales
-        WHERE order_customer_id IS NOT NULL
-      ) h ON h.customer_id = c.id
+      SELECT cp.*,
+        ${customerHasOrdersExpr('cp.id')} AS has_orders
+      FROM ic_counterparties cp
+      LEFT JOIN branches b ON cp.branch_id = b.id
       WHERE b.slug = $1
-      ORDER BY c.created_at DESC
+      ORDER BY cp.created_at DESC
     `,
       [slug],
     );
@@ -100,7 +94,7 @@ export async function getCustomersBySlug(slug: string) {
 export async function getCustomerByCognitoUserId(cognitoUserId: string) {
   try {
     const res = await query(
-      `SELECT c.* FROM customers c WHERE c.auth_user_id = $1 LIMIT 1`,
+      `SELECT cp.* FROM ic_counterparties cp WHERE cp.auth_user_id = $1 LIMIT 1`,
       [cognitoUserId],
     );
     if (res.rows.length === 0) {
@@ -128,16 +122,10 @@ export async function getAllCustomers() {
   try {
     const res = await query(
       `
-      SELECT c.*,
-        COALESCE(h.has_orders, false) AS has_orders,
-        0 AS net_usdt
-      FROM customers c
-      LEFT JOIN (
-        SELECT DISTINCT order_customer_id AS customer_id, true AS has_orders
-        FROM ic_sales
-        WHERE order_customer_id IS NOT NULL
-      ) h ON h.customer_id = c.id
-      ORDER BY c.name ASC
+      SELECT cp.*,
+        ${customerHasOrdersExpr('cp.id')} AS has_orders
+      FROM ic_counterparties cp
+      ORDER BY cp.name ASC
     `,
     );
     return { success: true, customers: res.rows.map(mapCustomerRow) };
@@ -152,10 +140,10 @@ export async function getCustomerById(customerId: string, slug?: string) {
   try {
     const res = await query(
       `
-      SELECT c.*
-      FROM customers c
-      LEFT JOIN branches b ON c.branch_id = b.id
-      WHERE c.id = $1
+      SELECT cp.*
+      FROM ic_counterparties cp
+      LEFT JOIN branches b ON cp.branch_id = b.id
+      WHERE cp.id = $1
         AND ($2::text IS NULL OR b.slug = $2)
       LIMIT 1
     `,
@@ -215,18 +203,18 @@ export async function saveCustomer(
     let existingCognitoUserId: string | null = null;
     if (!isNew && data.id) {
       const existing = await query(
-        `SELECT auth_user_id, email FROM customers WHERE id = $1 AND branch_id = $2 LIMIT 1`,
+        `SELECT auth_user_id, email FROM ic_counterparties WHERE id = $1 AND branch_id = $2 LIMIT 1`,
         [data.id, branchId],
       );
       if (existing.rows.length === 0) {
-        return { success: false, error: 'Customer not found' };
+        return { success: false, error: 'Counterparty not found' };
       }
       existingCognitoUserId = existing.rows[0].auth_user_id
         ? String(existing.rows[0].auth_user_id)
         : null;
     }
 
-    const id = data.id || `cust_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const id = data.id || crypto.randomUUID();
     const balance = data.balance !== undefined && data.balance !== '' ? Number(data.balance) : 0;
     const status = data.status || 'active';
     const country = data.country?.trim() || '';
@@ -279,7 +267,7 @@ export async function saveCustomer(
 
     await query(
       `
-      INSERT INTO customers (id, branch_id, name, code, phone, email, balance, status, auth_user_id, country, subdivision, locality)
+      INSERT INTO ic_counterparties (id, branch_id, name, code, phone, email, balance, status, auth_user_id, country, subdivision, locality)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
@@ -288,7 +276,7 @@ export async function saveCustomer(
         email = EXCLUDED.email,
         balance = EXCLUDED.balance,
         status = EXCLUDED.status,
-        auth_user_id = COALESCE(EXCLUDED.auth_user_id, customers.auth_user_id),
+        auth_user_id = COALESCE(EXCLUDED.auth_user_id, ic_counterparties.auth_user_id),
         country = EXCLUDED.country,
         subdivision = EXCLUDED.subdivision,
         locality = EXCLUDED.locality
@@ -309,61 +297,9 @@ export async function saveCustomer(
       ],
     );
 
-    const cpExisting = await query(
-      `SELECT id FROM ic_counterparties WHERE legacy_customer_id = $1 LIMIT 1`,
-      [id],
-    );
-    let counterpartyId: string;
-    if (cpExisting.rows.length > 0) {
-      counterpartyId = String(cpExisting.rows[0].id);
-      await query(
-        `UPDATE ic_counterparties
-         SET branch_id = $1, name = $2, code = $3, phone = $4, email = $5, country = $6,
-             subdivision = $7, locality = $8, status = $9, auth_user_id = COALESCE($10, auth_user_id)
-         WHERE id = $11`,
-        [
-          branchId,
-          data.name.trim(),
-          parsedCode,
-          data.phone?.trim() || null,
-          email || null,
-          country,
-          subdivision,
-          locality,
-          status,
-          cognitoUserId,
-          counterpartyId,
-        ],
-      );
-    } else {
-      counterpartyId = crypto.randomUUID();
-      await query(
-        `INSERT INTO ic_counterparties (
-           id, branch_id, name, code, phone, email, country, subdivision, locality, status, auth_user_id, legacy_customer_id
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-        [
-          counterpartyId,
-          branchId,
-          data.name.trim(),
-          parsedCode,
-          data.phone?.trim() || null,
-          email || null,
-          country,
-          subdivision,
-          locality,
-          status,
-          cognitoUserId,
-          id,
-        ],
-      );
-    }
-
-    await query(`UPDATE customers SET counterparty_id = $1 WHERE id = $2`, [counterpartyId, id]);
-
-    await syncICCounterpartyFundAccount(counterpartyId);
-    await syncCustomerFundAccount(id);
+    await syncICCounterpartyFundAccount(id);
     if (cognitoUserId) {
-      await query(`UPDATE profiles SET customer_id = $1 WHERE id = $2`, [id, cognitoUserId]);
+      await query(`UPDATE profiles SET counterparty_id = $1 WHERE id = $2`, [id, cognitoUserId]);
     }
 
     revalidateCustomerPaths(slug);
@@ -388,7 +324,7 @@ export async function resetCustomerPasswordAction(slug: string, customerId: stri
     }
 
     const existing = await query(
-      `SELECT email, auth_user_id FROM customers WHERE id = $1 AND branch_id = $2 LIMIT 1`,
+      `SELECT email, auth_user_id FROM ic_counterparties WHERE id = $1 AND branch_id = $2 LIMIT 1`,
       [customerId, access.branchId],
     );
     if (existing.rows.length === 0) {
@@ -416,11 +352,11 @@ export async function deleteCustomer(id: string, slug: string) {
     }
 
     const existing = await query(
-      `SELECT email, auth_user_id FROM customers WHERE id = $1 AND branch_id = $2 LIMIT 1`,
+      `SELECT email, auth_user_id FROM ic_counterparties WHERE id = $1 AND branch_id = $2 LIMIT 1`,
       [id, access.branchId],
     );
     if (existing.rows.length === 0) {
-      return { success: false, error: 'Customer not found' };
+      return { success: false, error: 'Counterparty not found' };
     }
 
     if (await customerHasAnyOrders(id)) {
@@ -432,8 +368,7 @@ export async function deleteCustomer(id: string, slug: string) {
       await deleteCognitoUserByEmail(email);
     }
 
-    await query(`DELETE FROM customers WHERE id = $1`, [id]);
-    await deactivateCustomerFundAccount(id);
+    await query(`DELETE FROM ic_counterparties WHERE id = $1`, [id]);
     revalidateCustomerPaths(slug);
     return { success: true };
   } catch (err: unknown) {
@@ -449,9 +384,9 @@ export async function adjustCustomerBalanceInTx(
   customerId: string,
   delta: number,
 ): Promise<number> {
-  const res = await client.query(`SELECT balance FROM customers WHERE id = $1 FOR UPDATE`, [customerId]);
-  if (res.rows.length === 0) throw new Error('Customer not found');
+  const res = await client.query(`SELECT balance FROM ic_counterparties WHERE id = $1 FOR UPDATE`, [customerId]);
+  if (res.rows.length === 0) throw new Error('Counterparty not found');
   const openingBalance = parseFloat(res.rows[0].balance);
-  await client.query(`UPDATE customers SET balance = balance + $1 WHERE id = $2`, [delta, customerId]);
+  await client.query(`UPDATE ic_counterparties SET balance = balance + $1 WHERE id = $2`, [delta, customerId]);
   return openingBalance;
 }

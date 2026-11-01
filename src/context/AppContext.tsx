@@ -962,12 +962,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 if (w.id !== res.data!.warehouseId) return w;
                 if (res.data!.settlementMode === 'metal') {
                   const grams = res.data!.metalWeightG || 0;
-                  const addUnits =
-                    res.data!.metalPaymentMethod === 'INR' ? res.data!.units || 0 : 0;
                   return {
                     ...w,
                     currentMetalG: (w.currentMetalG ?? 0) - grams,
-                    currentStock: (w.currentStock ?? 0) + addUnits,
                   };
                 }
                 return w;
@@ -1125,12 +1122,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 ? s.icWarehouses.map(w => {
                     if (w.id !== deleted.warehouseId) return w;
                     const restoreG = deleted.metalWeightG || 0;
-                    const reverseUnits =
-                      deleted.metalPaymentMethod === 'INR' ? deleted.units || 0 : 0;
                     return {
                       ...w,
                       currentMetalG: (w.currentMetalG ?? 0) + restoreG,
-                      currentStock: (w.currentStock ?? 0) - reverseUnits,
                     };
                   })
                 : s.icWarehouses,

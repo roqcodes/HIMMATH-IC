@@ -71,7 +71,7 @@ export const REPORT_CATALOG_GROUPS: ReadonlyArray<{
         id: 'profit-loss',
         title: 'Profit & loss',
         description:
-          'Ledger P&L: sales, WAC COGS on completed IC sales, operating expenses, and net result. Unsold stock sits in IC Inventory on the balance sheet.',
+          'Ledger P&L in AED: cash IC WAC COGS, metal AED lot results, operating expenses. Metal INR profit is on warehouse GP and the metal register.',
       },
       {
         id: 'balance-sheet',
@@ -89,20 +89,20 @@ export const REPORT_CATALOG_GROUPS: ReadonlyArray<{
         id: 'metal-trades',
         title: 'Metal purchase & sales',
         description:
-          'Metal-settled IC register — fine weight, INR/AED metal rates, INR value, IC units, and party detail.',
+          'Metal lots: grams, G rate, sheet RATE, INR/AED totals, and booked P&L in the sale pay currency.',
       },
     ],
   },
   {
     id: 'operational',
     title: 'Operational analysis',
-    description: 'Unit-level gross profit (cash and metal settlement) — reconciles to WAC COGS journals.',
+    description: 'IC unit WAC gross profit plus metal lot P&L (AED and INR) by warehouse.',
     reports: [
       {
         id: 'warehouse-pl',
         title: 'Warehouse gross profit',
         description:
-          'Weighted-average COGS on completed deliveries by warehouse (all settlement modes).',
+          'Cash IC WAC gross profit and metal lot P&L (AED / INR) by warehouse for the selected period.',
       },
     ],
   },

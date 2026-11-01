@@ -10,40 +10,40 @@ export type SalesKpiStats = {
   totalOrders: number;
   totalValue: number;
   totalUnits: number;
+  totalMetalG: number;
+  metalCount: number;
+  cashCount: number;
   avgRate: number;
   pendingCount: number;
   partialCount: number;
   pendingVerificationCount: number;
-  totalPartialUnitsDelivered: number;
 };
 
 export default function SalesKpiCards({ stats }: { stats: SalesKpiStats }) {
-  const activeCount = stats.pendingCount + stats.partialCount + stats.pendingVerificationCount;
-
   return (
     <AsicKpiStrip
       metrics={[
         {
-          label: 'Total orders',
-          value: stats.totalOrders.toLocaleString(),
-          hint: fmt(stats.totalValue),
+          label: 'Sales volume',
+          value: fmt(stats.totalValue),
+          hint: `${stats.cashCount} IC · ${stats.metalCount} metal`,
         },
         {
-          label: 'Total units',
+          label: 'IC units sold',
           value: stats.totalUnits.toLocaleString(),
           hint: `Avg ${fmt(stats.avgRate)}`,
         },
         {
-          label: 'Active',
-          value: activeCount.toLocaleString(),
-          hint: `${stats.pendingVerificationCount} awaiting verification`,
+          label: 'Metal sold',
+          value: `${stats.totalMetalG.toLocaleString('en-US', { maximumFractionDigits: 4 })} g`,
+          hint: 'In selected range',
           tone: 'amber',
         },
         {
-          label: 'Partial',
-          value: stats.partialCount.toLocaleString(),
-          hint: `${stats.totalPartialUnitsDelivered.toLocaleString()} units delivered`,
-          tone: 'indigo',
+          label: 'Orders',
+          value: stats.totalOrders.toLocaleString(),
+          hint: `${stats.pendingCount} pending`,
+          tone: 'emerald',
         },
       ]}
     />

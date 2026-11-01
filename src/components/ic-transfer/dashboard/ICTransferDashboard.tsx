@@ -11,6 +11,9 @@ import ICTransferDateFilterBar from '@/components/ic-transfer/shared/ICTransferD
 import { useICTransferRegionFilter } from '@/components/ic-transfer/shared/ICTransferFilterProvider';
 import { matchesSaleRegionFilter, matchesSelectedRegions } from '@/lib/icTransfer/regionFilter';
 import { scopeSalesForBranchAdmin, saleMatchesDateFilter } from '@/lib/icTransfer/branchOrderOwnership';
+import { effectivePurchaseCounterpartyId } from '@/lib/counterparties/effectiveId';
+import { sumMetalSaleWeightG, sumMetalWeightG } from '@/lib/icTransfer/warehouseMatrixMetrics';
+import { computeDealProfit } from '@/lib/icTransfer/dealProfit';
 import { formatAEDStr } from '@/lib/format';
 import { useDateFilterState } from '@/hooks/useDateFilterState';
 
@@ -203,7 +206,7 @@ export default function ICTransferDashboard() {
       totalPurchaseVol += aed;
       if (p.paymentStatus === 'pending') pendingPayables += aed;
       
-      const supplier = icSuppliers.find(s => s.id === p.supplierId);
+      const supplier = icSuppliers.find(s => s.id === effectivePurchaseCounterpartyId(p));
       if (supplier?.commission) {
          totalCommission += (p.units * supplier.commission);
       }
@@ -253,13 +256,54 @@ export default function ICTransferDashboard() {
       .map(([name, volume]) => ({ name, volume, percentage: (volume / maxRegionVol) * 100 }))
       .sort((a, b) => b.volume - a.volume);
 
+    const activeBranch = branches.find(b => b.slug === currentSlug)
+      || allBranches.find(b => b.slug === currentSlug);
+    const activeBranchId = activeBranch?.id;
+
+    const allowedWarehouseIds = new Set(
+      icWarehouses
+        .filter(w => !branchSlug ? !w.branchId : w.branchId === activeBranchId)
+        .map(w => w.id),
+    );
+    const metalOnHand = icWarehouses
+      .filter(w => allowedWarehouseIds.has(w.id))
+      .reduce((sum, w) => sum + Number(w.currentMetalG ?? 0), 0);
+    const metalPurchasedG = sumMetalWeightG(filteredPurchases);
+    const metalSoldG = sumMetalSaleWeightG(filteredSales);
+    const cashPurchases = filteredPurchases.filter(p => p.settlementMode !== 'metal').length;
+    const metalPurchases = filteredPurchases.filter(p => p.settlementMode === 'metal').length;
+    const cashSales = filteredSales.filter(s => s.settlementMode !== 'metal').length;
+    const metalSales = filteredSales.filter(s => s.settlementMode === 'metal').length;
+    const dealPl = computeDealProfit({
+      purchases: icPurchases.filter(p => !p.warehouseId || allowedWarehouseIds.has(p.warehouseId)),
+      sales: scopedSales.filter(s => !s.warehouseId || allowedWarehouseIds.has(s.warehouseId)),
+      range,
+    });
+
     return {
-      kpis: { totalPurchaseVol, totalSalesVol, pendingPayables, pendingReceivables, totalCommission, txnCount: filteredPurchases.length + filteredSales.length },
+      kpis: {
+        totalPurchaseVol,
+        totalSalesVol,
+        pendingPayables,
+        pendingReceivables,
+        totalCommission,
+        metalOnHand,
+        metalPurchasedG,
+        metalSoldG,
+        cashPurchases,
+        metalPurchases,
+        cashSales,
+        metalSales,
+        cashGrossProfitAed: dealPl.cashGrossProfitAed,
+        metalProfitAed: dealPl.metalProfitAed,
+        metalProfitInr: dealPl.metalProfitInr,
+        txnCount: filteredPurchases.length + filteredSales.length,
+      },
       trendData: trendDataArray,
       supplierData: supplierDataArray,
       regionData: regionDataArray
     };
-  }, [filteredPurchases, filteredSales, icSuppliers, icRegions, range, dateFilter]);
+  }, [filteredPurchases, filteredSales, icPurchases, scopedSales, icSuppliers, icRegions, icWarehouses, branchSlug, branches, allBranches, currentSlug, range, dateFilter]);
 
   return (
     <PageShell>
@@ -275,29 +319,36 @@ export default function ICTransferDashboard() {
       />
 
       <AsicKpiStrip
+        columns={3}
         metrics={[
           {
             label: 'Purchase volume',
             value: formatAEDStr(kpis.totalPurchaseVol),
-            hint: `${filteredPurchases.length} transactions`,
+            hint: `${kpis.cashPurchases} IC · ${kpis.metalPurchases} metal`,
           },
           {
             label: 'Sales volume',
             value: formatAEDStr(kpis.totalSalesVol),
-            hint: `${filteredSales.length} transactions`,
+            hint: `${kpis.cashSales} IC · ${kpis.metalSales} metal`,
             tone: 'emerald',
           },
           {
-            label: 'Pending payables',
-            value: formatAEDStr(kpis.pendingPayables),
-            hint: 'Owed to suppliers',
+            label: 'Metal on hand',
+            value: `${kpis.metalOnHand.toLocaleString('en-US', { maximumFractionDigits: 4 })} g`,
+            hint: 'Across scoped warehouses',
             tone: 'amber',
           },
           {
-            label: 'Pending receivables',
-            value: formatAEDStr(kpis.pendingReceivables),
-            hint: 'Expected from sales',
-            tone: 'indigo',
+            label: 'IC gross profit',
+            value: formatAEDStr(kpis.cashGrossProfitAed),
+            hint: 'WAC on cash IC sales',
+            tone: kpis.cashGrossProfitAed >= 0 ? 'emerald' : 'red',
+          },
+          {
+            label: 'Metal P&L',
+            value: formatAEDStr(kpis.metalProfitAed),
+            hint: `${kpis.metalSoldG.toLocaleString('en-US', { maximumFractionDigits: 2 })} g · sale − purchase AED`,
+            tone: kpis.metalProfitAed >= 0 ? 'emerald' : 'red',
           },
         ]}
       />

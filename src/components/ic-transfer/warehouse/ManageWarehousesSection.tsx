@@ -21,6 +21,8 @@ import { parseAsicPath } from '@/lib/asic/routing';
 
 const WAREHOUSE_TABLE_COLUMNS: ICTransferTableColumn[] = [
   { id: 'Name', label: 'Name', align: 'left' },
+  { id: 'Stock', label: 'Stock', align: 'right' },
+  { id: 'Metal (g)', label: 'Metal (g)', align: 'right' },
   { id: 'Location', label: 'Location (India)', align: 'left' },
   { id: 'Phone', label: 'Phone', align: 'left' },
   { id: 'Email', label: 'Email', align: 'left' },
@@ -118,28 +120,34 @@ export default function ManageWarehousesSection({
   const sortedWarehouses = useMemo(() => {
     const sorted = [...filteredWarehouses];
     sorted.sort((a, b) => {
-      let valA: string;
-      let valB: string;
+      let cmp = 0;
       switch (sortField) {
+        case 'Stock': {
+          const nA = a.currentStock ?? 0;
+          const nB = b.currentStock ?? 0;
+          cmp = nA - nB;
+          break;
+        }
+        case 'Metal (g)': {
+          const nA = a.currentMetalG ?? 0;
+          const nB = b.currentMetalG ?? 0;
+          cmp = nA - nB;
+          break;
+        }
         case 'Location':
-          valA = formatIndiaLocation(a);
-          valB = formatIndiaLocation(b);
+          cmp = formatIndiaLocation(a).localeCompare(formatIndiaLocation(b), undefined, { sensitivity: 'base' });
           break;
         case 'Phone':
-          valA = a.phone || '';
-          valB = b.phone || '';
+          cmp = (a.phone || '').localeCompare(b.phone || '', undefined, { sensitivity: 'base' });
           break;
         case 'Email':
-          valA = a.email || '';
-          valB = b.email || '';
+          cmp = (a.email || '').localeCompare(b.email || '', undefined, { sensitivity: 'base' });
           break;
         case 'Name':
         default:
-          valA = a.name;
-          valB = b.name;
+          cmp = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
           break;
       }
-      const cmp = valA.localeCompare(valB, undefined, { sensitivity: 'base' });
       return sortOrder === 'asc' ? cmp : -cmp;
     });
     return sorted;
@@ -254,6 +262,12 @@ export default function ManageWarehousesSection({
                   >
                     {warehouse.name}
                   </Link>
+                </td>
+                <td className={`${icTdClass('right')} font-mono tabular-nums text-slate-800`}>
+                  {(warehouse.currentStock ?? 0).toLocaleString()}
+                </td>
+                <td className={`${icTdClass('right')} font-mono tabular-nums text-slate-800`}>
+                  {(warehouse.currentMetalG ?? 0).toLocaleString('en-US', { maximumFractionDigits: 4 })}
                 </td>
                 <td className={icTdClass('left')}>{formatIndiaLocation(warehouse)}</td>
                 <td className={icTdClass('left')}>{warehouse.phone || '—'}</td>

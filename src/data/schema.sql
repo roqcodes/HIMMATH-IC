@@ -32,32 +32,10 @@ CREATE TABLE IF NOT EXISTS public.branches (
     hidden_pages TEXT[] NOT NULL DEFAULT '{}',
     is_active BOOLEAN NOT NULL DEFAULT true,
     deleted_at TIMESTAMPTZ,
-    features JSONB NOT NULL DEFAULT '{"warehousePortal":true,"customerPortal":true}'::jsonb,
+    features JSONB NOT NULL DEFAULT '{"warehousePortal":true,"customerPortal":false}'::jsonb,
     last_activity TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
-
--- ── Customers ────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS public.customers (
-    id VARCHAR(50) PRIMARY KEY,
-    branch_id VARCHAR(50) REFERENCES public.branches(id) ON DELETE CASCADE,
-    name VARCHAR(255) NOT NULL,
-    code VARCHAR(32),
-    phone VARCHAR(50),
-    email VARCHAR(255),
-    balance DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
-    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
-    auth_user_id UUID UNIQUE REFERENCES auth.users(id) ON DELETE SET NULL,
-    country VARCHAR(100),
-    subdivision VARCHAR(255),
-    locality VARCHAR(255),
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_customers_branch_id ON public.customers(branch_id);
-CREATE INDEX IF NOT EXISTS idx_customers_auth_user_id ON public.customers(auth_user_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_branch_code
-  ON public.customers (branch_id, lower(btrim(code)))
-  WHERE code IS NOT NULL AND btrim(code) <> '';
 
 CREATE TABLE IF NOT EXISTS public.user_page_permissions (
     user_id VARCHAR(128) NOT NULL,
@@ -77,27 +55,6 @@ CREATE TABLE IF NOT EXISTS public.ic_regions (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS public.ic_suppliers (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(255) NOT NULL,
-    code VARCHAR(32),
-    phone VARCHAR(50),
-    commission NUMERIC(10, 2),
-    region_id UUID REFERENCES public.ic_regions(id) ON DELETE SET NULL,
-    email VARCHAR(255),
-    address TEXT,
-    country VARCHAR(100),
-    subdivision VARCHAR(255),
-    locality VARCHAR(255),
-    branch_id VARCHAR(50) REFERENCES public.branches(id) ON DELETE CASCADE,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_ic_suppliers_region ON public.ic_suppliers(region_id);
-CREATE INDEX IF NOT EXISTS idx_ic_suppliers_branch ON public.ic_suppliers(branch_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_suppliers_scope_code
-  ON public.ic_suppliers (COALESCE(branch_id, ''), lower(btrim(code)))
-  WHERE code IS NOT NULL AND btrim(code) <> '';
-
 CREATE TABLE IF NOT EXISTS public.ic_counterparties (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     branch_id VARCHAR(50) REFERENCES public.branches(id) ON DELETE CASCADE,
@@ -112,24 +69,13 @@ CREATE TABLE IF NOT EXISTS public.ic_counterparties (
     subdivision VARCHAR(255),
     locality VARCHAR(255),
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
-    auth_user_id UUID UNIQUE REFERENCES auth.users(id) ON DELETE SET NULL,
-    legacy_customer_id VARCHAR(50),
-    legacy_supplier_id UUID,
+    balance NUMERIC(15, 2) NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_counterparties_legacy_customer
-  ON public.ic_counterparties (legacy_customer_id)
-  WHERE legacy_customer_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_counterparties_legacy_supplier
-  ON public.ic_counterparties (legacy_supplier_id)
-  WHERE legacy_supplier_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_counterparties_scope_code
   ON public.ic_counterparties (COALESCE(branch_id, ''), lower(btrim(code)))
   WHERE code IS NOT NULL AND btrim(code) <> '';
 CREATE INDEX IF NOT EXISTS idx_ic_counterparties_branch ON public.ic_counterparties (branch_id);
-
-ALTER TABLE public.customers
-  ADD COLUMN IF NOT EXISTS counterparty_id UUID REFERENCES public.ic_counterparties(id) ON DELETE SET NULL;
 
 CREATE TABLE IF NOT EXISTS public.ic_warehouses (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -164,10 +110,10 @@ CREATE TABLE IF NOT EXISTS public.ic_rate_groups (
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS public.ic_rate_group_customers (
-    group_id VARCHAR(50) REFERENCES public.ic_rate_groups(id) ON DELETE CASCADE,
-    customer_id VARCHAR(50) REFERENCES public.customers(id) ON DELETE CASCADE,
-    PRIMARY KEY (group_id, customer_id)
+CREATE TABLE IF NOT EXISTS public.ic_rate_group_counterparties (
+    group_id VARCHAR(50) NOT NULL REFERENCES public.ic_rate_groups(id) ON DELETE CASCADE,
+    counterparty_id UUID NOT NULL REFERENCES public.ic_counterparties(id) ON DELETE CASCADE,
+    PRIMARY KEY (group_id, counterparty_id)
 );
 
 CREATE TABLE IF NOT EXISTS public.ic_rate_group_branches (
@@ -179,7 +125,6 @@ CREATE INDEX IF NOT EXISTS idx_ic_rate_group_branches_branch ON public.ic_rate_g
 
 CREATE TABLE IF NOT EXISTS public.ic_purchases (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    supplier_id UUID REFERENCES public.ic_suppliers(id) ON DELETE SET NULL,
     counterparty_id UUID REFERENCES public.ic_counterparties(id) ON DELETE SET NULL,
     location_id UUID REFERENCES public.ic_regions(id) ON DELETE SET NULL,
     warehouse_id UUID REFERENCES public.ic_warehouses(id) ON DELETE SET NULL,
@@ -196,7 +141,6 @@ CREATE TABLE IF NOT EXISTS public.ic_purchases (
     inr_total NUMERIC(15, 4),
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_ic_purchases_supplier ON public.ic_purchases(supplier_id);
 CREATE INDEX IF NOT EXISTS idx_ic_purchases_counterparty ON public.ic_purchases(counterparty_id);
 CREATE INDEX IF NOT EXISTS idx_ic_purchases_warehouse ON public.ic_purchases(warehouse_id);
 CREATE INDEX IF NOT EXISTS idx_ic_purchases_created ON public.ic_purchases(created_at);
@@ -227,24 +171,11 @@ CREATE TABLE IF NOT EXISTS public.ic_delivery_agents (
 );
 CREATE INDEX IF NOT EXISTS idx_ic_delivery_agents_warehouse ON public.ic_delivery_agents(warehouse_id);
 
-CREATE TABLE IF NOT EXISTS public.ic_sub_customers (
-    id VARCHAR(50) PRIMARY KEY,
-    parent_customer_id VARCHAR(50) NOT NULL REFERENCES public.customers(id) ON DELETE CASCADE,
-    name VARCHAR(255) NOT NULL,
-    contact VARCHAR(255),
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_ic_sub_customers_parent ON public.ic_sub_customers(parent_customer_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_sub_customers_parent_name ON public.ic_sub_customers(parent_customer_id, LOWER(name));
-
 CREATE TABLE IF NOT EXISTS public.ic_sales (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     customer_name VARCHAR(255) NOT NULL,
     order_customer_name VARCHAR(255),
-    order_customer_id VARCHAR(255),
     counterparty_id UUID REFERENCES public.ic_counterparties(id) ON DELETE SET NULL,
-    sub_customer_id VARCHAR(50) REFERENCES public.ic_sub_customers(id) ON DELETE SET NULL,
-    sub_customer_name VARCHAR(255),
     entered_by VARCHAR(255),
     entered_by_name VARCHAR(255),
     entered_by_user_id VARCHAR(255),
@@ -299,7 +230,6 @@ CREATE INDEX IF NOT EXISTS idx_ic_purchases_warehouse_metal
   ON public.ic_purchases (warehouse_id, created_at DESC)
   WHERE settlement_mode = 'metal';
 CREATE INDEX IF NOT EXISTS idx_ic_sales_order_status ON public.ic_sales(order_status);
-CREATE INDEX IF NOT EXISTS idx_ic_sales_order_customer ON public.ic_sales(order_customer_id);
 CREATE INDEX IF NOT EXISTS idx_ic_sales_counterparty ON public.ic_sales(counterparty_id);
 CREATE INDEX IF NOT EXISTS idx_ic_sales_delivery_agent ON public.ic_sales(delivery_agent_id);
 CREATE INDEX IF NOT EXISTS idx_ic_sales_warehouse_status_created
@@ -341,7 +271,6 @@ CREATE TABLE IF NOT EXISTS public.ic_fund_accounts (
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
     opening_balance DECIMAL(15, 2) NOT NULL DEFAULT 0,
     notes TEXT NOT NULL DEFAULT '',
-    customer_id VARCHAR(50) REFERENCES public.customers(id) ON DELETE SET NULL,
     phone VARCHAR(50),
     source_type VARCHAR(30),
     source_id VARCHAR(50),
@@ -351,7 +280,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_fund_accounts_branch_name
     ON public.ic_fund_accounts (branch_id, LOWER(TRIM(name)));
 CREATE INDEX IF NOT EXISTS idx_ic_fund_accounts_branch_type
     ON public.ic_fund_accounts (branch_id, account_type, status);
-CREATE INDEX IF NOT EXISTS idx_ic_fund_accounts_customer_id ON public.ic_fund_accounts(customer_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_fund_accounts_branch_source
     ON public.ic_fund_accounts (branch_id, source_type, source_id)
     WHERE source_type IS NOT NULL AND source_id IS NOT NULL;
@@ -432,7 +360,6 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     name TEXT,
     email TEXT,
     branch_id VARCHAR(50) REFERENCES public.branches(id) ON DELETE SET NULL,
-    customer_id VARCHAR(50) REFERENCES public.customers(id) ON DELETE SET NULL,
     warehouse_id UUID REFERENCES public.ic_warehouses(id) ON DELETE SET NULL,
     delivery_agent_id UUID REFERENCES public.ic_delivery_agents(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -461,20 +388,17 @@ CREATE INDEX IF NOT EXISTS idx_asic_backups_created ON public.asic_backups (crea
 
 -- ── RLS (after tables exist) ─────────────────────────────────────────
 ALTER TABLE public.branches ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_page_permissions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_regions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.ic_suppliers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_counterparties ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_warehouses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_rate_groups ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.ic_rate_group_customers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ic_rate_group_counterparties ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_rate_group_branches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_purchases ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_sales ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_warehouse_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_delivery_agents ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.ic_sub_customers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_transfer_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_fund_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_fund_vouchers ENABLE ROW LEVEL SECURITY;
@@ -518,17 +442,15 @@ CREATE POLICY asic_profiles_self ON public.profiles FOR SELECT USING (
   id = auth.uid() OR public.current_profile_role() IN ('admin', 'auditor')
 );
 
-DROP POLICY IF EXISTS asic_customers_access ON public.customers;
-CREATE POLICY asic_customers_access ON public.customers FOR ALL USING (
+DROP POLICY IF EXISTS asic_counterparties_access ON public.ic_counterparties;
+CREATE POLICY asic_counterparties_access ON public.ic_counterparties FOR ALL USING (
   public.current_profile_role() IN ('admin', 'auditor')
   OR branch_id = public.current_profile_branch()
-  OR auth_user_id = auth.uid()
 );
 
 DROP POLICY IF EXISTS asic_ic_sales_access ON public.ic_sales;
 CREATE POLICY asic_ic_sales_access ON public.ic_sales FOR ALL USING (
   public.current_profile_role() IN ('admin', 'auditor')
-  OR order_customer_id IN (SELECT id FROM public.customers WHERE auth_user_id = auth.uid())
   OR warehouse_id IN (SELECT w.id FROM public.ic_warehouses w WHERE w.branch_id = public.current_profile_branch())
 );
 

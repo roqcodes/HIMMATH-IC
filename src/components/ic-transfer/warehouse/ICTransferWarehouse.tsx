@@ -11,14 +11,15 @@ import {
 } from '@/lib/icTransfer/warehouseMatrixMetrics';
 import {
   filterSalesForBranchPortal,
+  filterPurchasesForBranchPortal,
   filterWarehousesForBranchPortal,
   filterWarehousesForAdminPortal,
   type ICTransferPortalMode,
 } from '@/lib/icTransfer/branchPortalScope';
-import WarehouseKpiGrid from '@/components/warehouse/WarehouseKpiGrid';
 import ManageWarehousesSection from '@/components/ic-transfer/warehouse/ManageWarehousesSection';
 import ICTransferDateFilterBar from '@/components/ic-transfer/shared/ICTransferDateFilterBar';
 import AsicPageHeader from '@/components/asic/AsicPageHeader';
+import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
 import { useICTransferRegionFilter } from '@/components/ic-transfer/shared/ICTransferFilterProvider';
 import SalesTableShell, {
   salesTableClass,
@@ -46,7 +47,7 @@ export default function ICTransferWarehouse({
   branchName,
   branchCustomerIds = [],
 }: Props) {
-  const { icRegions, icWarehouses, icSales } = useApp();
+  const { icRegions, icWarehouses, icSales, icPurchases } = useApp();
   const {
     dateFilter,
     setDateFilter,
@@ -74,6 +75,11 @@ export default function ICTransferWarehouse({
     return filterSalesForBranchPortal(icSales, branchName, branchCustomerIdSet);
   }, [icSales, isBranchPortal, branchName, branchCustomerIdSet]);
 
+  const scopedPurchases = useMemo(() => {
+    if (!isBranchPortal || !branchId) return icPurchases;
+    return filterPurchasesForBranchPortal(icPurchases, icWarehouses, branchId);
+  }, [icPurchases, icWarehouses, isBranchPortal, branchId]);
+
   const range = useMemo(
     () => resolveDateFilterRange(dateFilter, customStartDate, customEndDate),
     [dateFilter, customStartDate, customEndDate],
@@ -89,24 +95,12 @@ export default function ICTransferWarehouse({
       computeWarehouseMatrix({
         warehouses: scopedWarehouses,
         regions: icRegions,
+        purchases: scopedPurchases,
         sales: scopedSales,
         range,
         regionIds: selectedRegionIds.length > 0 ? selectedRegionIds : undefined,
       }),
-    [scopedWarehouses, icRegions, scopedSales, range, selectedRegionIds],
-  );
-
-  const kpiMetrics = useMemo(
-    () => ({
-      currentStock: totals.currentStock,
-      reserved: totals.reserved,
-      remaining: totals.remaining,
-      totalOrders: totals.totalOrders,
-      totalCompleted: totals.totalCompleted,
-      totalPending: totals.totalPending,
-      splitOrders: totals.splitOrders,
-    }),
-    [totals],
+    [scopedWarehouses, icRegions, scopedPurchases, scopedSales, range, selectedRegionIds],
   );
 
   const openAddWarehouseRef = useRef<(() => void) | null>(null);
@@ -121,6 +115,10 @@ export default function ICTransferWarehouse({
     </button>
   );
 
+  const fmtStock = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 4 });
+  const formatAedKpi = (n: number) =>
+    `AED ${n.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
   return (
     <PageShell>
       <AsicPageHeader title="Warehouses" actions={addWarehouseButton} />
@@ -134,12 +132,55 @@ export default function ICTransferWarehouse({
         setCustomEndDate={setCustomEndDate}
       />
 
-      <WarehouseKpiGrid
-        metrics={kpiMetrics}
-        showSplit={false}
-        showCompleted={false}
-        deliveredUnits={totals.deliveredUnits}
-        remainingUnits={totals.remainingUnits}
+      <AsicKpiStrip
+        metrics={[
+          {
+            label: 'Stock (units)',
+            value: fmtStock(totals.currentStock),
+            hint: 'On hand',
+          },
+          {
+            label: 'Metal on hand',
+            value: fmtStock(totals.currentMetalG),
+            hint: 'Grams',
+            tone: 'amber',
+          },
+          {
+            label: 'IC purchases',
+            value: totals.cashPurchases.toLocaleString(),
+            hint: `Cash · ${rangeLabel}`,
+          },
+          {
+            label: 'Metal purchases',
+            value: totals.metalPurchases.toLocaleString(),
+            hint: `In range · ${rangeLabel}`,
+            tone: 'indigo',
+          },
+          {
+            label: 'IC sales',
+            value: totals.cashSales.toLocaleString(),
+            hint: `Cash · ${rangeLabel}`,
+            tone: 'emerald',
+          },
+          {
+            label: 'Metal sales',
+            value: totals.metalSales.toLocaleString(),
+            hint: `In range · ${rangeLabel}`,
+          },
+          {
+            label: 'IC gross profit',
+            value: formatAedKpi(totals.cashGrossProfitAed),
+            hint: `WAC · ${rangeLabel}`,
+            tone: totals.cashGrossProfitAed >= 0 ? 'emerald' : 'red',
+          },
+          {
+            label: 'Metal P&L',
+            value: formatAedKpi(totals.metalProfitAed),
+            hint: 'Sale − purchase AED',
+            tone: totals.metalProfitAed >= 0 ? 'emerald' : 'red',
+          },
+        ]}
+        columns={3}
       />
 
       <div className="mb-3">

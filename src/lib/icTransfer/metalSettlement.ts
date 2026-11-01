@@ -6,6 +6,12 @@ export type ICSettlementMode = (typeof IC_SETTLEMENT_MODES)[number];
 export const METAL_WEIGHT_DECIMALS = 4;
 export const METAL_AMOUNT_DECIMALS = 4;
 
+/**
+ * Metal sheet RATE column: AED = INR × RATE / 1,000.
+ * This is not AED per gram and not IC units (1 unit = 1 lakh).
+ */
+export const METAL_AED_RATE_DIVISOR = 1_000;
+
 export type MetalSettlementInput = {
   metalWeightG: number;
   metalRateInrPerG: number;
@@ -17,6 +23,9 @@ export type MetalSettlementInput = {
 export type MetalSettlementFields = {
   metalWeightG: number;
   metalRateInrPerG: number;
+  /** Excel RATE column (AED per 1,000 INR). */
+  metalSheetRateAed: number;
+  /** Implied AED per gram, stored on the row. */
   metalRateAedPerG: number;
   inrTotal: number;
   aedTotal: number;
@@ -84,17 +93,136 @@ export function deriveImputedUnitRateAed(aedTotal: number, units: number): numbe
   return round4(aed / u);
 }
 
+export function computeMetalAedFromInr(inrTotal: number, sheetRateAed: number): number {
+  return round4((round4(inrTotal) * round4(sheetRateAed)) / METAL_AED_RATE_DIVISOR);
+}
+
+export function computeMetalSheetRateAed(inrTotal: number, aedTotal: number): number {
+  const inr = round4(inrTotal);
+  if (inr <= 0) return 0;
+  return round4((round4(aedTotal) * METAL_AED_RATE_DIVISOR) / inr);
+}
+
+export function computeImpliedMetalRateAedPerG(weightG: number, aedTotal: number): number {
+  const w = roundWeight(weightG);
+  if (w <= 0) return 0;
+  return round4(round4(aedTotal) / w);
+}
+
 export function computeMetalTotalsFromWeight(
   weightG: number,
   rateInrPerG: number,
-  rateAedPerG: number,
+  sheetRateAed: number,
 ): { totalInr: number; totalAed: number } {
   const w = roundWeight(weightG);
   if (w <= 0) throw new Error('Weight must be greater than zero.');
+  const totalInr = round4(w * rateInrPerG);
   return {
-    totalInr: round4(w * rateInrPerG),
-    totalAed: round4(w * rateAedPerG),
+    totalInr,
+    totalAed: computeMetalAedFromInr(totalInr, sheetRateAed),
   };
+}
+
+export function metalFieldsFromRecord(input: {
+  metalWeightG?: number | null;
+  metalRateInrPerG?: number | null;
+  metalRateAedPerG?: number | null;
+  inrTotal?: number | null;
+  aedTotal?: number | null;
+}): MetalSettlementFields {
+  const metalWeightG = Number(input.metalWeightG) || 0;
+  const metalRateInrPerG = Number(input.metalRateInrPerG) || 0;
+  const inrTotal = Number(input.inrTotal) || 0;
+  const aedTotal = Number(input.aedTotal) || 0;
+  const metalSheetRateAed = computeMetalSheetRateAed(inrTotal, aedTotal);
+  const metalRateAedPerG =
+    metalWeightG > 0 && aedTotal > 0
+      ? computeImpliedMetalRateAedPerG(metalWeightG, aedTotal)
+      : Number(input.metalRateAedPerG) || 0;
+  return {
+    metalWeightG,
+    metalRateInrPerG,
+    metalSheetRateAed,
+    metalRateAedPerG,
+    inrTotal,
+    aedTotal,
+  };
+}
+
+function withDerivedAedPerG(fields: MetalSettlementFields): MetalSettlementFields {
+  return {
+    ...fields,
+    metalRateAedPerG: computeImpliedMetalRateAedPerG(fields.metalWeightG, fields.aedTotal),
+  };
+}
+
+export function applyMetalFieldChange(
+  value: MetalSettlementFields,
+  field: 'weight' | 'rateInr' | 'sheetRateAed' | 'totalInr' | 'totalAed',
+  num: number,
+): MetalSettlementFields {
+  switch (field) {
+    case 'weight': {
+      if (num <= 0) {
+        return { ...value, metalWeightG: num };
+      }
+      const { totalInr, totalAed } = computeMetalTotalsFromWeight(
+        num,
+        value.metalRateInrPerG,
+        value.metalSheetRateAed,
+      );
+      return withDerivedAedPerG({
+        ...value,
+        metalWeightG: num,
+        inrTotal: totalInr,
+        aedTotal: totalAed,
+      });
+    }
+    case 'rateInr': {
+      const w = value.metalWeightG;
+      if (w <= 0) return { ...value, metalRateInrPerG: num };
+      const { totalInr, totalAed } = computeMetalTotalsFromWeight(
+        w,
+        num,
+        value.metalSheetRateAed,
+      );
+      return withDerivedAedPerG({
+        ...value,
+        metalRateInrPerG: num,
+        inrTotal: totalInr,
+        aedTotal: totalAed,
+      });
+    }
+    case 'sheetRateAed': {
+      const aedTotal = computeMetalAedFromInr(value.inrTotal, num);
+      return withDerivedAedPerG({
+        ...value,
+        metalSheetRateAed: num,
+        aedTotal,
+      });
+    }
+    case 'totalInr': {
+      const w = value.metalWeightG;
+      const metalRateInrPerG = w > 0 ? computeMetalRateInrFromTotal(w, num) : value.metalRateInrPerG;
+      const aedTotal = computeMetalAedFromInr(num, value.metalSheetRateAed);
+      return withDerivedAedPerG({
+        ...value,
+        inrTotal: num,
+        metalRateInrPerG,
+        aedTotal,
+      });
+    }
+    case 'totalAed': {
+      const metalSheetRateAed = computeMetalSheetRateAed(value.inrTotal, num);
+      return withDerivedAedPerG({
+        ...value,
+        aedTotal: num,
+        metalSheetRateAed,
+      });
+    }
+    default:
+      return value;
+  }
 }
 
 export function computeMetalRateInrFromTotal(weightG: number, totalInr: number): number {

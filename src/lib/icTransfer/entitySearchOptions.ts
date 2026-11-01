@@ -17,7 +17,7 @@ function formatLabeledBalance(amount: number): string {
 }
 
 function formatLabeledAvailableUnits(units: number, metalG?: number): string {
-  const unitsLabel = `Available: ${fmtICAmount(units)} units`;
+  const unitsLabel = `Stock: ${fmtICAmount(units)} units`;
   if (metalG == null || metalG === 0) return unitsLabel;
   return `${unitsLabel} · ${fmtICAmount(metalG)} g metal`;
 }

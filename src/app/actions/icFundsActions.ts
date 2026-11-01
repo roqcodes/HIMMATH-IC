@@ -12,7 +12,6 @@ import {
 } from '@/app/actions/cognitoActions';
 import { requireICFundsAccess } from '@/lib/icFunds/requireAccess';
 import { ensureHqIcFundsBranch } from '@/lib/icFunds/ensureHqBranch';
-import { backfillICTransferFundAccounts } from '@/lib/icFunds/icTransferFundSync';
 import { HQ_IC_FUNDS_BRANCH_ID, HQ_IC_FUNDS_BRANCH_SLUG, isHqIcFundsBranch, isHqIcFundsBranchId } from '@/lib/icFunds/hqBranch';
 import {
   accountBalanceSql,
@@ -96,8 +95,6 @@ export async function ensureHqIcFundsBranchAction(): Promise<ActionResult<{ id: 
   }
   try {
     await ensureHqIcFundsBranch();
-    // Idempotent: post missing payable/receivable journals for IC Transfer deals.
-    void backfillICTransferFundAccounts();
     return { success: true, data: { id: HQ_IC_FUNDS_BRANCH_ID, slug: HQ_IC_FUNDS_BRANCH_SLUG } };
   } catch (err) {
     logger.error({ err }, 'ensureHqIcFundsBranchAction failed');
@@ -132,7 +129,12 @@ function mapAccount(row: Record<string, unknown>): ICFundAccount {
     createdAt: row.created_at ? String(row.created_at) : new Date().toISOString(),
     balance: Number(row.balance) || 0,
     pendingBalance: Number(row.pending_balance) || 0,
-    customerId: row.customer_id ? String(row.customer_id) : undefined,
+    customerId:
+      row.source_type === 'ic_counterparty' && row.source_id
+        ? String(row.source_id)
+        : row.source_type === 'ic_customer' && row.source_id
+          ? String(row.source_id)
+          : undefined,
     email: row.portal_email
       ? String(row.portal_email)
       : row.customer_email
@@ -191,17 +193,17 @@ function accountBalanceSelectSql(opts?: {
   const pendingJoin = accountPendingMovementJoinSql(joinOpts);
   return `SELECT a.*, ${accountBalanceSql(opts?.asOfParam ?? null)} AS balance,
     ${accountPendingBalanceSql()} AS pending_balance,
-    COALESCE(c.email, p.email) AS portal_email,
-    c.email AS customer_email,
-    COALESCE(c.phone, a.phone) AS customer_phone,
-    c.auth_user_id AS customer_auth_user_id,
+    cp.email AS portal_email,
+    cp.email AS customer_email,
+    COALESCE(cp.phone, a.phone) AS customer_phone,
+    NULL::uuid AS customer_auth_user_id,
     b.name AS branch_name,
     b.slug AS branch_slug
     FROM ic_fund_accounts a
     ${movementJoin}
     ${pendingJoin}
-    LEFT JOIN customers c ON c.id = a.customer_id
-    LEFT JOIN profiles p ON p.id = c.auth_user_id
+    LEFT JOIN ic_counterparties cp ON a.source_type IN ('ic_counterparty', 'ic_customer')
+      AND cp.id::text = a.source_id
     LEFT JOIN branches b ON b.id = a.branch_id`;
 }
 
@@ -546,15 +548,16 @@ export async function listICFundAccountsLiteAction(branchId: string): Promise<IC
   try {
     const res = await query(
       `SELECT a.id, a.branch_id, a.name, a.account_type, a.status, a.opening_balance,
-              a.notes, a.created_at, a.customer_id, a.source_type, a.source_id, a.phone,
-              c.email AS customer_email,
-              COALESCE(c.phone, a.phone) AS customer_phone,
-              c.auth_user_id AS customer_auth_user_id,
+              a.notes, a.created_at, a.source_type, a.source_id, a.phone,
+              cp.email AS customer_email,
+              COALESCE(cp.phone, a.phone) AS customer_phone,
+              NULL::uuid AS customer_auth_user_id,
               b.name AS branch_name, b.slug AS branch_slug,
               a.opening_balance AS balance,
               0::numeric AS pending_balance
        FROM ic_fund_accounts a
-       LEFT JOIN customers c ON c.id = a.customer_id
+       LEFT JOIN ic_counterparties cp ON a.source_type IN ('ic_counterparty', 'ic_customer')
+         AND cp.id::text = a.source_id
        LEFT JOIN branches b ON b.id = a.branch_id
        WHERE a.branch_id = $1
        ORDER BY a.account_type, LOWER(a.name)`,
@@ -592,7 +595,7 @@ export async function getICFundAccountByCustomerIdAction(
   try {
     const res = await query(
       `${accountBalanceSelectSql({ branchParam: '$1' })} WHERE a.branch_id = $1 AND (
-        a.customer_id = $2 OR (a.source_type = 'ic_customer' AND a.source_id = $2)
+        (a.source_type IN ('ic_counterparty', 'ic_customer') AND a.source_id = $2)
       ) LIMIT 1`,
       [branchId, customerId],
     );
@@ -619,71 +622,30 @@ export async function createICFundAccountAction(
       ? HQ_IC_FUNDS_BRANCH_ID
       : parsed.data.branchId;
 
+  if (parsed.data.requireSignIn) {
+    return { success: false, error: 'Portal login for fund accounts is no longer supported.' };
+  }
+
   const id = `ICFA-${crypto.randomUUID().slice(0, 10).toUpperCase()}`;
-  const email = parsed.data.email?.trim() || '';
-  const password = parsed.data.password?.trim() || '';
   const phone = parsed.data.phone?.trim() || null;
 
-  if (parsed.data.requireSignIn && !email) {
-    return { success: false, error: 'Email is required for portal login.' };
-  }
-
-  if (parsed.data.requireSignIn && !validatePassword(password).isValid) {
-    return { success: false, error: PASSWORD_INVALID_MESSAGE };
-  }
-
-  let customerId: string | null = null;
-  let portalUserId: string | null = null;
-
   try {
-    if (parsed.data.requireSignIn) {
-      customerId = `cust_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-      const cognitoRes = await createCustomerCognitoUser({
-        email,
-        name: parsed.data.name.trim(),
-        branchId: ledgerBranchId,
-        password,
-      });
-      if (!cognitoRes.success || !cognitoRes.userId) {
-        return { success: false, error: cognitoRes.error || 'Failed to create portal login account.' };
-      }
-
-      await query(
-        `INSERT INTO customers (id, branch_id, name, phone, email, balance, status, auth_user_id)
-         VALUES ($1, $2, $3, $4, $5, 0, 'active', $6)`,
-        [
-          customerId,
-          ledgerBranchId,
-          parsed.data.name.trim(),
-          phone,
-          email,
-          cognitoRes.userId,
-        ],
-      );
-      await query(`UPDATE profiles SET customer_id = $1 WHERE id = $2`, [customerId, cognitoRes.userId]);
-    }
-
-    if (!portalUserId) {
-      await query(
-        `INSERT INTO ic_fund_accounts (id, branch_id, name, account_type, opening_balance, notes, customer_id, phone, source_type, source_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [
-          id,
-          ledgerBranchId,
-          parsed.data.name.trim(),
-          parsed.data.accountType,
-          Number(parsed.data.openingBalance.toFixed(2)),
-          parsed.data.notes?.trim() ?? '',
-          customerId,
-          phone,
-          customerId ? 'ic_customer' : null,
-          customerId,
-        ],
-      );
-    }
+    await query(
+      `INSERT INTO ic_fund_accounts (id, branch_id, name, account_type, opening_balance, notes, phone)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        id,
+        ledgerBranchId,
+        parsed.data.name.trim(),
+        parsed.data.accountType,
+        Number(parsed.data.openingBalance.toFixed(2)),
+        parsed.data.notes?.trim() ?? '',
+        phone,
+      ],
+    );
     const res = await query(`${accountBalanceSelectSql({ accountParam: '$1' })} WHERE a.id = $1`, [id]);
     revalidatePath(`/${access.slug}/ic-funds/accounts`);
-    revalidatePath(`/${access.slug}/customers`);
+    revalidatePath(`/${access.slug}/counterparties`);
     return { success: true, data: mapAccount(res.rows[0] as Record<string, unknown>) };
   } catch (err) {
     const code = (err as { code?: string }).code;
@@ -788,17 +750,13 @@ export async function updateICFundAccountAction(input: unknown): Promise<ActionR
 
     if (parsed.data.phone !== undefined) {
       push('phone', parsed.data.phone.trim() || null);
-      const customerId = existing.rows[0].customer_id ? String(existing.rows[0].customer_id) : null;
-      if (customerId) {
-        await query(`UPDATE customers SET phone = $1 WHERE id = $2`, [
-          parsed.data.phone.trim() || null,
-          customerId,
-        ]);
-      }
     }
 
-    const enablingPortal = Boolean(parsed.data.requireSignIn);
-    if (sets.length === 0 && parsed.data.phone === undefined && !enablingPortal) {
+    if (parsed.data.requireSignIn) {
+      return { success: false, error: 'Portal login for fund accounts is no longer supported.' };
+    }
+
+    if (sets.length === 0 && parsed.data.phone === undefined) {
       return { success: false, error: 'No fields to update' };
     }
 
@@ -808,75 +766,6 @@ export async function updateICFundAccountAction(input: unknown): Promise<ActionR
         `UPDATE ic_fund_accounts SET ${sets.join(', ')} WHERE id = $${idx} AND branch_id = $${idx + 1}`,
         values,
       );
-    }
-
-    if (enablingPortal) {
-      const portalCheck = await query(
-        `SELECT c.auth_user_id AS customer_auth_user_id
-         FROM ic_fund_accounts a
-         LEFT JOIN customers c ON c.id = a.customer_id
-         WHERE a.id = $1 AND a.branch_id = $2
-         LIMIT 1`,
-        [parsed.data.id, parsed.data.branchId],
-      );
-      const portalRow = portalCheck.rows[0] as Record<string, unknown> | undefined;
-      const hasPortal = Boolean(portalRow?.customer_auth_user_id);
-      if (!hasPortal) {
-        const email = parsed.data.email?.trim() || '';
-        const password = parsed.data.password?.trim() || '';
-        const accountName =
-          parsed.data.name?.trim() || String(existing.rows[0].name ?? '').trim();
-        const phone =
-          parsed.data.phone !== undefined
-            ? parsed.data.phone.trim() || null
-            : existing.rows[0].phone
-              ? String(existing.rows[0].phone)
-              : null;
-
-        {
-          const newCustomerId = `cust_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-          const cognitoRes = await createCustomerCognitoUser({
-            email,
-            name: accountName,
-            branchId: parsed.data.branchId,
-            password,
-          });
-          if (!cognitoRes.success || !cognitoRes.userId) {
-            return { success: false, error: cognitoRes.error || 'Failed to create portal login account.' };
-          }
-
-          await query(
-            `INSERT INTO customers (id, branch_id, name, phone, email, balance, status, auth_user_id)
-             VALUES ($1, $2, $3, $4, $5, 0, 'active', $6)`,
-            [newCustomerId, parsed.data.branchId, accountName, phone, email, cognitoRes.userId],
-          );
-          await query(`UPDATE profiles SET customer_id = $1 WHERE id = $2`, [newCustomerId, cognitoRes.userId]);
-          await query(
-            `UPDATE ic_fund_accounts
-             SET customer_id = $1,
-                 source_type = COALESCE(source_type, 'ic_customer'),
-                 source_id = COALESCE(source_id, $1)
-             WHERE id = $2 AND branch_id = $3`,
-            [newCustomerId, parsed.data.id, parsed.data.branchId],
-          );
-        }
-        revalidatePath(`/${access.slug}/customers`);
-      }
-    }
-
-    const accountName = parsed.data.name?.trim();
-    const customerId = existing.rows[0].customer_id ? String(existing.rows[0].customer_id) : null;
-    if (accountName && customerId) {
-      const customerRes = await query(
-        `SELECT email, auth_user_id FROM customers WHERE id = $1 LIMIT 1`,
-        [customerId],
-      );
-      const customerEmail = customerRes.rows[0]?.email ? String(customerRes.rows[0].email) : '';
-      const cognitoUserId = customerRes.rows[0]?.auth_user_id;
-      await query(`UPDATE customers SET name = $1 WHERE id = $2`, [accountName, customerId]);
-      if (cognitoUserId && customerEmail) {
-        await updateCognitoUserName(customerEmail, accountName);
-      }
     }
 
     const res = await query(`${accountBalanceSelectSql({ accountParam: '$1' })} WHERE a.id = $1`, [parsed.data.id]);
@@ -895,36 +784,7 @@ export async function resetICFundAccountPasswordAction(
   accountId: string,
   passwordRaw: string,
 ): Promise<ActionResult<void>> {
-  const access = await requireICFundsAccess(branchId, 'write');
-  if (!access.ok) return { success: false, error: access.error };
-  if (!validatePassword(passwordRaw).isValid) {
-    return { success: false, error: PASSWORD_INVALID_MESSAGE };
-  }
-
-  try {
-    const res = await query(
-      `SELECT c.email AS customer_email, c.auth_user_id AS customer_auth_user_id
-       FROM ic_fund_accounts a
-       LEFT JOIN customers c ON c.id = a.customer_id
-       WHERE a.id = $1 AND a.branch_id = $2
-       LIMIT 1`,
-      [accountId, branchId],
-    );
-    if (res.rows.length === 0) return { success: false, error: 'Account not found' };
-    const row = res.rows[0] as Record<string, unknown>;
-    const email = row.customer_email ? String(row.customer_email) : '';
-    const customerAuthUserId = row.customer_auth_user_id ? String(row.customer_auth_user_id) : '';
-    if (!email || !customerAuthUserId) {
-      return { success: false, error: 'This account has no portal login.' };
-    }
-
-    const reset = await resetCustomerCognitoPasswordAction(email, passwordRaw, access.slug);
-    if (!reset.success) return { success: false, error: reset.error || 'Failed to reset password' };
-    return { success: true, data: undefined };
-  } catch (err) {
-    logger.error({ err, branchId, accountId }, 'Failed to reset IC fund account password');
-    return { success: false, error: 'Failed to reset password' };
-  }
+  return { success: false, error: 'Portal login for fund accounts is no longer supported.' };
 }
 
 export async function listICFundVouchersAction(params: {
@@ -962,6 +822,154 @@ export async function listICFundVouchersAction(params: {
       offset,
       cause: err instanceof Error ? err.message : String(err),
     });
+  }
+}
+
+const WAREHOUSE_SALE_REFERENCE_TYPES = ['ic_sale', 'ic_sale_cogs', 'ic_sale_profit'] as const;
+
+/** IC Funds journals for purchases, sales (IC + metal), COGS, and profit at a warehouse. */
+export async function listWarehouseDealVouchersAction(params: {
+  warehouseId: string;
+  startDate?: string;
+  endDate?: string;
+  limit?: number;
+}): Promise<ICFundVoucher[]> {
+  const warehouseId = String(params.warehouseId || '').trim();
+  if (!warehouseId) return [];
+
+  const whRes = await query<{ branch_id: string | null }>(
+    `SELECT branch_id FROM ic_warehouses WHERE id = $1 LIMIT 1`,
+    [warehouseId],
+  );
+  if (whRes.rows.length === 0) return [];
+
+  const warehouseBranchId = whRes.rows[0].branch_id ? String(whRes.rows[0].branch_id) : null;
+  const branchCandidates = [
+    ...(warehouseBranchId ? [warehouseBranchId] : []),
+    HQ_IC_FUNDS_BRANCH_ID,
+  ];
+  let accessOk = false;
+  for (const branchId of branchCandidates) {
+    const access = await requireICFundsAccess(branchId, 'read');
+    if (access.ok) {
+      accessOk = true;
+      break;
+    }
+  }
+  if (!accessOk) return [];
+
+  const limit = clampVoucherListLimit(params.limit ?? 500);
+  const startDate = params.startDate?.trim() || null;
+  const endDate = params.endDate?.trim() || null;
+
+  const dealDateSql = (alias: string) =>
+    `AND ($3::date IS NULL OR ${alias}.created_at >= $3::date)
+     AND ($4::date IS NULL OR ${alias}.created_at < ($4::date + interval '1 day'))`;
+
+  const clauses = [
+    `(
+      (v.reference_type = 'ic_purchase' AND EXISTS (
+        SELECT 1 FROM ic_purchases p
+        WHERE p.id = v.reference_id AND p.warehouse_id = $1
+        ${dealDateSql('p')}
+      ))
+      OR (v.reference_type = ANY($2::text[]) AND EXISTS (
+        SELECT 1 FROM ic_sales s
+        WHERE s.id = v.reference_id AND s.warehouse_id = $1
+        ${dealDateSql('s')}
+      ))
+    )`,
+  ];
+  const values: unknown[] = [
+    warehouseId,
+    [...WAREHOUSE_SALE_REFERENCE_TYPES],
+    startDate,
+    endDate,
+  ];
+
+  try {
+    const res = await query(
+      `${VOUCHER_DETAIL_SELECT_SQL}
+       WHERE ${clauses.join(' AND ')}
+       ORDER BY v.voucher_date DESC, v.voucher_no DESC, v.created_at DESC
+       LIMIT $5`,
+      [...values, limit],
+    );
+    return res.rows.map(r => mapVoucher(r as Record<string, unknown>));
+  } catch (err) {
+    logger.error({ err, warehouseId }, 'Failed to list warehouse deal vouchers');
+    return [];
+  }
+}
+
+const COUNTERPARTY_SALE_REFERENCE_TYPES = ['ic_sale', 'ic_sale_cogs', 'ic_sale_profit'] as const;
+
+/** IC Funds journals for purchases/sales with this counterparty (IC + metal, COGS, profit). */
+export async function listCounterpartyDealVouchersAction(params: {
+  counterpartyId: string;
+  startDate?: string;
+  endDate?: string;
+  limit?: number;
+}): Promise<ICFundVoucher[]> {
+  const counterpartyId = String(params.counterpartyId || '').trim();
+  if (!counterpartyId) return [];
+
+  const cpRes = await query<{ branch_id: string | null }>(
+    `SELECT branch_id FROM ic_counterparties WHERE id = $1 LIMIT 1`,
+    [counterpartyId],
+  );
+  if (cpRes.rows.length === 0) return [];
+
+  const cpBranchId = cpRes.rows[0].branch_id ? String(cpRes.rows[0].branch_id) : null;
+  const branchCandidates = [...(cpBranchId ? [cpBranchId] : []), HQ_IC_FUNDS_BRANCH_ID];
+  let accessOk = false;
+  for (const branchId of branchCandidates) {
+    const access = await requireICFundsAccess(branchId, 'read');
+    if (access.ok) {
+      accessOk = true;
+      break;
+    }
+  }
+  if (!accessOk) return [];
+
+  const limit = clampVoucherListLimit(params.limit ?? 500);
+  const startDate = params.startDate?.trim() || null;
+  const endDate = params.endDate?.trim() || null;
+
+  const dealDateSql = (alias: string) =>
+    `AND ($3::date IS NULL OR ${alias}.created_at >= $3::date)
+     AND ($4::date IS NULL OR ${alias}.created_at < ($4::date + interval '1 day'))`;
+
+  const purchaseMatch = `(p.counterparty_id = $1 OR p.supplier_id = $1)`;
+  const saleMatch = `(s.counterparty_id = $1 OR s.order_customer_id = $1)`;
+
+  const clauses = [
+    `(
+      (v.reference_type = 'ic_purchase' AND EXISTS (
+        SELECT 1 FROM ic_purchases p
+        WHERE p.id = v.reference_id AND ${purchaseMatch}
+        ${dealDateSql('p')}
+      ))
+      OR (v.reference_type = ANY($2::text[]) AND EXISTS (
+        SELECT 1 FROM ic_sales s
+        WHERE s.id = v.reference_id AND ${saleMatch}
+        ${dealDateSql('s')}
+      ))
+    )`,
+  ];
+
+  try {
+    const res = await query(
+      `${VOUCHER_DETAIL_SELECT_SQL}
+       WHERE ${clauses.join(' AND ')}
+       ORDER BY v.voucher_date DESC, v.voucher_no DESC, v.created_at DESC
+       LIMIT $5`,
+      [counterpartyId, [...COUNTERPARTY_SALE_REFERENCE_TYPES], startDate, endDate, limit],
+    );
+    return res.rows.map(r => mapVoucher(r as Record<string, unknown>));
+  } catch (err) {
+    logger.error({ err, counterpartyId }, 'Failed to list counterparty deal vouchers');
+    return [];
   }
 }
 
@@ -1292,12 +1300,15 @@ export async function getICFundAccountDetailAction(params: {
       stats,
     };
 
-    if (account.sourceType === 'ic_supplier' && account.sourceId) {
+    if (
+      (account.sourceType === 'ic_supplier' || account.sourceType === 'ic_counterparty') &&
+      account.sourceId
+    ) {
       const purchases = await query(
         `SELECT p.id, p.created_at, p.units, p.aed_total, p.payment_method, p.settlement_mode, p.inr_total, w.name AS warehouse_name
          FROM ic_purchases p
          LEFT JOIN ic_warehouses w ON w.id = p.warehouse_id
-         WHERE p.supplier_id = $1
+         WHERE p.counterparty_id = $1
          ORDER BY p.created_at DESC
          LIMIT 100`,
         [account.sourceId],
@@ -1313,7 +1324,7 @@ export async function getICFundAccountDetailAction(params: {
         warehouseName: row.warehouse_name ? String(row.warehouse_name) : undefined,
       })) as ICFundAccountRelatedPurchase[];
 
-      const supplier = await query(`SELECT commission FROM ic_suppliers WHERE id = $1 LIMIT 1`, [
+      const supplier = await query(`SELECT commission FROM ic_counterparties WHERE id = $1 LIMIT 1`, [
         account.sourceId,
       ]);
       if (supplier.rows[0]) {
@@ -1576,6 +1587,9 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
          p.units,
          p.unit_rate,
          p.aed_total,
+         p.inr_total,
+         p.settlement_mode,
+         p.metal_weight_g,
          p.created_at,
          w.name AS warehouse_name
        FROM ic_purchases p
@@ -1597,12 +1611,20 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
          s.customer_name,
          s.order_customer_name,
          s.created_at,
+         s.settlement_mode,
+         s.inr_total,
+         s.metal_weight_g,
+         s.metal_purchase_id,
+         s.metal_payment_method,
          COALESCE(s.status_updated_at, s.created_at) AS sale_at,
          w.name AS warehouse_name
        FROM ic_sales s
        JOIN ic_warehouses w ON w.id = s.warehouse_id
-       WHERE s.order_status = 'completed'
-         AND s.warehouse_id IS NOT NULL
+       WHERE s.warehouse_id IS NOT NULL
+         AND COALESCE(s.order_status, 'completed') NOT IN (
+           'branch_rejected', 'admin_rejected', 'wh_rejected', 'da_rejected',
+           'cancelled', 'cancellation_pending'
+         )
          ${branchFilter}
        ORDER BY sale_at ASC, s.created_at ASC, s.id ASC`,
       branchParams,
@@ -1617,12 +1639,40 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
         saleAt: Date;
         customerName: string;
         warehouseName: string;
+        settlementMode: 'cash' | 'metal';
+      }>
+    >();
+    const metalLots = new Map<
+      string,
+      { inrTotal: number; aedTotal: number; metalWeightG: number }
+    >();
+    const metalSalesByWarehouse = new Map<
+      string,
+      Array<{
+        id: string;
+        saleAt: Date;
+        customerName: string;
+        warehouseName: string;
+        warehouseId: string;
+        saleG: number;
+        saleInr: number;
+        saleAed: number;
+        lotId: string | null;
+        paymentMethod: 'INR' | 'AED';
       }>
     >();
 
     for (const row of purchasesRes.rows) {
       const warehouseId = String(row.warehouse_id);
       warehouseMeta.set(warehouseId, String(row.warehouse_name ?? 'Warehouse'));
+      if (row.settlement_mode === 'metal') {
+        metalLots.set(String(row.id), {
+          inrTotal: Number(row.inr_total) || 0,
+          aedTotal: Number(row.aed_total) || 0,
+          metalWeightG: Number(row.metal_weight_g) || 0,
+        });
+        continue;
+      }
       const units = Number(row.units) || 0;
       const events = eventsByWarehouse.get(warehouseId) ?? [];
       events.push({
@@ -1639,6 +1689,26 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
       const warehouseId = String(row.warehouse_id);
       warehouseMeta.set(warehouseId, String(row.warehouse_name ?? 'Warehouse'));
       const saleAt = new Date(String(row.sale_at));
+      const settlementMode = row.settlement_mode === 'metal' ? 'metal' : 'cash';
+
+      if (settlementMode === 'metal') {
+        const metalSales = metalSalesByWarehouse.get(warehouseId) ?? [];
+        metalSales.push({
+          id: String(row.id),
+          saleAt,
+          customerName: String(row.order_customer_name || row.customer_name || 'Customer'),
+          warehouseName: String(row.warehouse_name ?? 'Warehouse'),
+          warehouseId,
+          saleG: Number(row.metal_weight_g) || 0,
+          saleInr: Number(row.inr_total) || 0,
+          saleAed: (Number(row.aed_amount) || 0) + (Number(row.service_charge) || 0),
+          lotId: row.metal_purchase_id ? String(row.metal_purchase_id) : null,
+          paymentMethod: row.metal_payment_method === 'INR' ? 'INR' : 'AED',
+        });
+        metalSalesByWarehouse.set(warehouseId, metalSales);
+        continue;
+      }
+
       const events = eventsByWarehouse.get(warehouseId) ?? [];
       events.push({
         kind: 'sale',
@@ -1659,6 +1729,7 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
         saleAt,
         customerName: String(row.order_customer_name || row.customer_name || 'Customer'),
         warehouseName: String(row.warehouse_name ?? 'Warehouse'),
+        settlementMode: 'cash',
       });
       salesByWarehouse.set(warehouseId, sales);
     }
@@ -1675,8 +1746,13 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
         revenue: number;
         cogs: number;
         grossProfit: number;
+        metalProfitAed: number;
+        metalProfitInr: number;
+        metalSoldG: number;
       }
     >();
+
+    const emptyMetal = { metalProfitAed: 0, metalProfitInr: 0, metalSoldG: 0 };
 
     for (const [warehouseId, allEvents] of eventsByWarehouse) {
       const cutoffMs = periodEndMs ?? Number.POSITIVE_INFINITY;
@@ -1710,6 +1786,7 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
           cogs: margin.cogs,
           grossProfit: margin.grossProfit,
           marginPct: margin.marginPct,
+          settlementMode: 'cash',
         });
 
         periodSaleUnits += margin.deliveredUnits;
@@ -1727,10 +1804,10 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
         revenue: Number(periodRevenue.toFixed(2)),
         cogs: Number(periodCogs.toFixed(2)),
         grossProfit: Number(periodGrossProfit.toFixed(2)),
+        ...emptyMetal,
       });
     }
 
-    // Warehouses with purchases but no sales yet
     for (const [warehouseId, events] of eventsByWarehouse) {
       if (warehouseSummaries.has(warehouseId)) continue;
       const cutoffMs = periodEndMs ?? Number.POSITIVE_INFINITY;
@@ -1744,6 +1821,67 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
         revenue: 0,
         cogs: 0,
         grossProfit: 0,
+        ...emptyMetal,
+      });
+    }
+
+    for (const [warehouseId, metalSales] of metalSalesByWarehouse) {
+      const existing = warehouseSummaries.get(warehouseId) ?? {
+        warehouseName: warehouseMeta.get(warehouseId) ?? 'Warehouse',
+        purchaseUnits: 0,
+        purchaseCost: 0,
+        weightedAvgRate: 0,
+        saleUnits: 0,
+        revenue: 0,
+        cogs: 0,
+        grossProfit: 0,
+        ...emptyMetal,
+      };
+      let metalProfitAed = 0;
+      let metalProfitInr = 0;
+      let metalSoldG = 0;
+
+      for (const sale of metalSales) {
+        const saleMs = sale.saleAt.getTime();
+        if (periodStartMs != null && saleMs < periodStartMs) continue;
+        if (periodEndMs != null && saleMs > periodEndMs) continue;
+        const lot = sale.lotId ? metalLots.get(sale.lotId) : undefined;
+        const lotG = lot?.metalWeightG || sale.saleG;
+        const pl = computeMetalLotProfit({
+          paymentMethod: sale.paymentMethod,
+          weightG: sale.saleG,
+          purchaseInr: allocateLotAmount(lot?.inrTotal || 0, sale.saleG, lotG),
+          purchaseAed: allocateLotAmount(lot?.aedTotal || 0, sale.saleG, lotG),
+          saleInr: sale.saleInr,
+          saleAed: sale.saleAed,
+        });
+        metalProfitAed += pl.profitAed;
+        metalProfitInr += pl.profitInr;
+        metalSoldG += sale.saleG;
+        lines.push({
+          saleId: sale.id,
+          saleDate: isoDate(sale.saleAt),
+          warehouseId,
+          warehouseName: sale.warehouseName,
+          customerName: sale.customerName,
+          units: sale.saleG,
+          saleRate: 0,
+          revenue: sale.saleAed,
+          avgPurchaseRate: 0,
+          cogs: pl.purchaseAed,
+          grossProfit: pl.bookedProfit,
+          marginPct: 0,
+          settlementMode: 'metal',
+          metalWeightG: sale.saleG,
+          bookedCurrency: pl.bookedCurrency,
+        });
+      }
+
+      warehouseSummaries.set(warehouseId, {
+        ...existing,
+        metalProfitAed: Number(metalProfitAed.toFixed(2)),
+        metalProfitInr: Number(metalProfitInr.toFixed(2)),
+        metalSoldG: Number(metalSoldG.toFixed(4)),
       });
     }
 
@@ -1760,21 +1898,31 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
         revenue: summary.revenue,
         cogs: summary.cogs,
         grossProfit: summary.grossProfit,
+        metalProfitAed: summary.metalProfitAed,
+        metalProfitInr: summary.metalProfitInr,
+        metalSoldG: summary.metalSoldG,
       }))
       .filter(
         w =>
           w.saleUnits > 0 ||
           w.revenue > 0 ||
           w.purchaseUnits > 0 ||
-          w.purchaseCost > 0,
+          w.purchaseCost > 0 ||
+          w.metalSoldG > 0 ||
+          Math.abs(w.metalProfitAed) > 0.005 ||
+          Math.abs(w.metalProfitInr) > 0.005,
       )
       .sort((a, b) => a.warehouseName.localeCompare(b.warehouseName));
 
+    const cashLines = lines.filter(l => l.settlementMode !== 'metal');
     const totals = {
-      saleUnits: Number(lines.reduce((s, l) => s + l.units, 0).toFixed(4)),
-      revenue: Number(lines.reduce((s, l) => s + l.revenue, 0).toFixed(2)),
-      cogs: Number(lines.reduce((s, l) => s + l.cogs, 0).toFixed(2)),
-      grossProfit: Number(lines.reduce((s, l) => s + l.grossProfit, 0).toFixed(2)),
+      saleUnits: Number(cashLines.reduce((s, l) => s + l.units, 0).toFixed(4)),
+      revenue: Number(cashLines.reduce((s, l) => s + l.revenue, 0).toFixed(2)),
+      cogs: Number(cashLines.reduce((s, l) => s + l.cogs, 0).toFixed(2)),
+      grossProfit: Number(cashLines.reduce((s, l) => s + l.grossProfit, 0).toFixed(2)),
+      metalProfitAed: Number(warehouses.reduce((s, w) => s + w.metalProfitAed, 0).toFixed(2)),
+      metalProfitInr: Number(warehouses.reduce((s, w) => s + w.metalProfitInr, 0).toFixed(2)),
+      metalSoldG: Number(warehouses.reduce((s, w) => s + w.metalSoldG, 0).toFixed(4)),
     };
 
     return {
@@ -1846,7 +1994,7 @@ export async function getICSettlementTradeReportAction(params: unknown): Promise
          w.name AS warehouse_name,
          w.code AS warehouse_code
        FROM ic_purchases p
-       LEFT JOIN ic_suppliers s ON s.id = p.supplier_id
+       LEFT JOIN ic_counterparties s ON s.id = p.counterparty_id
        LEFT JOIN ic_warehouses w ON w.id = p.warehouse_id
        WHERE p.settlement_mode = $${purchaseModeIndex}
          ${branchFilter.replace(/\bw\./g, 'w.')}
@@ -1875,18 +2023,17 @@ export async function getICSettlementTradeReportAction(params: unknown): Promise
          s.order_status,
          s.customer_name,
          s.order_customer_name,
-         s.order_customer_id,
          s.rejection_remarks,
          w.name AS warehouse_name,
          w.code AS warehouse_code,
-         c.name AS customer_master_name,
-         c.code AS customer_code,
+         cp.name AS customer_master_name,
+         cp.code AS customer_code,
          mp.inr_total AS lot_purchase_inr,
          mp.aed_total AS lot_purchase_aed,
          mp.metal_weight_g AS lot_purchase_g
        FROM ic_sales s
        LEFT JOIN ic_warehouses w ON w.id = s.warehouse_id
-       LEFT JOIN customers c ON c.id = s.order_customer_id
+       LEFT JOIN ic_counterparties cp ON cp.id = s.counterparty_id
        LEFT JOIN ic_purchases mp ON mp.id = s.metal_purchase_id
        WHERE s.settlement_mode = $${saleModeIndex}
          ${sqlExcludeVoidIcSales('s')}
@@ -1932,15 +2079,11 @@ export async function getICSettlementTradeReportAction(params: unknown): Promise
       const unitRate = resolveTradeUnitRateAed(units, Number(row.unit_rate) || 0, aedTotal);
       const id = String(row.id);
       const counterparty = String(row.order_customer_name || row.customer_master_name || row.customer_name || 'Customer');
-      const metalPaymentMethod =
-        row.metal_payment_method === 'INR' || row.metal_payment_method === 'AED'
-          ? row.metal_payment_method
-          : undefined;
       const saleG = row.metal_weight_g != null ? Number(row.metal_weight_g) : 0;
       const pl =
-        settlementMode === 'metal' && metalPaymentMethod
+        settlementMode === 'metal'
           ? computeMetalLotProfit({
-              paymentMethod: metalPaymentMethod,
+              paymentMethod: 'AED',
               weightG: saleG,
               purchaseInr: allocateLotAmount(
                 Number(row.lot_purchase_inr) || 0,
@@ -1964,7 +2107,6 @@ export async function getICSettlementTradeReportAction(params: unknown): Promise
           id,
           customer_name: row.customer_name,
           order_customer_name: row.order_customer_name,
-          order_customer_id: row.order_customer_id,
         }),
         counterparty,
         counterpartyCode: row.customer_code ? String(row.customer_code) : undefined,
@@ -1977,8 +2119,8 @@ export async function getICSettlementTradeReportAction(params: unknown): Promise
         metalWeightG: row.metal_weight_g != null ? Number(row.metal_weight_g) : undefined,
         metalRateInrPerG: row.metal_rate_inr_per_g != null ? Number(row.metal_rate_inr_per_g) : undefined,
         metalRateAedPerG: row.metal_rate_aed_per_g != null ? Number(row.metal_rate_aed_per_g) : undefined,
-        settlementLabel: metalPaymentMethod ? `${settlementLabel} · ${metalPaymentMethod}` : settlementLabel,
-        metalPaymentMethod,
+        settlementLabel,
+        metalPaymentMethod: 'AED' as const,
         bookedProfit: pl?.bookedProfit,
         bookedCurrency: pl?.bookedCurrency,
         paymentStatus: row.payment_status ? String(row.payment_status) : undefined,

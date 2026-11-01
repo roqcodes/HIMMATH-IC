@@ -18,13 +18,11 @@ import { btnPrimary, btnSecondary, formInput } from '@/lib/ui';
 import { useApp } from '@/context/AppContext';
 import { listAvailableMetalLotsAction, type AvailableMetalLot } from '@/app/actions/icTransferActions';
 import { ICSale, ICSupplier } from '@/types';
-import MetalPaymentToggle from '../shared/MetalPaymentToggle';
-import type { MetalPaymentMethod } from '@/lib/icTransfer/metalInventory';
 import TransactionTypeSelector from '../shared/TransactionTypeSelector';
 import ICSaleAmountCards from '../shared/ICSaleAmountCards';
 import SettlementModeToggle from '../shared/SettlementModeToggle';
 import MetalSettlementFields, { emptyMetalFields } from '../shared/MetalSettlementFields';
-import type { ICSettlementMode } from '@/lib/icTransfer/metalSettlement';
+import { metalFieldsFromRecord, type ICSettlementMode } from '@/lib/icTransfer/metalSettlement';
 import {
   computeICSaleAmounts,
   formatRateInputValue,
@@ -51,16 +49,8 @@ import {
   icFormGridGap,
 } from '../shared/icTransferFormModalLayout';
 
-function resolveInitialCounterpartyId(
-  initialData: ICSale | undefined,
-  counterparties: ICSupplier[],
-): string {
-  if (initialData?.counterpartyId) return initialData.counterpartyId;
-  if (initialData?.orderCustomerId) {
-    const match = counterparties.find(c => c.legacyCustomerId === initialData.orderCustomerId);
-    if (match) return match.id;
-  }
-  return '';
+function resolveInitialCounterpartyId(initialData: ICSale | undefined): string {
+  return initialData?.counterpartyId || '';
 }
 
 type Props = {
@@ -124,9 +114,6 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [metalPurchaseId, setMetalPurchaseId] = useState(initialData?.metalPurchaseId || '');
-  const [metalPaymentMethod, setMetalPaymentMethod] = useState<MetalPaymentMethod>(
-    initialData?.metalPaymentMethod === 'INR' ? 'INR' : 'AED',
-  );
   const [metalLots, setMetalLots] = useState<AvailableMetalLot[]>([]);
   const branchId = useMemo(() => {
     if (user?.branchId) return user.branchId;
@@ -169,7 +156,7 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
     [counterpartySearchOptions, counterpartyId],
   );
 
-  const rateGroupCustomerId = selectedCounterparty?.legacyCustomerId ?? undefined;
+  const rateGroupCustomerId = counterpartyId || undefined;
 
   const customerRateGroup = useMemo(() => {
     if (!rateGroupCustomerId) return undefined;
@@ -249,22 +236,21 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
     if (open) {
       const mode = initialData?.settlementMode === 'metal' ? 'metal' : 'cash';
       setSettlementMode(mode);
-      setMetal({
-        metalWeightG: initialData?.metalWeightG ?? 0,
-        metalRateInrPerG: initialData?.metalRateInrPerG ?? 0,
-        metalRateAedPerG: initialData?.metalRateAedPerG ?? 0,
-        inrTotal: initialData?.inrTotal ?? 0,
+      setMetal(metalFieldsFromRecord({
+        metalWeightG: initialData?.metalWeightG,
+        metalRateInrPerG: initialData?.metalRateInrPerG,
+        metalRateAedPerG: initialData?.metalRateAedPerG,
+        inrTotal: initialData?.inrTotal,
         aedTotal: (initialData?.aedAmount ?? 0) + (initialData?.serviceCharge ?? 0),
-      });
+      }));
       setUnits(initialData?.units?.toString() || '');
       setRate(initialData?.unitRate?.toString() || '');
       setCustomerName(
         initialData?.orderCustomerName || initialData?.customerName || '',
       );
-      setCounterpartyId(resolveInitialCounterpartyId(initialData, scopedCounterparties));
+      setCounterpartyId(resolveInitialCounterpartyId(initialData));
       setWarehouseId(lockedWarehouseId || initialData?.warehouseId || '');
       setMetalPurchaseId(initialData?.metalPurchaseId || '');
-      setMetalPaymentMethod(initialData?.metalPaymentMethod === 'INR' ? 'INR' : 'AED');
       setTransactionType(normalizeICSaleTransactionType(initialData?.transactionType));
       setPriority(initialData?.priority || 'Normal');
       setAddress(initialData?.address || '');
@@ -335,10 +321,7 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
   const amounts = computeICSaleAmounts(unitNum, rateNum, serviceChargeNum);
 
   const isByHand = transactionType === 'by_hand';
-  const customerEditUrl =
-    selectedCounterparty?.legacyCustomerId
-      ? customerEditHref(currentSlug, selectedCounterparty.legacyCustomerId)
-      : null;
+  const customerEditUrl = null;
 
   const canSubmit = isMetal
     ? counterpartyId &&
@@ -346,6 +329,7 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
       Boolean(metalPurchaseId) &&
       metal.metalWeightG > 0 &&
       metal.metalRateInrPerG > 0 &&
+      metal.metalSheetRateAed > 0 &&
       metal.metalRateAedPerG > 0 &&
       metal.inrTotal > 0 &&
       metal.aedTotal > 0
@@ -377,7 +361,6 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
           warehouseId,
           settlementMode: 'metal' as const,
           metalPurchaseId,
-          metalPaymentMethod,
           unitRate: 0,
           units: 0,
           metalWeightG: metal.metalWeightG,
@@ -552,13 +535,13 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
                           setMetalPurchaseId(id);
                           const lot = metalLots.find(l => l.id === id);
                           if (lot) {
-                            setMetal({
+                            setMetal(metalFieldsFromRecord({
                               metalWeightG: lot.remainingG,
                               metalRateInrPerG: lot.metalRateInrPerG,
                               metalRateAedPerG: lot.metalRateAedPerG,
                               inrTotal: lot.inrTotal,
                               aedTotal: lot.aedTotal,
-                            });
+                            }));
                           }
                         }}
                         options={metalLotOptions}
@@ -567,11 +550,9 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
                       />
                     )}
                   </InputField>
-                  <MetalPaymentToggle
-                    value={metalPaymentMethod}
-                    onChange={setMetalPaymentMethod}
-                    disabled={isSubmitting || isUploading}
-                  />
+                  <p className="text-xs text-slate-500 dark:text-[var(--theme-text-secondary)]">
+                    Customer pays the total AED amount. IC Funds posts receivable and metal P&amp;L on completion.
+                  </p>
                   <MetalSettlementFields
                     value={metal}
                     onChange={setMetal}

@@ -1,10 +1,13 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  applyMetalFieldChange,
   computeMetalRateInrFromTotal,
+  computeMetalSheetRateAed,
   computeMetalTotalsFromWeight,
   deriveImputedUnitRateAed,
   deriveUnitsFromInrTotal,
+  metalFieldsFromRecord,
   normalizeCashPurchase,
   normalizeMetalPurchase,
 } from './metalSettlement';
@@ -15,10 +18,37 @@ describe('metalSettlement', () => {
     assert.equal(deriveUnitsFromInrTotal(250_000), 2.5);
   });
 
-  it('computes weight-based totals', () => {
+  it('computes weight-based totals with sheet RATE (AED = INR × rate ÷ 1000)', () => {
     const { totalInr, totalAed } = computeMetalTotalsFromWeight(10.5, 5000, 220);
     assert.equal(totalInr, 52500);
-    assert.equal(totalAed, 2310);
+    assert.equal(totalAed, 11550);
+  });
+
+  it('matches the metal P&L sheet purchase row', () => {
+    const { totalInr, totalAed } = computeMetalTotalsFromWeight(499.71, 13980, 36.23);
+    assert.equal(totalInr, 6_985_945.8);
+    assert.equal(totalAed, 253_100.8163);
+    assert.equal(computeMetalSheetRateAed(totalInr, totalAed), 36.23);
+
+    const sale = computeMetalTotalsFromWeight(499.71, 14000, 36.35);
+    assert.equal(sale.totalInr, 6_995_940);
+    assert.equal(sale.totalAed, 254_302.419);
+  });
+
+  it('keeps RATE and recomputes AED when G rate changes', () => {
+    const started = {
+      ...metalFieldsFromRecord({
+        metalWeightG: 499.71,
+        metalRateInrPerG: 13980,
+        inrTotal: 6_985_945.8,
+        aedTotal: 253_100.8163,
+      }),
+      metalSheetRateAed: 36.23,
+    };
+    const next = applyMetalFieldChange(started, 'rateInr', 14000);
+    assert.equal(next.inrTotal, 6_995_940);
+    assert.equal(next.metalSheetRateAed, 36.23);
+    assert.equal(next.aedTotal, 253_462.9062);
   });
 
   it('back-solves INR rate per gram from total', () => {

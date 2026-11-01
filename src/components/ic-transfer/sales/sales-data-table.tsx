@@ -4,17 +4,20 @@ import React from 'react';
 import type { Branch, ICSale } from '@/types';
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
 import { getAdminSaleCustomerName } from '@/lib/icTransfer/branchOrderOwnership';
+import { effectiveSaleCounterpartyId } from '@/lib/counterparties/effectiveId';
+import CounterpartyLink from '@/components/counterparties/CounterpartyLink';
+import WarehouseLink from '@/components/ic-transfer/warehouse/WarehouseLink';
 import { isBranchHandledSale } from '@/lib/icTransfer/fulfillmentHandler';
 import { getAdminRowAccentClass } from '@/lib/icTransfer/orderStatus';
 import { highPriorityRowClass } from '@/lib/icTransfer/orderPriority';
-import { getDeliveredUnits, getRemainingUnits } from '@/lib/icTransfer/saleUnits';
-import AsicTabBar from '@/components/asic/AsicTabBar';
 import { fmtLedgerAed } from '@/lib/icFunds/format';
+import { formatSettlementModeLabel } from '@/lib/icTransfer/metalSettlement';
 import ICTransferDataTableShell, {
   ICTransferTableFilterSelect,
   type ICTransferTableColumn,
   icTdClass,
 } from '@/components/ic-transfer/shared/ICTransferDataTableShell';
+import AsicTabBar from '@/components/asic/AsicTabBar';
 import {
   ICTransferDeleteIconButton,
   ICTransferEditIconButton,
@@ -27,10 +30,10 @@ const SALES_COLUMNS: ICTransferTableColumn[] = [
   { id: 'Date', label: 'Date', align: 'left' },
   { id: 'Customer', label: 'Customer', align: 'left' },
   { id: 'Warehouse', label: 'Warehouse', align: 'left' },
+  { id: 'Settlement', label: 'Settlement', align: 'left' },
   { id: 'Units', label: 'Units', align: 'right' },
+  { id: 'Metal (g)', label: 'Metal (g)', align: 'right' },
   { id: 'Total AED', label: 'AED', align: 'right' },
-  { id: 'Delivered Units', label: 'Delivered', align: 'right' },
-  { id: 'Remaining Units', label: 'Remaining', align: 'right' },
   { id: 'Actions', label: 'Actions', align: 'center', sortable: false },
 ];
 
@@ -65,6 +68,7 @@ type SalesDataTableProps = {
   onEdit: (sale: ICSale) => void;
   onDelete: (e: React.MouseEvent, sale: ICSale) => void;
   getWarehouseName: (id?: string) => string;
+  branchSlug?: string;
   branchName: string;
   branches: Branch[];
   txnBranchName?: string;
@@ -123,6 +127,7 @@ export default function SalesDataTable(props: SalesDataTableProps) {
     onEdit,
     onDelete,
     getWarehouseName,
+    branchSlug,
     branchName,
     branches,
     txnBranchName,
@@ -246,6 +251,7 @@ export default function SalesDataTable(props: SalesDataTableProps) {
           onEdit={onEdit}
           onDelete={onDelete}
           getWarehouseName={getWarehouseName}
+          branchSlug={branchSlug}
           branchName={branchName}
           branches={branches}
           txnBranchName={txnBranchName}
@@ -264,6 +270,7 @@ function SaleRow({
   onEdit,
   onDelete,
   getWarehouseName,
+  branchSlug,
   branchName,
   branches,
   txnBranchName,
@@ -276,14 +283,15 @@ function SaleRow({
   onEdit: (sale: ICSale) => void;
   onDelete: (e: React.MouseEvent, sale: ICSale) => void;
   getWarehouseName: (id?: string) => string;
+  branchSlug?: string;
   branchName: string;
   branches: Branch[];
   txnBranchName?: string;
 }) {
   const customerLabel = getAdminSaleCustomerName(s, branchName, branches);
+  const counterpartyId = effectiveSaleCounterpartyId(s) || s.orderCustomerId;
   const branchHandled = isBranchHandledSale(s);
-  const delivered = getDeliveredUnits(s.units, s.collectedUnits, s.orderStatus);
-  const remaining = getRemainingUnits(s.units, s.collectedUnits, s.orderStatus);
+  const isMetal = s.settlementMode === 'metal';
   const accent =
     getAdminRowAccentClass(s.orderStatus, s.transactionType) ?? highPriorityRowClass(s.priority);
 
@@ -322,7 +330,12 @@ function SaleRow({
       </td>
       <td className={icTdClass('left')}>
         <div className="min-w-[120px]">
-          <span className="font-medium text-slate-900">{customerLabel}</span>
+          <CounterpartyLink
+            counterpartyId={counterpartyId}
+            name={customerLabel}
+            branchSlug={branchSlug}
+            stopPropagation
+          />
           <div className="mt-0.5 flex flex-wrap items-center gap-1">
             {s.transactionType === 'by_hand' && <OutlineBadge tone="violet">By Hand</OutlineBadge>}
             {s.derivedFromSaleId && (
@@ -334,22 +347,28 @@ function SaleRow({
         </div>
       </td>
       <td className={icTdClass('left')}>
-        <WarehouseCell sale={s} getWarehouseName={getWarehouseName} />
+        <WarehouseCell sale={s} getWarehouseName={getWarehouseName} branchSlug={branchSlug} />
+      </td>
+      <td className={icTdClass('left')}>
+        <span className="text-xs font-medium text-slate-700">
+          {formatSettlementModeLabel(s.settlementMode)}
+        </span>
       </td>
       <td className={icTdClass('right')}>
-        <span className="font-mono tabular-nums text-slate-700">{s.units.toLocaleString()}</span>
+        <span className="font-mono tabular-nums text-slate-700">
+          {isMetal ? '—' : s.units.toLocaleString()}
+        </span>
+      </td>
+      <td className={icTdClass('right')}>
+        <span className="font-mono tabular-nums text-amber-800">
+          {isMetal
+            ? (s.metalWeightG ?? 0).toLocaleString('en-US', { maximumFractionDigits: 4 })
+            : '—'}
+        </span>
       </td>
       <td className={icTdClass('right')}>
         <span className="font-mono font-medium tabular-nums text-slate-900">
           {fmtLedgerAed(s.aedAmount || 0)}
-        </span>
-      </td>
-      <td className={icTdClass('right')}>
-        <span className="font-mono tabular-nums text-emerald-700">{delivered.toLocaleString()}</span>
-      </td>
-      <td className={icTdClass('right')}>
-        <span className={`font-mono tabular-nums ${remaining > 0 ? 'text-amber-700' : 'text-slate-400'}`}>
-          {remaining.toLocaleString()}
         </span>
       </td>
       <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
@@ -370,12 +389,21 @@ function SaleRow({
 function WarehouseCell({
   sale: s,
   getWarehouseName,
+  branchSlug,
 }: {
   sale: ICSale;
   getWarehouseName: (id?: string) => string;
+  branchSlug?: string;
 }) {
   if (s.warehouseId) {
-    return <span className="text-slate-700">{getWarehouseName(s.warehouseId)}</span>;
+    return (
+      <WarehouseLink
+        warehouseId={s.warehouseId}
+        name={getWarehouseName(s.warehouseId)}
+        branchSlug={branchSlug ?? ''}
+        stopPropagation
+      />
+    );
   }
   if (isBranchHandledSale(s)) {
     return <span className="text-xs italic text-teal-700">Branch managed</span>;

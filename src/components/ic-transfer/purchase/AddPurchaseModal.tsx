@@ -12,7 +12,7 @@ import ICSaleAmountCards from '../shared/ICSaleAmountCards';
 import SettlementModeToggle from '../shared/SettlementModeToggle';
 import MetalSettlementFields, { emptyMetalFields } from '../shared/MetalSettlementFields';
 import { computeICSaleAmounts } from '@/lib/icTransfer/rateCalculations';
-import type { ICSettlementMode } from '@/lib/icTransfer/metalSettlement';
+import { metalFieldsFromRecord, type ICSettlementMode } from '@/lib/icTransfer/metalSettlement';
 import {
   buildSupplierSearchOptions,
   buildWarehouseSearchOptions,
@@ -148,13 +148,13 @@ export default function AddPurchaseModal({
       setSupplierId(initialData?.counterpartyId || initialData?.supplierId || '');
       setWarehouseId(lockedWarehouseId || initialData?.warehouseId || '');
       setNotes(initialData?.notes || '');
-      setMetal({
-        metalWeightG: initialData?.metalWeightG ?? 0,
-        metalRateInrPerG: initialData?.metalRateInrPerG ?? 0,
-        metalRateAedPerG: initialData?.metalRateAedPerG ?? 0,
-        inrTotal: initialData?.inrTotal ?? 0,
-        aedTotal: initialData?.aedTotal ?? 0,
-      });
+      setMetal(metalFieldsFromRecord({
+        metalWeightG: initialData?.metalWeightG,
+        metalRateInrPerG: initialData?.metalRateInrPerG,
+        metalRateAedPerG: initialData?.metalRateAedPerG,
+        inrTotal: initialData?.inrTotal,
+        aedTotal: initialData?.aedTotal,
+      }));
 
       if (!lockedWarehouseId && !initialData?.warehouseId && warehouseOptions.length === 1) {
         setWarehouseId(warehouseOptions[0]!.id);
@@ -172,6 +172,7 @@ export default function AddPurchaseModal({
     warehouseId &&
     metal.metalWeightG > 0 &&
     metal.metalRateInrPerG > 0 &&
+    metal.metalSheetRateAed > 0 &&
     metal.metalRateAedPerG > 0 &&
     metal.inrTotal > 0 &&
     metal.aedTotal > 0;
@@ -365,7 +366,14 @@ export default function AddPurchaseModal({
 
             <SettlementModePanel
               active={settlementMode}
-              metal={<MetalSettlementFields value={metal} onChange={setMetal} disabled={isSubmitting} />}
+              metal={
+                <>
+                  <p className="text-xs text-slate-500 dark:text-[var(--theme-text-secondary)]">
+                    AED paid to the counterparty is posted to IC Funds (Dr Metal inventory · Cr counterparty).
+                  </p>
+                  <MetalSettlementFields value={metal} onChange={setMetal} disabled={isSubmitting} />
+                </>
+              }
               cash={
                 <>
                   <div className={asicFormGrid}>

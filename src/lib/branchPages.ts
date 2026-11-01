@@ -42,7 +42,7 @@ export const BRANCH_NAV_PAGE_IDS = BRANCH_NAV_PAGES.map(p => p.id);
 export const HIDEABLE_BRANCH_PAGE_IDS = BRANCH_NAV_PAGES.filter(p => p.hideable && !p.navHidden).map(p => p.id);
 
 /** Pages customer-role users may access (extensible for future customer portals). */
-export const CUSTOMER_PORTAL_PAGE_IDS: BranchPageId[] = ['ic-transfer'];
+export const CUSTOMER_PORTAL_PAGE_IDS: BranchPageId[] = [];
 
 const PATH_SEGMENT_TO_PAGE_ID: Record<string, BranchPageId> = {
   group: 'deals',

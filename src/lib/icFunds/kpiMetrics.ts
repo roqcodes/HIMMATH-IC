@@ -478,9 +478,9 @@ export function computeBooksKpis(input: {
         },
         {
           label: 'Booked P&L',
-          value: `${s.bookedInrProfit.toLocaleString(undefined, { maximumFractionDigits: 2 })} INR`,
-          hint: `AED lots ${fmtLedgerAed(s.bookedAedProfit)} · pay currency of each sale`,
-          tone: s.bookedInrProfit + s.bookedAedProfit >= 0 ? 'emerald' : 'red',
+          value: fmtLedgerAed(s.bookedAedProfit),
+          hint: 'Sale AED − purchase AED on matched lots',
+          tone: s.bookedAedProfit >= 0 ? 'emerald' : 'red',
         },
       ];
     }
@@ -513,30 +513,31 @@ export function computeBooksKpis(input: {
   }
 
   if (reportView === 'warehouse-pl' && warehousePl) {
+    const t = warehousePl.totals;
     return [
       {
-        label: 'Revenue',
-        value: fmtLedgerAed(warehousePl.totals.revenue),
-        hint: `${warehousePl.totals.saleUnits.toLocaleString(undefined, { maximumFractionDigits: 2 })} units sold`,
+        label: 'IC revenue',
+        value: fmtLedgerAed(t.revenue),
+        hint: `${t.saleUnits.toLocaleString(undefined, { maximumFractionDigits: 2 })} cash IC units sold`,
         tone: 'emerald',
       },
       {
-        label: 'COGS',
-        value: fmtLedgerAed(warehousePl.totals.cogs),
-        hint: 'Weighted-average cost of goods sold',
-        tone: 'amber',
+        label: 'IC gross profit',
+        value: fmtLedgerAed(t.grossProfit),
+        hint: `COGS ${fmtLedgerAed(t.cogs)} · WAC`,
+        tone: t.grossProfit >= 0 ? 'emerald' : 'red',
       },
       {
-        label: 'Gross profit',
-        value: fmtLedgerAed(warehousePl.totals.grossProfit),
-        hint: 'Revenue minus COGS',
-        tone: warehousePl.totals.grossProfit >= 0 ? 'emerald' : 'red',
+        label: 'Metal P&L',
+        value: fmtLedgerAed(t.metalProfitAed),
+        hint: `${t.metalSoldG.toLocaleString(undefined, { maximumFractionDigits: 2 })} g · sale − purchase AED`,
+        tone: t.metalProfitAed >= 0 ? 'emerald' : 'red',
       },
       {
         label: 'Warehouses',
         value: warehousePl.warehouses.length.toLocaleString(),
-        hint: `${warehousePl.lines.length} completed sales in period`,
-        tone: 'indigo',
+        hint: 'With activity in period',
+        tone: 'slate',
       },
     ];
   }

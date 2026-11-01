@@ -56,7 +56,6 @@ import {
   type BranchPortalConfig,
 } from '@/lib/icTransfer/adminOnlyBranch';
 import { canEditOrder, canDeleteOrder } from '@/lib/icTransfer/orderWorkflowRules';
-import { validateSubCustomerForOrder } from '@/app/actions/subCustomerActions';
 import { transactionTypeRequiresBank } from '@/lib/icTransfer/transactionTypes';
 import { SELECT_RATE_GROUPS_BY_IDS_WITH_MEMBERS } from '@/lib/icTransfer/rateGroupQueries';
 import { normalizePricingConfig, validatePricingConfig } from '@/lib/icTransfer/ratePricing';
@@ -177,8 +176,6 @@ const SALE_COLUMNS: Record<string, string> = {
   orderCustomerName: 'order_customer_name',
   orderCustomerId: 'order_customer_id',
   counterpartyId: 'counterparty_id',
-  subCustomerId: 'sub_customer_id',
-  subCustomerName: 'sub_customer_name',
   warehouseId: 'warehouse_id',
   settlementMode: 'settlement_mode',
   transactionType: 'transaction_type',
@@ -221,23 +218,10 @@ async function applyMetalSaleStock(
   warehouseId: string,
   saleId: string,
   grams: number,
-  paymentMethod: 'INR' | 'AED',
-  units: number,
 ): Promise<void> {
   if (grams > 0) {
     await logWarehouseStockTransaction(client, warehouseId, 'clear', grams, 'metal_sale', saleId);
     await adjustWarehouseMetalStock(client, warehouseId, -grams);
-  }
-  if (paymentMethod === 'INR' && units > 0) {
-    await logWarehouseStockTransaction(
-      client,
-      warehouseId,
-      'receive',
-      units,
-      'metal_sale_inr_units',
-      saleId,
-    );
-    await adjustWarehouseStock(client, warehouseId, units);
   }
 }
 
@@ -245,11 +229,7 @@ async function reverseMetalSaleStock(client: PoolClient, sale: MetalSaleStockRow
   if (sale.settlement_mode !== 'metal' || !sale.warehouse_id) return;
   const warehouseId = String(sale.warehouse_id);
   const grams = Number(sale.metal_weight_g) || 0;
-  const units = Number(sale.units) || 0;
   if (grams > 0) await adjustWarehouseMetalStock(client, warehouseId, grams);
-  if (sale.metal_payment_method === 'INR' && units > 0) {
-    await adjustWarehouseStock(client, warehouseId, -units);
-  }
 }
 
 async function resolveEnteredByForBranch(branchSlug?: string) {
@@ -266,7 +246,7 @@ async function resolveEnteredByForBranch(branchSlug?: string) {
 async function isCustomerEnteredSale(sale: ICSale): Promise<boolean> {
   if (!sale.orderCustomerId || !sale.enteredByUserId) return false;
   const res = await query(
-    `SELECT auth_user_id FROM customers WHERE id = $1 LIMIT 1`,
+    `SELECT auth_user_id FROM ic_counterparties WHERE id = $1 LIMIT 1`,
     [sale.orderCustomerId],
   );
   const cognitoUserId = res.rows[0]?.auth_user_id;
@@ -445,7 +425,7 @@ export async function dbUpdateICSupplierAction(
     if (ownershipCheck) return { success: false, error: ownershipCheck.error };
 
     const res = await query(
-      `UPDATE ic_counterparties SET name=$1, code=$2, phone=$3, commission=$4, region_id=$5, email=$6, address=$7, country=$8, subdivision=$9, locality=$10 WHERE id=$11 RETURNING *`,
+      `UPDATE ic_counterparties SET name=$1, code=$2, phone=$3, commission=$4, region_id=$5, email=$6, address=$7, country=$8, subdivision=$9, locality=$10, status=$11 WHERE id=$12 RETURNING *`,
       [
         parsed.name,
         parsed.code,
@@ -457,10 +437,11 @@ export async function dbUpdateICSupplierAction(
         parsed.country?.trim() || null,
         parsed.subdivision?.trim() || null,
         parsed.locality?.trim() || null,
+        'active',
         parsed.id,
       ],
     );
-    if (res.rowCount === 0) return { success: false, error: 'Supplier not found' };
+    if (res.rowCount === 0) return { success: false, error: 'Counterparty not found' };
     await syncICSupplierFundAccount(parsed.id);
     return { success: true, data: mapICSupplierRow(res.rows[0]) };
   } catch (error: unknown) {
@@ -784,10 +765,10 @@ export async function dbSetICRateGroupCustomersAction(groupId: string, customerI
     await withTransaction(async (client) => {
       if (parsed.customerIds.length > 0) {
         const checkRes = await client.query(
-          `SELECT c.customer_id, g.name as group_name 
-           FROM ic_rate_group_customers c 
+          `SELECT c.counterparty_id, g.name as group_name 
+           FROM ic_rate_group_counterparties c 
            JOIN ic_rate_groups g ON c.group_id = g.id
-           WHERE c.customer_id = ANY($1) AND c.group_id != $2`,
+           WHERE c.counterparty_id::text = ANY($1) AND c.group_id != $2`,
           [parsed.customerIds, parsed.groupId]
         );
         if (checkRes.rows.length > 0) {
@@ -796,11 +777,11 @@ export async function dbSetICRateGroupCustomersAction(groupId: string, customerI
         }
       }
 
-      await client.query('DELETE FROM ic_rate_group_customers WHERE group_id = $1', [parsed.groupId]);
+      await client.query('DELETE FROM ic_rate_group_counterparties WHERE group_id = $1', [parsed.groupId]);
       if (parsed.customerIds.length > 0) {
         await client.query(
-          `INSERT INTO ic_rate_group_customers (group_id, customer_id)
-           SELECT $1, unnest($2::text[])`,
+          `INSERT INTO ic_rate_group_counterparties (group_id, counterparty_id)
+           SELECT $1, unnest($2::uuid[])`,
           [parsed.groupId, parsed.customerIds]
         );
       }
@@ -855,13 +836,12 @@ export async function dbAddICPurchaseAction(
 
       const res = await client.query(
         `INSERT INTO ic_purchases (
-           counterparty_id, supplier_id, location_id, warehouse_id, unit_rate, units, payment_method, notes, aed_total, payment_status,
+           counterparty_id, location_id, warehouse_id, unit_rate, units, payment_method, notes, aed_total, payment_status,
            settlement_mode, metal_weight_g, metal_rate_inr_per_g, metal_rate_aed_per_g, inr_total
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'paid', $10, $11, $12, $13, $14) RETURNING *`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'paid', $9, $10, $11, $12, $13) RETURNING *`,
         [
           party.counterpartyId,
-          party.legacySupplierId,
           parsed.locationId || null,
           parsed.warehouseId || null,
           normalized.unitRate,
@@ -999,53 +979,12 @@ export async function dbAddICSaleAction(
 
     let salePayload = { ...parsed };
     let branchName = '';
-    let branchHiddenPages: string[] | null = null;
-    let branchId: string | null = null;
-
-    const portalContext = await loadBranchPortalContext(
-      slug,
-      user?.role === 'customer' ? user.branchId : null,
-    );
+    const portalContext = await loadBranchPortalContext(slug, null);
     if (portalContext) {
-      branchId = portalContext.branchId;
       branchName = portalContext.branchName;
-      branchHiddenPages = portalContext.hiddenPages;
     }
 
-    const branchPortalConfig: BranchPortalConfig = {
-      branchId,
-      hiddenPages: branchHiddenPages,
-    };
-
-    if (user?.role === 'customer') {
-      if (!user.customerId) {
-        return { success: false, error: 'Customer profile is not linked to this account' };
-      }
-      const customerName = user.name?.trim() || parsed.customerName;
-      const recordUnderBranch = Boolean(branchName && shouldRecordCustomerOrderUnderBranch(branchHiddenPages));
-
-      const subCustomer = await validateSubCustomerForOrder(user.customerId, parsed.subCustomerId);
-      if ('error' in subCustomer) {
-        return { success: false, error: subCustomer.error };
-      }
-
-      salePayload = {
-        ...salePayload,
-        customerName: recordUnderBranch ? branchName : customerName,
-        orderCustomerId: user.customerId,
-        orderCustomerName: customerName,
-        subCustomerId: subCustomer.id,
-        subCustomerName: subCustomer.name,
-        warehouseId: undefined,
-      };
-      const cpRes = await query(
-        `SELECT id FROM ic_counterparties WHERE legacy_customer_id = $1 LIMIT 1`,
-        [user.customerId],
-      );
-      if (cpRes.rows.length > 0) {
-        salePayload = { ...salePayload, counterpartyId: String(cpRes.rows[0].id) };
-      }
-    } else if (user && slug && (user.role === 'branch_manager' || user.role === 'staff') && branchName) {
+    if (user && slug && (user.role === 'branch_manager' || user.role === 'staff') && branchName) {
       salePayload = {
         ...salePayload,
         customerName: branchName,
@@ -1059,13 +998,12 @@ export async function dbAddICSaleAction(
       salePayload = { ...salePayload, bank: undefined };
     }
 
-    if (user?.role !== 'customer' && parsed.counterpartyId) {
+    if (parsed.counterpartyId) {
       const cp = await loadCounterpartyLink({ query }, String(parsed.counterpartyId));
       if (!cp) return { success: false, error: 'Counterparty not found' };
       salePayload = {
         ...salePayload,
         counterpartyId: cp.counterpartyId,
-        orderCustomerId: cp.legacyCustomerId ?? salePayload.orderCustomerId ?? undefined,
         orderCustomerName: salePayload.orderCustomerName || cp.name,
       };
     }
@@ -1077,12 +1015,10 @@ export async function dbAddICSaleAction(
           enteredByUserId: user.id || 'system_id',
         }
       : await resolveEnteredByForBranch(branchSlug);
-    const isCustomerOrder = user?.role === 'customer';
     const isMetalSale = (salePayload.settlementMode ?? parsed.settlementMode) === 'metal';
     const metalLotSale = isMetalSale
       ? normalizeMetalLotSale({
           metalPurchaseId: String(salePayload.metalPurchaseId || parsed.metalPurchaseId || ''),
-          paymentMethod: salePayload.metalPaymentMethod === 'INR' ? 'INR' : 'AED',
           input: {
             metalWeightG: Number(salePayload.metalWeightG ?? parsed.metalWeightG),
             metalRateInrPerG: Number(salePayload.metalRateInrPerG ?? parsed.metalRateInrPerG),
@@ -1097,14 +1033,7 @@ export async function dbAddICSaleAction(
     let fulfillmentHandler = salePayload.fulfillmentHandler === 'branch' ? 'branch' : 'hq_admin';
     const statusUpdatedBy = instantComplete ? enteredBy : null;
 
-    if (isCustomerOrder && !instantComplete) {
-      initialOrderStatus = customerOrderInitialStatus(branchPortalConfig);
-      fulfillmentHandler = 'hq_admin';
-    } else if (isCustomerOrder && instantComplete) {
-      fulfillmentHandler = 'hq_admin';
-    }
-
-    if (user?.role !== 'customer' && !salePayload.warehouseId?.trim()) {
+    if (!salePayload.warehouseId?.trim()) {
       return { success: false, error: 'Warehouse is required.' };
     }
 
@@ -1128,20 +1057,17 @@ export async function dbAddICSaleAction(
     const row = await withTransaction(async (client) => {
       const res = await client.query(
         `INSERT INTO ic_sales (
-          customer_name, order_customer_name, order_customer_id, counterparty_id, sub_customer_id, sub_customer_name,
+          customer_name, order_customer_name, counterparty_id,
           warehouse_id, transaction_type, units, unit_rate, aed_amount,
           entered_by, entered_by_name, entered_by_user_id, address, location, district, image_url, service_charge, order_status, priority, bank, fulfillment_handler,
           collected_units, status_updated_at, status_updated_by,
           settlement_mode, metal_weight_g, metal_rate_inr_per_g, metal_rate_aed_per_g, inr_total,
           metal_purchase_id, metal_payment_method
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33) RETURNING *`,
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30) RETURNING *`,
         [
           salePayload.customerName,
           salePayload.orderCustomerName || null,
-          salePayload.orderCustomerId || null,
           salePayload.counterpartyId || parsed.counterpartyId || null,
-          salePayload.subCustomerId || null,
-          salePayload.subCustomerName || null,
           salePayload.warehouseId || null,
           normalized.settlementMode === 'metal' ? null : salePayload.transactionType || null,
           normalized.units,
@@ -1168,7 +1094,7 @@ export async function dbAddICSaleAction(
           normalized.metalRateAedPerG,
           normalized.inrTotal,
           metalLotSale?.metalPurchaseId ?? null,
-          metalLotSale?.metalPaymentMethod ?? null,
+          'AED',
         ],
       );
 
@@ -1201,8 +1127,6 @@ export async function dbAddICSaleAction(
           salePayload.warehouseId,
           String(res.rows[0].id),
           sellG,
-          metalLotSale.metalPaymentMethod,
-          metalLotSale.units,
         );
       } else if (instantComplete && salePayload.warehouseId && normalized.units > 0) {
         await logWarehouseStockTransaction(
@@ -1259,7 +1183,6 @@ export async function dbUpdateICPurchaseAction(
       const party = await loadCounterpartyLink({ query }, cpId);
       if (!party) return { success: false, error: 'Counterparty not found' };
       parsedUpdates.counterpartyId = party.counterpartyId;
-      parsedUpdates.supplierId = party.legacySupplierId ?? undefined;
     }
 
     const mergedForm = {
@@ -1405,10 +1328,6 @@ export async function dbUpdateICSaleAction(
           metalPurchaseId: String(
             parsedUpdates.metalPurchaseId ?? existingRow.metal_purchase_id ?? '',
           ),
-          paymentMethod:
-            (parsedUpdates.metalPaymentMethod ?? existingRow.metal_payment_method) === 'INR'
-              ? 'INR'
-              : 'AED',
           input: {
             metalWeightG: Number(mergedForm.metalWeightG),
             metalRateInrPerG: Number(mergedForm.metalRateInrPerG),
@@ -1473,8 +1392,6 @@ export async function dbUpdateICSaleAction(
             warehouseId,
             parsedId,
             metalLotSale.metalWeightG,
-            metalLotSale.metalPaymentMethod,
-            metalLotSale.units,
           );
         }
       }
@@ -1639,7 +1556,7 @@ async function assertBranchManagerHandlesSale(
     return { error: 'This action is only for branch-managed orders' };
   }
 
-  const custRes = await query(`SELECT id FROM customers WHERE branch_id = $1`, [branchId]);
+  const custRes = await query(`SELECT id FROM ic_counterparties WHERE branch_id = $1`, [branchId]);
   const branchCustomerIds = new Set(custRes.rows.map(r => String((r as { id: string }).id)));
 
   if (!saleBelongsToBranchPortal(sale, branchName, branchCustomerIds)) {
@@ -1700,7 +1617,7 @@ async function assertBranchManagerCanReviewCustomerOrder(
     return { error: 'Order is not awaiting branch review' };
   }
 
-  const custRes = await query(`SELECT id FROM customers WHERE branch_id = $1`, [branchId]);
+  const custRes = await query(`SELECT id FROM ic_counterparties WHERE branch_id = $1`, [branchId]);
   const branchCustomerIds = new Set(custRes.rows.map(r => String((r as { id: string }).id)));
 
   if (!saleBelongsToBranchPortal(sale, branchName, branchCustomerIds)) {
@@ -1954,13 +1871,7 @@ async function assertBranchOwnsSale(
   }
 
   if (user.role === 'customer') {
-    if (!user.customerId) {
-      return { error: 'Customer profile is not linked to this account' };
-    }
-    if (!customerOwnsSale(sale, user.customerId, user.name, branchName)) {
-      return { error: 'You can only modify your own orders' };
-    }
-    return { sale, updatedBy: user.email || user.name || 'customer' };
+    return { error: 'Customer portal is no longer available' };
   }
 
   if (isBranchHandledSale(sale) && user.role === 'branch_manager') {
@@ -1968,7 +1879,7 @@ async function assertBranchOwnsSale(
       ? (await query(`SELECT id FROM branches WHERE slug = $1 LIMIT 1`, [slug])).rows[0]?.id
       : user.branchId;
     if (branchIdForCust) {
-      const custRes = await query(`SELECT id FROM customers WHERE branch_id = $1`, [branchIdForCust]);
+      const custRes = await query(`SELECT id FROM ic_counterparties WHERE branch_id = $1`, [branchIdForCust]);
       const branchCustomerIds = new Set(custRes.rows.map(r => String((r as { id: string }).id)));
       if (saleBelongsToBranchPortal(sale, branchName, branchCustomerIds)) {
         return { sale, updatedBy: user.email || user.name || 'branch' };
@@ -2250,12 +2161,9 @@ export async function branchDeleteICSaleAction(
       return { success: false, error: 'This order can no longer be deleted' };
     }
 
-    const allowedStatuses =
-      user?.role === 'customer'
-        ? ['pending_branch_review', 'branch_rejected', 'pending']
-        : isBranchHandledSale(auth.sale)
-          ? ['pending']
-          : ['pending', 'admin_rejected'];
+    const allowedStatuses = isBranchHandledSale(auth.sale)
+      ? ['pending']
+      : ['pending', 'admin_rejected'];
 
     try {
       const res = await query(
@@ -2400,7 +2308,7 @@ async function assertBranchManagerForCustomerCancellation(
     return { error: 'Order is not awaiting cancellation review' };
   }
 
-  const custRes = await query(`SELECT id FROM customers WHERE branch_id = $1`, [branchId]);
+  const custRes = await query(`SELECT id FROM ic_counterparties WHERE branch_id = $1`, [branchId]);
   const branchCustomerIds = new Set(custRes.rows.map(r => String((r as { id: string }).id)));
   if (!saleBelongsToBranchPortal(sale, branchName, branchCustomerIds)) {
     return { error: 'You can only resolve cancellations for your branch customers' };
@@ -2997,10 +2905,10 @@ export async function dbGetCustomerCurrencyAction(
       `SELECT COALESCE(
          (
            SELECT g.currency
-           FROM ic_rate_group_customers c
-           JOIN customers cust ON c.customer_id = cust.id
+           FROM ic_rate_group_counterparties c
+           JOIN ic_counterparties cust ON c.counterparty_id = cust.id
            JOIN ic_rate_groups g ON c.group_id = g.id
-           WHERE ($1::text IS NOT NULL AND cust.id = $1)
+           WHERE ($1::text IS NOT NULL AND cust.id::text = $1)
               OR ($1::text IS NULL AND $2::text IS NOT NULL AND LOWER(cust.name) = LOWER($2))
            LIMIT 1
          ),
@@ -3039,10 +2947,10 @@ export async function dbGetCustomerPhoneAction(
     }
     const res = await query(
       `SELECT phone
-         FROM customers
-        WHERE ($1::text IS NOT NULL AND id = $1)
+         FROM ic_counterparties
+        WHERE ($1::text IS NOT NULL AND id::text = $1)
            OR ($1::text IS NULL AND $2::text IS NOT NULL AND LOWER(name) = LOWER($2))
-        ORDER BY (id = $1) DESC
+        ORDER BY (id::text = $1) DESC
         LIMIT 1`,
       [customerId, customerName]
     );

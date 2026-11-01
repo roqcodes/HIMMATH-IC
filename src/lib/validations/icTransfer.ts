@@ -248,9 +248,6 @@ export const addSaleSchema = saleFieldsSchema.superRefine((data, ctx) => {
     if (!data.metalPurchaseId) {
       ctx.addIssue({ code: 'custom', message: 'Select the metal purchase to sell', path: ['metalPurchaseId'] });
     }
-    if (data.metalPaymentMethod !== 'INR' && data.metalPaymentMethod !== 'AED') {
-      ctx.addIssue({ code: 'custom', message: 'Choose INR or AED payment', path: ['metalPaymentMethod'] });
-    }
     if (data.metalWeightG == null || data.metalWeightG <= 0) {
       ctx.addIssue({ code: 'custom', message: 'Weight required for metal sale', path: ['metalWeightG'] });
     }
