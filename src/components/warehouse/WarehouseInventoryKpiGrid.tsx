@@ -79,7 +79,10 @@ export default function WarehouseInventoryKpiGrid({ metrics, books, rangeLabel }
             tone="emerald"
             count={metrics.cashSales}
           />
-          <KpiCell label="IC Stock" value={<FmtLedgerInr amount={metrics.currentStock * INR_PER_UNIT} />} />
+          <KpiCell
+            label="IC Stock"
+            value={<FmtLedgerInr amount={metrics.currentStock * INR_PER_UNIT} />}
+          />
 
           <KpiCell 
             label="Metal Purchases" 

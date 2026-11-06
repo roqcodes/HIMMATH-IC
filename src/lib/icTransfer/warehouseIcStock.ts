@@ -3,7 +3,7 @@ import { remainingIcStockWac } from '@/lib/icTransfer/dealProfit';
 import { mapICPurchaseRow, mapICSaleRow } from '@/lib/icTransferMappers';
 import type { ICPurchase, ICSale } from '@/types';
 
-/** On-hand IC units from cash purchases, metal INR sales, minus IC sales (not warehouse.current_stock). */
+/** On-hand IC units: cash IC purchases + metal INR sales − cash IC sales. */
 export function computeWarehouseIcUnitsOnHand(
   purchases: ICPurchase[],
   sales: ICSale[],

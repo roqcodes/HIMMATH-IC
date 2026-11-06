@@ -70,7 +70,7 @@ describe('dealProfit', () => {
     assert.equal(slice.metalSaleCount, 1);
   });
 
-  it('does not put metal INR sale units into IC WAC', () => {
+  it('puts metal INR sale units into IC stock', () => {
     const purchases: ICPurchase[] = [
       {
         id: 'p-metal-inr',
@@ -109,7 +109,7 @@ describe('dealProfit', () => {
     assert.equal(slice.cashCogsAed, 0);
     assert.equal(slice.metalProfitInr, 1_000_000);
     const { units } = remainingIcStockWac(purchases, sales, 'w1');
-    assert.equal(units, 0);
+    assert.equal(units, 110);
   });
 
   it('keeps DEL cash IC 360k/370k separate from metal 10L INR', () => {
@@ -175,7 +175,7 @@ describe('dealProfit', () => {
     assert.equal(slice.cashRevenueAed, 370_000);
     assert.equal(slice.metalProfitInr, 1_000_000);
     const { units } = remainingIcStockWac(purchases, sales, 'del');
-    assert.equal(units, 0);
+    assert.equal(units, 149.86);
   });
 
   it('books INR margin on cash-metal sale matched to INR lot', () => {
@@ -314,7 +314,7 @@ describe('dealProfit', () => {
     ];
 
     const { units } = remainingIcStockWac(purchases, sales, 'ksd');
-    assert.equal(units, 0);
+    assert.equal(units, 70);
   });
 
   it('nets lab test out of metal INR P&L', () => {

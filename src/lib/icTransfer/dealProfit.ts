@@ -1,3 +1,4 @@
+import { isMetalAedPayment } from '@/lib/domain/books';
 import { isDateInRange, type DateFilterRange } from '@/lib/dateFilterRange';
 import { isVoidIcSaleOrderStatus } from '@/lib/icFunds/icTransferReportFilters';
 import { computeMetalLotProfit } from '@/lib/icTransfer/metalInventory';
@@ -45,6 +46,79 @@ function round4(n: number): number {
 
 function isMetal(mode: string | undefined | null): boolean {
   return mode === 'metal';
+}
+
+/** Metal sold for INR becomes IC units (₹1 lakh = 1 unit). Agent-AED metal stays off the IC pool. */
+function metalInrSaleIcUnits(sale: ICSale): number {
+  if (!isMetal(sale.settlementMode) || isMetalAedPayment(sale.metalPaymentMethod)) return 0;
+  return Number(sale.units) || 0;
+}
+
+function icStockPurchaseEvents(
+  purchases: ICPurchase[],
+  throughIso?: (iso: string | undefined) => boolean,
+): WarehouseInventoryEvent[] {
+  const events: WarehouseInventoryEvent[] = [];
+  for (const p of purchases) {
+    if (isMetal(p.settlementMode)) continue;
+    if (throughIso && !throughIso(p.createdAt)) continue;
+    const units = Number(p.units) || 0;
+    if (units <= 0) continue;
+    events.push({
+      kind: 'purchase',
+      at: purchaseMs(p),
+      sortKey: p.id,
+      units,
+      cost: Number(p.aedTotal) || units * (Number(p.unitRate) || 0),
+    });
+  }
+  return events;
+}
+
+function icStockInflowFromMetalInrSales(
+  sales: ICSale[],
+  throughIso?: (iso: string | undefined) => boolean,
+): WarehouseInventoryEvent[] {
+  const events: WarehouseInventoryEvent[] = [];
+  for (const s of sales) {
+    const units = metalInrSaleIcUnits(s);
+    if (units <= 0) continue;
+    if (throughIso && !throughIso(s.statusUpdatedAt || s.createdAt)) continue;
+    const aed = Number(s.aedAmount) || 0;
+    events.push({
+      kind: 'purchase',
+      at: saleMs(s),
+      sortKey: `metal-inr-${s.id}`,
+      units,
+      cost: aed > 0 ? aed : units * (Number(s.unitRate) || 0),
+    });
+  }
+  return events;
+}
+
+function icStockSaleEvents(
+  sales: ICSale[],
+  throughIso?: (iso: string | undefined) => boolean,
+): WarehouseInventoryEvent[] {
+  const events: WarehouseInventoryEvent[] = [];
+  for (const s of sales) {
+    if (isMetal(s.settlementMode)) continue;
+    if (throughIso && !throughIso(s.createdAt)) continue;
+    const units = Number(s.units) || 0;
+    if (units <= 0) continue;
+    events.push({
+      kind: 'sale',
+      at: saleMs(s),
+      sortKey: s.id,
+      saleId: s.id,
+      units,
+      collectedUnits: s.collectedUnits,
+      unitRate: Number(s.unitRate) || 0,
+      aedAmount: Number(s.aedAmount) || 0,
+      serviceCharge: Number(s.serviceCharge) || 0,
+    });
+  }
+  return events;
 }
 
 /** Pending/null still count — fulfillment queues are retired. Only rejected/cancelled drop out. */
@@ -137,41 +211,16 @@ function computeOneWarehouse(
   const whPurchases = purchases.filter(p => p.warehouseId === warehouseId);
   const whSales = sales.filter(s => s.warehouseId === warehouseId && isDealSaleActive(s));
 
-  const events: WarehouseInventoryEvent[] = [];
-  for (const p of whPurchases) {
-    if (isMetal(p.settlementMode)) continue;
-    if (!throughEnd(p.createdAt, range)) continue;
-    const units = Number(p.units) || 0;
-    if (units <= 0) continue;
-    events.push({
-      kind: 'purchase',
-      at: purchaseMs(p),
-      sortKey: p.id,
-      units,
-      cost: Number(p.aedTotal) || units * (Number(p.unitRate) || 0),
-    });
-  }
+  const through = (iso: string | undefined) => throughEnd(iso, range);
+  const events: WarehouseInventoryEvent[] = [
+    ...icStockPurchaseEvents(whPurchases, through),
+    ...icStockInflowFromMetalInrSales(whSales, through),
+    ...icStockSaleEvents(whSales, through),
+  ];
 
   const cashSalesInPeriod = whSales.filter(
     s => !isMetal(s.settlementMode) && inRange(s.createdAt, range),
   );
-  for (const s of whSales) {
-    if (isMetal(s.settlementMode)) continue;
-    if (!throughEnd(s.createdAt, range)) continue;
-    const units = Number(s.units) || 0;
-    if (units <= 0) continue;
-    events.push({
-      kind: 'sale',
-      at: saleMs(s),
-      sortKey: s.id,
-      saleId: s.id,
-      units,
-      collectedUnits: s.collectedUnits,
-      unitRate: Number(s.unitRate) || 0,
-      aedAmount: Number(s.aedAmount) || 0,
-      serviceCharge: Number(s.serviceCharge) || 0,
-    });
-  }
 
   const { saleMargins } = simulateWarehouseInventory(events);
   let cashGrossProfitAed = 0;
@@ -226,7 +275,10 @@ function computeOneWarehouse(
   };
 }
 
-/** Remaining IC WAC after cash IC buys minus cash IC sales. Metal does not enter this pool. */
+/**
+ * Remaining IC WAC: cash IC purchases + metal INR sales (₹1 lakh = 1 unit),
+ * minus cash IC sales. Agent-AED metal never enters this pool.
+ */
 export function remainingIcStockWac(
   purchases: ICPurchase[],
   sales: ICSale[],
@@ -234,35 +286,11 @@ export function remainingIcStockWac(
 ): { units: number; rate: number } {
   const whPurchases = purchases.filter(p => p.warehouseId === warehouseId);
   const whSales = sales.filter(s => s.warehouseId === warehouseId && isDealSaleActive(s));
-  const events: WarehouseInventoryEvent[] = [];
-  for (const p of whPurchases) {
-    if (isMetal(p.settlementMode)) continue;
-    const units = Number(p.units) || 0;
-    if (units <= 0) continue;
-    events.push({
-      kind: 'purchase',
-      at: purchaseMs(p),
-      sortKey: p.id,
-      units,
-      cost: Number(p.aedTotal) || units * (Number(p.unitRate) || 0),
-    });
-  }
-  for (const s of whSales) {
-    if (isMetal(s.settlementMode)) continue;
-    const units = Number(s.units) || 0;
-    if (units <= 0) continue;
-    events.push({
-      kind: 'sale',
-      at: saleMs(s),
-      sortKey: s.id,
-      saleId: s.id,
-      units,
-      collectedUnits: s.collectedUnits,
-      unitRate: Number(s.unitRate) || 0,
-      aedAmount: Number(s.aedAmount) || 0,
-      serviceCharge: Number(s.serviceCharge) || 0,
-    });
-  }
+  const events: WarehouseInventoryEvent[] = [
+    ...icStockPurchaseEvents(whPurchases),
+    ...icStockInflowFromMetalInrSales(whSales),
+    ...icStockSaleEvents(whSales),
+  ];
   const { pool } = simulateWarehouseInventory(events);
   return { units: pool.units, rate: remainingStockWac(pool) };
 }
