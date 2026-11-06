@@ -1,5 +1,6 @@
 'use server';
 
+import { after } from 'next/server';
 import { cookies } from 'next/headers';
 import type { PoolClient } from 'pg';
 import { query, withTransaction } from '@/lib/db';
@@ -24,7 +25,6 @@ import {
   mapICSaleRow,
 } from '@/lib/icTransferMappers';
 import { resolveNormalizedPurchase, resolveNormalizedSale } from '@/lib/icTransfer/metalSettlement';
-import { syncWarehouseIcStockColumn } from '@/lib/icTransfer/warehouseIcStock';
 import {
   hasLab,
   labFieldsFromRecord,
@@ -35,7 +35,6 @@ import {
   formatMetalLotLabel,
   isFullRemainingSell,
   normalizeMetalLotSale,
-  remainingMetalGramsOnLot,
 } from '@/lib/icTransfer/metalInventory';
 import { sqlExcludeVoidIcSales } from '@/lib/icFunds/icTransferReportFilters';
 import { adjustWarehouseMetalStock, adjustWarehouseStock, logWarehouseStockTransaction } from '@/lib/warehouse/stockDb';
@@ -98,6 +97,15 @@ import {
 } from '@/lib/validations/icTransfer';
 import { entityCodeConflictMessage } from '@/lib/validations/entityCode';
 import { z } from 'zod';
+
+/** IC Funds ledger sync can be heavy; run after the HTTP response so saves feel instant. */
+function scheduleIcFundLedgerSync(task: () => Promise<void>): void {
+  after(() => {
+    void task().catch(err => {
+      logger.error({ err }, 'Deferred IC Funds ledger sync failed');
+    });
+  });
+}
 
 async function loadRateGroupsWithMembers(groupIds: string[]) {
   if (groupIds.length === 0) return [];
@@ -985,14 +993,10 @@ export async function dbAddICPurchaseAction(
         }
       }
 
-      if (parsed.warehouseId) {
-        await syncWarehouseIcStockColumn(client, parsed.warehouseId);
-      }
-
       return res.rows[0];
     });
 
-    await syncICPurchaseFundLedger(row.id);
+    scheduleIcFundLedgerSync(() => syncICPurchaseFundLedger(String(row.id)));
     return { success: true, data: mapICPurchaseRow(row) };
   } catch (err: unknown) {
     logger.error({ err, purchase }, 'Validation error in dbAddICPurchaseAction');
@@ -1198,6 +1202,7 @@ export async function dbAddICSaleAction(
           metalRateInrPerG: salePayload.metalRateInrPerG ?? parsed.metalRateInrPerG,
           metalRateAedPerG: salePayload.metalRateAedPerG ?? parsed.metalRateAedPerG,
           inrTotal: salePayload.inrTotal ?? parsed.inrTotal,
+          labTotalInr: Number(salePayload.labTotalInr ?? parsed.labTotalInr ?? 0),
           serviceCharge: salePayload.serviceCharge ?? parsed.serviceCharge,
         });
 
@@ -1266,21 +1271,25 @@ export async function dbAddICSaleAction(
 
       if (metalLotSale && salePayload.warehouseId) {
         const lotId = metalLotSale.metalPurchaseId;
+        const newSaleId = String(res.rows[0].id);
         const lotRes = await client.query(
-          `SELECT id, warehouse_id, metal_weight_g FROM ic_purchases WHERE id = $1 LIMIT 1`,
-          [lotId],
+          `SELECT p.warehouse_id, p.metal_weight_g,
+             COALESCE(p.metal_weight_g, 0) - COALESCE((
+               SELECT SUM(s.metal_weight_g)
+               FROM ic_sales s
+               WHERE s.metal_purchase_id = $1
+                 AND s.id <> $2::uuid
+                 ${sqlExcludeVoidIcSales('s')}
+             ), 0) AS remaining_g
+           FROM ic_purchases p WHERE p.id = $1 LIMIT 1`,
+          [lotId, newSaleId],
         );
         if (lotRes.rows.length === 0) throw new Error('Metal purchase not found.');
         const lot = lotRes.rows[0];
         if (String(lot.warehouse_id) !== String(salePayload.warehouseId)) {
           throw new Error('Metal purchase is not in the selected warehouse.');
         }
-        const soldRes = await client.query(
-          `SELECT metal_weight_g, order_status FROM ic_sales
-           WHERE metal_purchase_id = $1 AND id <> $2::uuid`,
-          [lotId, res.rows[0].id],
-        );
-        const remaining = remainingMetalGramsOnLot(Number(lot.metal_weight_g) || 0, soldRes.rows);
+        const remaining = Number(lot.remaining_g) || 0;
         const sellG = metalLotSale.metalWeightG;
         if (sellG - remaining > 0.0001) {
           throw new Error('Not enough metal remaining on this purchase.');
@@ -1288,13 +1297,7 @@ export async function dbAddICSaleAction(
         if (!isFullRemainingSell(sellG, remaining)) {
           throw new Error('This draft sells the full remaining lot only.');
         }
-        await applyMetalSaleStock(
-          client,
-          salePayload.warehouseId,
-          String(res.rows[0].id),
-          sellG,
-          metalLotSale.units,
-        );
+        await applyMetalSaleStock(client, salePayload.warehouseId, newSaleId, sellG, metalLotSale.units);
       } else if (instantComplete && salePayload.warehouseId && normalized.units > 0) {
         await logWarehouseStockTransaction(
           client,
@@ -1307,14 +1310,10 @@ export async function dbAddICSaleAction(
         await adjustWarehouseStock(client, salePayload.warehouseId, -normalized.units);
       }
 
-      if (salePayload.warehouseId) {
-        await syncWarehouseIcStockColumn(client, salePayload.warehouseId);
-      }
-
       return res.rows[0];
     });
 
-    await syncICSaleFundLedger(String(row.id));
+    scheduleIcFundLedgerSync(() => syncICSaleFundLedger(String(row.id)));
     return { success: true, data: mapICSaleRow(row) };
   } catch (err: unknown) {
     logger.error({ err, sale }, 'Error in dbAddICSaleAction');
@@ -1450,17 +1449,10 @@ export async function dbUpdateICPurchaseAction(
         }
       }
 
-      const syncIds = new Set<string>();
-      if (oldWarehouseId) syncIds.add(oldWarehouseId);
-      if (newWarehouseId) syncIds.add(newWarehouseId);
-      for (const whId of syncIds) {
-        await syncWarehouseIcStockColumn(client, whId);
-      }
-
       return updateRes.rows[0];
     });
 
-    await syncICPurchaseFundLedger(parsedId);
+    scheduleIcFundLedgerSync(() => syncICPurchaseFundLedger(parsedId));
     return { success: true, data: mapICPurchaseRow(res) };
   } catch (err: unknown) {
     logger.error({ err, id, updates }, 'Error in dbUpdateICPurchaseAction');
@@ -1506,6 +1498,9 @@ export async function dbUpdateICSaleAction(
       inrTotal:
         parsedUpdates.inrTotal ??
         (existingRow.inr_total != null ? Number(existingRow.inr_total) : undefined),
+      labTotalInr:
+        parsedUpdates.labTotalInr ??
+        (existingRow.lab_total_inr != null ? Number(existingRow.lab_total_inr) : 0),
       serviceCharge:
         parsedUpdates.serviceCharge ??
         (existingRow.service_charge != null ? Number(existingRow.service_charge) : 0),
@@ -1603,15 +1598,10 @@ export async function dbUpdateICSaleAction(
         }
       }
 
-      const whForSync = String(parsedUpdates.warehouseId ?? existingRow.warehouse_id ?? '');
-      if (whForSync) {
-        await syncWarehouseIcStockColumn(client, whForSync);
-      }
-
       return updateRes.rows[0];
     });
 
-    await syncICSaleFundLedger(parsedId);
+    scheduleIcFundLedgerSync(() => syncICSaleFundLedger(parsedId));
     return { success: true, data: mapICSaleRow(row) };
   } catch (err: unknown) {
     logger.error({ err, id, updates }, 'Error in dbUpdateICSaleAction');
@@ -1650,13 +1640,9 @@ export async function dbDeleteICPurchaseAction(id: string): Promise<DbActionResu
         await adjustWarehouseStock(client, warehouse_id, -Number(units));
       }
 
-      if (warehouse_id) {
-        await syncWarehouseIcStockColumn(client, String(warehouse_id));
-      }
-
       await client.query('DELETE FROM ic_purchases WHERE id = $1', [parsedId]);
     });
-    await removeICPurchaseFundLedger(parsedId);
+    scheduleIcFundLedgerSync(() => removeICPurchaseFundLedger(parsedId));
     return { success: true, data: null };
   } catch (err: unknown) {
     logger.error({ err, id }, 'Error in dbDeleteICPurchaseAction');
@@ -1700,11 +1686,8 @@ export async function dbDeleteICSaleAction(id: string): Promise<DbActionResult<n
       }
       const warehouseId = saleRow.warehouse_id ? String(saleRow.warehouse_id) : '';
       await client.query('DELETE FROM ic_sales WHERE id = $1', [parsedId]);
-      if (warehouseId) {
-        await syncWarehouseIcStockColumn(client, warehouseId);
-      }
     });
-    await removeICSaleFundLedger(parsedId);
+    scheduleIcFundLedgerSync(() => removeICSaleFundLedger(parsedId));
     return { success: true, data: null };
   } catch (err: unknown) {
     logger.error({ err, id }, 'Error in dbDeleteICSaleAction');
@@ -2148,7 +2131,7 @@ export async function adminAcceptICSaleAction(
       if (res.rowCount === 0) {
         return { success: false, error: 'Order not found or not in pending status' };
       }
-      await syncICSaleFundLedger(parsed.id);
+      scheduleIcFundLedgerSync(() => syncICSaleFundLedger(parsed.id));
       const sale = await fetchICSaleById(parsed.id);
       return sale ? { success: true, data: sale } : { success: false, error: 'Order not found' };
     } catch (error: unknown) {
@@ -2193,7 +2176,7 @@ export async function adminRejectICSaleAction(
       if (res.rowCount === 0) {
         return { success: false, error: 'Order cannot be rejected in its current status' };
       }
-      await removeICSaleFundLedger(parsed.id);
+      scheduleIcFundLedgerSync(() => removeICSaleFundLedger(parsed.id));
       const sale = await fetchICSaleById(parsed.id);
       return sale ? { success: true, data: sale } : { success: false, error: 'Order not found' };
     } catch (error: unknown) {
@@ -2237,7 +2220,7 @@ export async function adminReassignICSaleWarehouseAction(
       if (res.rowCount === 0) {
         return { success: false, error: 'Order cannot be reassigned in its current status' };
       }
-      await syncICSaleFundLedger(parsed.id);
+      scheduleIcFundLedgerSync(() => syncICSaleFundLedger(parsed.id));
       const sale = await fetchICSaleById(parsed.id);
       return sale ? { success: true, data: sale } : { success: false, error: 'Order not found' };
     } catch (error: unknown) {
@@ -2392,7 +2375,7 @@ export async function branchDeleteICSaleAction(
       if (res.rowCount === 0) {
         return { success: false, error: 'Order not found or no longer pending' };
       }
-      await removeICSaleFundLedger(parsedId);
+      scheduleIcFundLedgerSync(() => removeICSaleFundLedger(parsedId));
       return { success: true, data: null };
     } catch (error: unknown) {
       logger.error({ error, id }, 'Error in branchDeleteICSaleAction execution');
@@ -2698,7 +2681,7 @@ export async function adminVerifyDeliveryAction(id: string, branchSlug?: string)
     if (res.rowCount === 0) {
       return { success: false, error: 'Order not found or not awaiting delivery verification' };
     }
-    await syncICSaleFundLedger(parsedId);
+    scheduleIcFundLedgerSync(() => syncICSaleFundLedger(parsedId));
     const updated = await fetchICSaleById(parsedId);
     return updated ? { success: true, data: updated } : { success: false, error: 'Order not found' };
   } catch (err: unknown) {
@@ -2731,7 +2714,7 @@ export async function adminBulkVerifyDeliveryAction(
     const verifiedCount = res.rowCount ?? 0;
     const failedCount = uniqueIds.length - verifiedCount;
     for (const row of res.rows) {
-      await syncICSaleFundLedger(String(row.id));
+      scheduleIcFundLedgerSync(() => syncICSaleFundLedger(String(row.id)));
     }
     return { success: true, data: { verifiedCount, failedCount } };
   } catch (err: unknown) {
@@ -2771,7 +2754,7 @@ export async function adminCompleteByHandOrderAction(id: string, branchSlug?: st
     if (res.rowCount === 0) {
       return { success: false, error: 'Order could not be completed' };
     }
-    await syncICSaleFundLedger(parsedId);
+    scheduleIcFundLedgerSync(() => syncICSaleFundLedger(parsedId));
     const updated = await fetchICSaleById(parsedId);
     return updated ? { success: true, data: updated } : { success: false, error: 'Order not found' };
   } catch (err: unknown) {
@@ -2811,7 +2794,7 @@ export async function adminReopenByHandOrderAction(id: string, branchSlug?: stri
     if (res.rowCount === 0) {
       return { success: false, error: 'Order could not be reopened' };
     }
-    await removeICSaleFundLedger(parsedId);
+    scheduleIcFundLedgerSync(() => removeICSaleFundLedger(parsedId));
     const updated = await fetchICSaleById(parsedId);
     return updated ? { success: true, data: updated } : { success: false, error: 'Order not found' };
   } catch (err: unknown) {
@@ -2907,7 +2890,7 @@ export async function branchAcceptICSaleAction(
     if (res.rowCount === 0) {
       return { success: false, error: 'Order not found or not in pending status' };
     }
-    await syncICSaleFundLedger(parsed.id);
+    scheduleIcFundLedgerSync(() => syncICSaleFundLedger(parsed.id));
     const updated = await fetchICSaleById(parsed.id);
     return updated ? { success: true, data: updated } : { success: false, error: 'Order not found' };
   } catch (err: unknown) {
@@ -2947,7 +2930,7 @@ export async function branchReassignICSaleWarehouseAction(
     if (res.rowCount === 0) {
       return { success: false, error: 'Order cannot be reassigned in its current status' };
     }
-    await syncICSaleFundLedger(parsed.id);
+    scheduleIcFundLedgerSync(() => syncICSaleFundLedger(parsed.id));
     const updated = await fetchICSaleById(parsed.id);
     return updated ? { success: true, data: updated } : { success: false, error: 'Order not found' };
   } catch (err: unknown) {
@@ -2987,7 +2970,7 @@ export async function branchCompleteHandledOrderAction(
     if (res.rowCount === 0) {
       return { success: false, error: 'Order could not be completed' };
     }
-    await syncICSaleFundLedger(parsedId);
+    scheduleIcFundLedgerSync(() => syncICSaleFundLedger(parsedId));
     const updated = await fetchICSaleById(parsedId);
     return updated ? { success: true, data: updated } : { success: false, error: 'Order not found' };
   } catch (err: unknown) {
@@ -3025,7 +3008,7 @@ export async function branchReopenHandledOrderAction(
     if (res.rowCount === 0) {
       return { success: false, error: 'Order could not be reopened' };
     }
-    await removeICSaleFundLedger(parsedId);
+    scheduleIcFundLedgerSync(() => removeICSaleFundLedger(parsedId));
     const updated = await fetchICSaleById(parsedId);
     return updated ? { success: true, data: updated } : { success: false, error: 'Order not found' };
   } catch (err: unknown) {
@@ -3099,7 +3082,7 @@ export async function autoCompleteByHandOrdersCronAction(): Promise<DbActionResu
        RETURNING id`,
     );
     for (const row of res.rows) {
-      await syncICSaleFundLedger(String(row.id));
+      scheduleIcFundLedgerSync(() => syncICSaleFundLedger(String(row.id)));
     }
     return { success: true, data: { completedCount: res.rowCount ?? 0 } };
   } catch (error: unknown) {

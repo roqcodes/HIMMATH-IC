@@ -8,7 +8,9 @@ import {
 } from './dealBookKpis';
 import { computeDealProfit } from './dealProfit';
 import { computeWarehouseMetalGramsOnHand } from './warehouseMatrixMetrics';
-import { saleDealAed } from './dealTableDisplay';
+import { netMetalInr } from '@/lib/icTransfer/labTest';
+import { computeMetalAedFromInr } from '@/lib/icTransfer/metalSettlement';
+import { saleDealAed, saleTableDisplayAed } from './dealTableDisplay';
 import type { ICPurchase, ICSale } from '@/types';
 
 const range = { startDate: '2026-11-01', endDate: '2026-11-05' };
@@ -48,6 +50,34 @@ describe('warehouse KPI fixture Zak buy + Ronak sell', () => {
     assert.equal(dealPurchaseAed(zakBuy), 0);
     assert.equal(dealSaleAed(ronakSell), 0);
     assert.equal(saleDealAed(ronakSell), 0);
+  });
+
+  it('table shows implied AED from net INR × RATE ÷ 1000 for metal INR', () => {
+    const expected = computeMetalAedFromInr(
+      netMetalInr(Number(ronakSell.inrTotal) || 0, Number(ronakSell.labTotalInr) || 0),
+      Number(ronakSell.unitRate) || 0,
+    );
+    assert.ok(Math.abs(saleTableDisplayAed(ronakSell) - expected) < 0.01);
+  });
+
+  it('metal AED agent totals scale by net INR after lab', () => {
+    const purchase: ICPurchase = {
+      ...zakBuy,
+      metalPaymentMethod: 'AED',
+      inrTotal: 3_00_00_000,
+      labTotalInr: 12_000,
+      aedTotal: 1000,
+    };
+    const sale: ICSale = {
+      ...ronakSell,
+      metalPaymentMethod: 'AED',
+      inrTotal: 3_20_00_000,
+      labTotalInr: 24_000,
+      aedAmount: 2000,
+      serviceCharge: 0,
+    };
+    assert.equal(dealPurchaseAed(purchase), 999.6);
+    assert.equal(dealSaleAed(sale), 1998.5);
   });
 
   it('books Metal P&L 19.88L after lab', () => {

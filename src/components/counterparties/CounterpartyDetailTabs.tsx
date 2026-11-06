@@ -19,8 +19,8 @@ import {
   formatDealTableInr,
   purchaseDealAed,
   purchaseDealInr,
-  saleDealAed,
   saleDealInr,
+  saleTableDisplayAed,
 } from '@/lib/icTransfer/dealTableDisplay';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import { ASICTableRowsSkeleton } from '@/components/asic/ASICTableSkeleton';
@@ -248,7 +248,7 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
   const qty = metalSale
     ? `${(s.metalWeightG ?? 0).toLocaleString('en-US', { maximumFractionDigits: 4 })} g`
     : `${(s.units ?? 0).toLocaleString()} u`;
-  const amountAed = formatDealTableAed(saleDealAed(s));
+  const amountAed = formatDealTableAed(saleTableDisplayAed(s));
 
   return (
     <tr

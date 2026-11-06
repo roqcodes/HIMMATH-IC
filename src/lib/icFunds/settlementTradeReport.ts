@@ -1,4 +1,5 @@
 import { isMetalAedPayment } from '@/lib/domain/books';
+import { computeIcCashRateFromTotals } from '@/lib/icTransfer/rateCalculations';
 import type { ICSettlementMode } from '@/lib/icTransfer/metalSettlement';
 
 export type ICSettlementTradeLine = {
@@ -79,14 +80,21 @@ export function tradeLinePaymentFromDb(value: unknown): 'INR' | 'AED' | undefine
   return isMetalAedPayment(String(value)) ? 'AED' : 'INR';
 }
 
-/** Imputed AED/unit when legacy rows omit unit_rate (common on metal settlement). */
-export function resolveTradeUnitRateAed(units: number, unitRate: number, aedTotal: number): number {
+/**
+ * Stored unit_rate for cash IC is **AED per unit** (AED = units × rate). When missing, infer AED ÷ units.
+ */
+export function resolveTradeUnitRateAed(
+  units: number,
+  unitRate: number,
+  aedTotal: number,
+  _inrNotional?: number | null,
+): number {
   const rate = Number(unitRate);
   if (Number.isFinite(rate) && rate > 0) return round4(rate);
   const u = Number(units);
   const aed = Number(aedTotal);
   if (Number.isFinite(u) && u > 0 && Number.isFinite(aed) && aed > 0) {
-    return round4(aed / u);
+    return round4(computeIcCashRateFromTotals(u, aed));
   }
   return 0;
 }

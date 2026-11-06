@@ -8,6 +8,26 @@ export const RATE_DECIMAL_PLACES = 14;
 /** 1 IC unit = 1 lakh INR = 100,000. */
 export const INR_PER_UNIT = 100_000;
 
+/**
+ * Cash IC sheet: **AED = units × RATE** (RATE ~36, same field they type on metal).
+ * Example: 50 units × 36.2 = 1,810 AED.
+ */
+export function computeIcCashAedTotal(units: number, unitRateAed: number): number {
+  const u = Number(units);
+  const r = Number(unitRateAed);
+  if (!Number.isFinite(u) || u <= 0 || !Number.isFinite(r) || r <= 0) return 0;
+  return Number((u * r).toFixed(4));
+}
+
+/** Implied cash RATE from units and AED (AED ÷ units). */
+export function computeIcCashRateFromTotals(units: number, aedTotal: number): number {
+  const u = Number(units);
+  if (!Number.isFinite(u) || u <= 0) return 0;
+  const aed = Number(aedTotal);
+  if (!Number.isFinite(aed) || aed <= 0) return 0;
+  return Number((aed / u).toFixed(4));
+}
+
 export function formatAmount(value: number, fractionDigits = 2): string {
   if (!Number.isFinite(value)) return '0';
   return value.toLocaleString(undefined, {
@@ -46,9 +66,9 @@ export function computeICSaleAmounts(
   saleRateAed: number,
   serviceCharge: number = 0,
 ) {
-  const aedBaseTotal = units * saleRateAed;
-  const aedNetTotal = Math.max(0, aedBaseTotal - serviceCharge);
   const inrTotal = units * INR_PER_UNIT;
+  const aedBaseTotal = computeIcCashAedTotal(units, saleRateAed);
+  const aedNetTotal = Math.max(0, aedBaseTotal - serviceCharge);
 
   return {
     saleRateAed,

@@ -1,8 +1,9 @@
 import { isDateInRange, type DateFilterRange } from '@/lib/dateFilterRange';
 import { computeDealProfit } from '@/lib/icTransfer/dealProfit';
-import { computeWarehouseIcUnitsOnHand } from '@/lib/icTransfer/warehouseIcStock';
+import { computeWarehouseIcStockWac, computeWarehouseIcUnitsOnHand } from '@/lib/icTransfer/warehouseIcStock';
 import { dealPurchaseAed, dealSaleAed, remainingCashMetalInrCost } from '@/lib/icTransfer/dealBookKpis';
 import { resolvePurchaseInrDisplay, resolveSaleInrDisplay } from '@/lib/icTransfer/metalSettlement';
+import { INR_PER_UNIT } from '@/lib/icTransfer/rateCalculations';
 import { fmtLedgerAed, fmtLedgerInr } from '@/lib/icFunds/format';
 import type { ICPurchase, ICRegion, ICSale, ICWarehouse } from '@/types';
 
@@ -17,16 +18,26 @@ export type WarehouseMatrixRow = {
   cashSales: number;
   metalSales: number;
   cashPurchaseAed: number;
+  /** Notional IC purchases in INR (units × ₹1 lakh) in range. */
+  cashPurchaseInr: number;
   metalPurchaseAed: number;
   metalPurchaseInr: number;
   cashSaleAed: number;
+  /** Notional IC sales in INR (units × ₹1 lakh) in range. */
+  cashSaleInr: number;
   metalSaleAed: number;
   metalSaleInr: number;
   cashGrossProfitAed: number;
+  cashGrossProfitInr: number;
   metalProfitAed: number;
   metalProfitInr: number;
   /** Unsold cash-metal lots at net INR cost (as at range end). */
   metalStockInr: number;
+  /**
+   * Weighted average AED **rate** on remaining IC units (cash IC + metal-INR inflows),
+   * not an AED balance. Same basis as metal prefill RATE (~36).
+   */
+  icStockAvgAedRate: number;
 };
 
 export type RegionSummaryRow = {
@@ -40,15 +51,19 @@ export type RegionSummaryRow = {
   cashSales: number;
   metalSales: number;
   cashPurchaseAed: number;
+  cashPurchaseInr: number;
   metalPurchaseAed: number;
   metalPurchaseInr: number;
   cashSaleAed: number;
+  cashSaleInr: number;
   metalSaleAed: number;
   metalSaleInr: number;
   cashGrossProfitAed: number;
+  cashGrossProfitInr: number;
   metalProfitAed: number;
   metalProfitInr: number;
   metalStockInr: number;
+  icStockAvgAedRate: number;
 };
 
 export type WarehouseInventoryTotals = {
@@ -59,15 +74,19 @@ export type WarehouseInventoryTotals = {
   cashSales: number;
   metalSales: number;
   cashPurchaseAed: number;
+  cashPurchaseInr: number;
   metalPurchaseAed: number;
   metalPurchaseInr: number;
   cashSaleAed: number;
+  cashSaleInr: number;
   metalSaleAed: number;
   metalSaleInr: number;
   cashGrossProfitAed: number;
+  cashGrossProfitInr: number;
   metalProfitAed: number;
   metalProfitInr: number;
   metalStockInr: number;
+  icStockAvgAedRate: number;
 };
 
 function sumPurchaseAed(purchases: ICPurchase[], metal: boolean): number {
@@ -80,6 +99,18 @@ function sumSaleAed(sales: ICSale[], metal: boolean): number {
   return sales
     .filter(s => isMetalMode(s.settlementMode) === metal)
     .reduce((sum, s) => sum + dealSaleAed(s), 0);
+}
+
+function sumCashNotionalInrPurchases(purchases: ICPurchase[]): number {
+  return purchases
+    .filter(p => !isMetalMode(p.settlementMode))
+    .reduce((sum, p) => sum + (Number(p.units) || 0) * INR_PER_UNIT, 0);
+}
+
+function sumCashNotionalInrSales(sales: ICSale[]): number {
+  return sales
+    .filter(s => !isMetalMode(s.settlementMode))
+    .reduce((sum, s) => sum + (Number(s.units) || 0) * INR_PER_UNIT, 0);
 }
 
 function sumMetalPurchaseInr(purchases: ICPurchase[]): number {
@@ -154,33 +185,54 @@ function computeRow(
     warehouseId: warehouse.id,
   });
 
+  const currentStock = computeWarehouseIcUnitsOnHand(warehousePurchases, warehouseSales, warehouse.id);
+
   return {
     warehouseId: warehouse.id,
     warehouseName: warehouse.name,
     regionName,
-    currentStock: computeWarehouseIcUnitsOnHand(warehousePurchases, warehouseSales, warehouse.id),
+    currentStock,
     currentMetalG: computeWarehouseMetalGramsOnHand(warehousePurchases, warehouseSales, warehouse.id),
     cashPurchases: countPurchases(inRangePurchases, false),
     metalPurchases: countPurchases(inRangePurchases, true),
     cashSales: countSales(inRangeSales, false),
     metalSales: countSales(inRangeSales, true),
     cashPurchaseAed: sumPurchaseAed(inRangePurchases, false),
+    cashPurchaseInr: sumCashNotionalInrPurchases(inRangePurchases),
     metalPurchaseAed: sumPurchaseAed(inRangePurchases, true),
     metalPurchaseInr: sumMetalPurchaseInr(inRangePurchases),
     cashSaleAed: sumSaleAed(inRangeSales, false),
+    cashSaleInr: sumCashNotionalInrSales(inRangeSales),
     metalSaleAed: sumSaleAed(inRangeSales, true),
     metalSaleInr: sumMetalSaleInr(inRangeSales),
     cashGrossProfitAed: profit.cashGrossProfitAed,
+    cashGrossProfitInr: profit.cashGrossProfitInr,
     metalProfitAed: profit.metalProfitAed,
     metalProfitInr: profit.metalProfitInr,
     metalStockInr: remainingCashMetalInrCost(warehousePurchases, warehouseSales, {
       through: range.endDate,
     }),
+    icStockAvgAedRate: computeWarehouseIcStockWac(warehousePurchases, warehouseSales, warehouse.id),
   };
 }
 
 function sumRows(rows: WarehouseMatrixRow[], pick: (r: WarehouseMatrixRow) => number): number {
   return rows.reduce((sum, r) => sum + pick(r), 0);
+}
+
+/** Blend per-warehouse average IC rate by remaining units (stock-weighted). */
+function weightedAverageIcStockRate(rows: { currentStock: number; icStockAvgAedRate: number }[]): number {
+  let weight = 0;
+  let numer = 0;
+  for (const row of rows) {
+    const u = Number(row.currentStock) || 0;
+    const r = Number(row.icStockAvgAedRate) || 0;
+    if (u <= 0 || r <= 0) continue;
+    numer += u * r;
+    weight += u;
+  }
+  if (weight <= 0) return 0;
+  return Number((numer / weight).toFixed(4));
 }
 
 /** On-hand IC units at warehouse (no order reservation). */
@@ -222,15 +274,19 @@ export function computeWarehouseMatrix(options: {
     cashSales: sumRows(rows, r => r.cashSales),
     metalSales: sumRows(rows, r => r.metalSales),
     cashPurchaseAed: sumRows(rows, r => r.cashPurchaseAed),
+    cashPurchaseInr: sumRows(rows, r => r.cashPurchaseInr),
     metalPurchaseAed: sumRows(rows, r => r.metalPurchaseAed),
     metalPurchaseInr: sumRows(rows, r => r.metalPurchaseInr),
     cashSaleAed: sumRows(rows, r => r.cashSaleAed),
+    cashSaleInr: sumRows(rows, r => r.cashSaleInr),
     metalSaleAed: sumRows(rows, r => r.metalSaleAed),
     metalSaleInr: sumRows(rows, r => r.metalSaleInr),
     cashGrossProfitAed: sumRows(rows, r => r.cashGrossProfitAed),
+    cashGrossProfitInr: sumRows(rows, r => r.cashGrossProfitInr),
     metalProfitAed: sumRows(rows, r => r.metalProfitAed),
     metalProfitInr: sumRows(rows, r => r.metalProfitInr),
     metalStockInr: sumRows(rows, r => r.metalStockInr),
+    icStockAvgAedRate: weightedAverageIcStockRate(rows),
   };
 
   const regionRows = regions
@@ -255,15 +311,19 @@ export function computeWarehouseMatrix(options: {
         cashSales: sumRows(regionRowsData, r => r.cashSales),
         metalSales: sumRows(regionRowsData, r => r.metalSales),
         cashPurchaseAed: sumRows(regionRowsData, r => r.cashPurchaseAed),
+        cashPurchaseInr: sumRows(regionRowsData, r => r.cashPurchaseInr),
         metalPurchaseAed: sumRows(regionRowsData, r => r.metalPurchaseAed),
         metalPurchaseInr: sumRows(regionRowsData, r => r.metalPurchaseInr),
         cashSaleAed: sumRows(regionRowsData, r => r.cashSaleAed),
+        cashSaleInr: sumRows(regionRowsData, r => r.cashSaleInr),
         metalSaleAed: sumRows(regionRowsData, r => r.metalSaleAed),
         metalSaleInr: sumRows(regionRowsData, r => r.metalSaleInr),
         cashGrossProfitAed: sumRows(regionRowsData, r => r.cashGrossProfitAed),
+        cashGrossProfitInr: sumRows(regionRowsData, r => r.cashGrossProfitInr),
         metalProfitAed: sumRows(regionRowsData, r => r.metalProfitAed),
         metalProfitInr: sumRows(regionRowsData, r => r.metalProfitInr),
         metalStockInr: sumRows(regionRowsData, r => r.metalStockInr),
+        icStockAvgAedRate: weightedAverageIcStockRate(regionRowsData),
       } satisfies RegionSummaryRow;
     })
     .filter((row): row is RegionSummaryRow => row !== null && row.warehouseCount > 0)
@@ -289,15 +349,19 @@ export function computeSingleWarehouseMetrics(
     cashSales: row.cashSales,
     metalSales: row.metalSales,
     cashPurchaseAed: row.cashPurchaseAed,
+    cashPurchaseInr: row.cashPurchaseInr,
     metalPurchaseAed: row.metalPurchaseAed,
     metalPurchaseInr: row.metalPurchaseInr,
     cashSaleAed: row.cashSaleAed,
+    cashSaleInr: row.cashSaleInr,
     metalSaleAed: row.metalSaleAed,
     metalSaleInr: row.metalSaleInr,
     cashGrossProfitAed: row.cashGrossProfitAed,
+    cashGrossProfitInr: row.cashGrossProfitInr,
     metalProfitAed: row.metalProfitAed,
     metalProfitInr: row.metalProfitInr,
     metalStockInr: row.metalStockInr,
+    icStockAvgAedRate: row.icStockAvgAedRate,
   };
 }
 

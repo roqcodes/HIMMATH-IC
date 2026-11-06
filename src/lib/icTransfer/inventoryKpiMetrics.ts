@@ -20,7 +20,7 @@ export function formatMetalPlKpi(opts: {
   return {
     value: ledgerInrNode(inr),
     valueTitle: fmtLedgerInr(inr),
-    hint: opts.rangeLabel,
+    ...(opts.rangeLabel.trim() ? { hint: opts.rangeLabel } : {}),
     tone: plTone(inr),
   };
 }

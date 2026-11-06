@@ -1,3 +1,4 @@
+import { computeIcCashAedTotal } from '@/lib/icTransfer/rateCalculations';
 import { getDeliveredUnits } from '@/lib/icTransfer/saleUnits';
 
 export type WarehousePurchasePool = {
@@ -52,7 +53,11 @@ export type SaleMarginResult = {
 };
 
 export type ICWarehousePLLine = {
+  lineKind: 'sale' | 'metal_purchase';
+  /** Sale UUID, or metal-purchase UUID when lineKind is metal_purchase (stable row id for exports/filters). */
   saleId: string;
+  /** Epoch ms for ordering detail rows on the same calendar day. */
+  eventAtMs: number;
   saleDate: string;
   warehouseId: string;
   warehouseName: string;
@@ -67,6 +72,16 @@ export type ICWarehousePLLine = {
   settlementMode: 'cash' | 'metal';
   metalWeightG?: number;
   bookedCurrency?: 'AED' | 'INR';
+  /** Sale id when lineKind is sale; purchase id when lineKind is metal_purchase. */
+  referenceId?: string;
+  /**
+   * Metal tab (INR detail): economic INR amounts regardless of agent/AED booking.
+   * Purchase rows: revenue 0, cost = net INR for the lot, profit 0.
+   * Sale rows: sale INR, lot cost INR, and INR P&amp;L (sale − cost).
+   */
+  metalDisplayRevenueInr?: number;
+  metalDisplayCostInr?: number;
+  metalDisplayProfitInr?: number;
 };
 
 export type ICWarehousePLWarehouseSummary = {
@@ -116,7 +131,7 @@ export function purchaseAedTotal(
   aedTotal?: number | null,
 ): number {
   if (aedTotal != null && Number.isFinite(Number(aedTotal))) return Number(aedTotal);
-  return units * unitRate;
+  return computeIcCashAedTotal(units, unitRate);
 }
 
 /** Weighted average on a cost pool (remaining stock or all-time purchases). */
@@ -126,8 +141,9 @@ export function weightedAveragePurchaseRate(pool: WarehousePurchasePool): number
 }
 
 export function remainingStockWac(pool: RemainingStockPool): number {
-  if (pool.units <= 0) return 0;
-  return pool.cost / pool.units;
+  const u = Number(pool.units);
+  if (!Number.isFinite(u) || Math.abs(u) < 1e-9) return 0;
+  return pool.cost / u;
 }
 
 export function addPurchaseToPool(pool: RemainingStockPool, units: number, cost: number): void {

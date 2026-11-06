@@ -2,9 +2,9 @@
 
 import React from 'react';
 import { fmtICDate, FmtLedgerAed, FmtLedgerAmount } from '@/lib/icFunds/format';
-import type { ICWarehousePLReport } from '@/lib/icFunds/warehouseProfit';
+import type { ICWarehousePLLine, ICWarehousePLReport } from '@/lib/icFunds/warehouseProfit';
 import { icfTableWrap, icfTd, icfTh, icfThAlign, icfTheadRow } from '@/components/ic-funds/ui';
-import { ReportAmountCell, ReportCaption, ReportSegmentTabs } from './reportShared';
+import { ReportAmountCell, ReportSegmentTabs } from './reportShared';
 
 function AmountCell({
   n,
@@ -31,26 +31,40 @@ function fmtGrams(n: number): string {
   return `${n.toLocaleString(undefined, { maximumFractionDigits: 4 })} g`;
 }
 
+/** INR columns on Metal tab: same economics for INR-book and agent-AED deals. */
+function metalLineRevenueInr(l: ICWarehousePLLine): number {
+  if (l.lineKind === 'metal_purchase') return 0;
+  if (l.metalDisplayRevenueInr != null) return l.metalDisplayRevenueInr;
+  return l.bookedCurrency === 'INR' ? l.revenue : 0;
+}
+
+function metalLineCostInr(l: ICWarehousePLLine): number {
+  if (l.metalDisplayCostInr != null) return l.metalDisplayCostInr;
+  return l.bookedCurrency === 'INR' ? l.cogs : 0;
+}
+
+function metalLineProfitInr(l: ICWarehousePLLine): number {
+  if (l.lineKind === 'metal_purchase') return 0;
+  if (l.metalDisplayProfitInr != null) return l.metalDisplayProfitInr;
+  return l.bookedCurrency === 'INR' ? l.grossProfit : 0;
+}
+
 export default function WarehouseStatementReport({
   report,
   warehouses,
   lines,
-  periodLabel,
   book,
   onBookChange,
 }: {
   report: ICWarehousePLReport;
   warehouses: ICWarehousePLReport['warehouses'];
   lines: ICWarehousePLReport['lines'];
-  periodLabel: string;
   book: 'ic' | 'metal';
   onBookChange: (book: 'ic' | 'metal') => void;
 }) {
   const totals = report.totals;
   const icLines = lines.filter(l => l.settlementMode !== 'metal');
   const metalLines = lines.filter(l => l.settlementMode === 'metal');
-  const metalInrLines = metalLines.filter(l => l.bookedCurrency !== 'AED');
-  const metalAedLines = metalLines.filter(l => l.bookedCurrency === 'AED');
 
   const sum = (rows: typeof lines, pick: (l: (typeof lines)[number]) => number) =>
     rows.reduce((s, l) => s + pick(l), 0);
@@ -59,21 +73,18 @@ export default function WarehouseStatementReport({
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-2.5 py-2 dark:border-[var(--theme-border)]">
         <ReportSegmentTabs
-          label="Warehouse book"
+          label="Book"
           value={book}
           onChange={onBookChange}
           options={[
-            { id: 'ic', label: 'IC cash (AED)' },
-            { id: 'metal', label: 'Metal' },
+            { id: 'ic', label: 'IC (AED)' },
+            { id: 'metal', label: 'Metal (INR)' },
           ]}
         />
       </div>
 
       {book === 'ic' ? (
         <>
-          <ReportCaption>
-            {periodLabel} · IC is units and dirhams. Metal grams are on the other tab.
-          </ReportCaption>
           <div className={icfTableWrap}>
             <table className="w-full min-w-[720px] text-left text-sm">
               <thead>
@@ -114,7 +125,7 @@ export default function WarehouseStatementReport({
                 <tfoot>
                   <tr className="border-t border-slate-200 bg-slate-50 font-medium">
                     <td className={icfTd} colSpan={5}>
-                      Totals (IC cash, AED)
+                      Total
                     </td>
                     <ReportAmountCell n={totals.grossProfit} danger={totals.grossProfit < 0} />
                   </tr>
@@ -123,8 +134,8 @@ export default function WarehouseStatementReport({
             </table>
           </div>
 
-          <p className="border-b border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-slate-500">
-            IC sales in this period
+          <p className="border-b border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-slate-500 dark:text-[var(--theme-text-muted)]">
+            IC cash — detail
           </p>
           <div className={icfTableWrap}>
             <table className="w-full min-w-[880px] text-left text-sm">
@@ -143,7 +154,7 @@ export default function WarehouseStatementReport({
                 {icLines.length === 0 ? (
                   <tr>
                     <td className={`${icfTd} py-6 text-center text-slate-500`} colSpan={7}>
-                      No completed IC cash sales in this view.
+                      No IC cash sales in this view.
                     </td>
                   </tr>
                 ) : (
@@ -166,7 +177,7 @@ export default function WarehouseStatementReport({
                 <tfoot>
                   <tr className="border-t border-slate-200 bg-slate-50 font-medium">
                     <td className={icfTd} colSpan={4}>
-                      Totals (AED)
+                      Total (AED)
                     </td>
                     <ReportAmountCell n={totals.revenue} />
                     <ReportAmountCell n={totals.cogs} />
@@ -179,12 +190,8 @@ export default function WarehouseStatementReport({
         </>
       ) : (
         <>
-          <ReportCaption>
-            {periodLabel} · Metal is grams. P&amp;L (INR) and agent P&amp;L (AED) are separate — do not add the two
-            profit columns.
-          </ReportCaption>
           <div className={icfTableWrap}>
-            <table className="w-full min-w-[800px] text-left text-sm">
+            <table className="w-full min-w-[720px] text-left text-sm">
               <thead>
                 <tr className={icfTheadRow}>
                   <th className={icfTh}>Warehouse</th>
@@ -192,14 +199,13 @@ export default function WarehouseStatementReport({
                   <th className={icfThAlign('right')}>In g</th>
                   <th className={icfThAlign('right')}>Out g</th>
                   <th className={icfThAlign('right')}>Close g</th>
-                  <th className={icfThAlign('right')}>P&amp;L (INR)</th>
-                  <th className={icfThAlign('right')}>Agent P&amp;L (AED)</th>
+                  <th className={icfThAlign('right')}>Metal P&amp;L (INR)</th>
                 </tr>
               </thead>
               <tbody>
                 {warehouses.length === 0 ? (
                   <tr>
-                    <td className={`${icfTd} py-6 text-center text-slate-500`} colSpan={7}>
+                    <td className={`${icfTd} py-6 text-center text-slate-500`} colSpan={6}>
                       No warehouse activity in this period.
                     </td>
                   </tr>
@@ -212,7 +218,6 @@ export default function WarehouseStatementReport({
                       <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtGrams(row.metalOutG)}</td>
                       <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtGrams(row.closingMetalG)}</td>
                       <AmountCell n={row.metalProfitInr} danger={row.metalProfitInr < 0} currency="INR" />
-                      <AmountCell n={row.metalProfitAed} danger={row.metalProfitAed < 0} />
                     </tr>
                   ))
                 )}
@@ -221,59 +226,58 @@ export default function WarehouseStatementReport({
                 <tfoot>
                   <tr className="border-t border-slate-200 bg-slate-50 font-medium">
                     <td className={icfTd} colSpan={5}>
-                      Totals (do not add across)
+                      Total (INR)
                     </td>
                     <ReportAmountCell n={totals.metalProfitInr} currency="INR" danger={totals.metalProfitInr < 0} />
-                    <ReportAmountCell n={totals.metalProfitAed} danger={totals.metalProfitAed < 0} />
                   </tr>
                 </tfoot>
               ) : null}
             </table>
           </div>
 
-          <p className="border-b border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-slate-500">
-            Metal sales in this period
+          <p className="border-b border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-slate-500 dark:text-[var(--theme-text-muted)]">
+            Metal (INR) — detail
           </p>
           <div className={icfTableWrap}>
-            <table className="w-full min-w-[880px] text-left text-sm">
+            <table className="w-full min-w-[800px] text-left text-sm">
               <thead>
                 <tr className={icfTheadRow}>
                   <th className={icfTh}>Date</th>
                   <th className={icfTh}>Warehouse</th>
-                  <th className={icfTh}>Customer</th>
-                  <th className={icfTh}>Book</th>
+                  <th className={icfTh}>Party</th>
+                  <th className={icfTh}>Type</th>
                   <th className={icfThAlign('right')}>Grams</th>
-                  <th className={icfThAlign('right')}>Sales</th>
-                  <th className={icfThAlign('right')}>Cost</th>
-                  <th className={icfThAlign('right')}>Profit</th>
+                  <th className={icfThAlign('right')}>Sales (INR)</th>
+                  <th className={icfThAlign('right')}>Cost (INR)</th>
+                  <th className={icfThAlign('right')}>Profit (INR)</th>
                 </tr>
               </thead>
               <tbody>
                 {metalLines.length === 0 ? (
                   <tr>
                     <td className={`${icfTd} py-6 text-center text-slate-500`} colSpan={8}>
-                      No completed metal sales in this view.
+                      No metal purchases or sales in this view.
                     </td>
                   </tr>
                 ) : (
                   metalLines.map(line => {
-                    const bookCur = line.bookedCurrency === 'AED' ? 'AED' : 'INR';
+                    const isPurchase = line.lineKind === 'metal_purchase';
                     return (
-                      <tr key={line.saleId} className="border-b border-slate-100">
+                      <tr key={`${line.lineKind}-${line.saleId}`} className="border-b border-slate-100">
                         <td className={icfTd}>{fmtICDate(line.saleDate)}</td>
                         <td className={icfTd}>{line.warehouseName}</td>
                         <td className={`${icfTd} max-w-[10rem] truncate`}>{line.customerName}</td>
-                        <td className={icfTd}>{bookCur}</td>
+                        <td className={icfTd}>{isPurchase ? 'Purchase' : 'Sale'}</td>
                         <td className={`${icfTd} text-right font-mono tabular-nums`}>
                           {fmtGrams(line.metalWeightG ?? line.units)}
                         </td>
-                        <AmountCell n={line.revenue} currency={bookCur} />
-                        <AmountCell n={line.cogs} currency={bookCur} />
-                        <td
-                          className={`${icfTd} text-right font-mono tabular-nums ${line.grossProfit < 0 ? 'text-red-600' : ''}`}
-                        >
-                          <FmtLedgerAmount amount={line.grossProfit} book={bookCur} />
-                        </td>
+                        <AmountCell n={metalLineRevenueInr(line)} currency="INR" />
+                        <AmountCell n={metalLineCostInr(line)} currency="INR" />
+                        <AmountCell
+                          n={metalLineProfitInr(line)}
+                          currency="INR"
+                          danger={!isPurchase && metalLineProfitInr(line) < 0}
+                        />
                       </tr>
                     );
                   })
@@ -283,25 +287,14 @@ export default function WarehouseStatementReport({
                 <tfoot>
                   <tr className="border-t border-slate-200 bg-slate-50 font-medium">
                     <td className={icfTd} colSpan={5}>
-                      Totals (INR)
+                      Total
                     </td>
-                    <ReportAmountCell n={sum(metalInrLines, l => l.revenue)} currency="INR" />
-                    <ReportAmountCell n={sum(metalInrLines, l => l.cogs)} currency="INR" />
+                    <ReportAmountCell n={sum(metalLines, metalLineRevenueInr)} currency="INR" />
+                    <ReportAmountCell n={sum(metalLines, metalLineCostInr)} currency="INR" />
                     <ReportAmountCell
-                      n={sum(metalInrLines, l => l.grossProfit)}
+                      n={sum(metalLines, metalLineProfitInr)}
                       currency="INR"
-                      danger={sum(metalInrLines, l => l.grossProfit) < 0}
-                    />
-                  </tr>
-                  <tr className="border-t border-slate-100 bg-slate-50 font-medium">
-                    <td className={icfTd} colSpan={5}>
-                      Totals (AED)
-                    </td>
-                    <ReportAmountCell n={sum(metalAedLines, l => l.revenue)} />
-                    <ReportAmountCell n={sum(metalAedLines, l => l.cogs)} />
-                    <ReportAmountCell
-                      n={sum(metalAedLines, l => l.grossProfit)}
-                      danger={sum(metalAedLines, l => l.grossProfit) < 0}
+                      danger={sum(metalLines, metalLineProfitInr) < 0}
                     />
                   </tr>
                 </tfoot>

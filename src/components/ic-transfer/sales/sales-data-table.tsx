@@ -11,7 +11,13 @@ import WarehouseLink from '@/components/ic-transfer/warehouse/WarehouseLink';
 import { isBranchHandledSale } from '@/lib/icTransfer/fulfillmentHandler';
 import { getAdminRowAccentClass } from '@/lib/icTransfer/orderStatus';
 import { highPriorityRowClass } from '@/lib/icTransfer/orderPriority';
-import { formatDealTableAed, formatDealTableInr, saleDealAed, saleDealInr } from '@/lib/icTransfer/dealTableDisplay';
+import {
+  formatDealTableAed,
+  formatDealTableInr,
+  saleDealAed,
+  saleDealInr,
+  saleTableDisplayAed,
+} from '@/lib/icTransfer/dealTableDisplay';
 import { formatSettlementModeLabel } from '@/lib/icTransfer/metalSettlement';
 import DealAgentHint from '@/components/ic-transfer/shared/DealAgentHint';
 import ICTransferDataTableShell, {
@@ -378,7 +384,7 @@ function SaleRow({
       </td>
       <td className={icTdClass('right')}>
         <span className="font-mono font-medium tabular-nums text-slate-900">
-          {formatDealTableAed(saleDealAed(s))}
+          {formatDealTableAed(saleTableDisplayAed(s))}
         </span>
       </td>
       <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>

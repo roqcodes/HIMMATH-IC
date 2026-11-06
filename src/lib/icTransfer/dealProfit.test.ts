@@ -10,7 +10,7 @@ describe('dealProfit', () => {
         id: 'p-cash',
         warehouseId: 'w1',
         units: 10,
-        unitRate: 30,
+        unitRate: 1_000_000 / 300,
         aedTotal: 300,
         settlementMode: 'cash',
         createdAt: '2026-01-01T00:00:00.000Z',
@@ -34,7 +34,7 @@ describe('dealProfit', () => {
         customerName: 'A',
         warehouseId: 'w1',
         units: 10,
-        unitRate: 36,
+        unitRate: 1_000_000 / 360,
         aedAmount: 360,
         settlementMode: 'cash',
         orderStatus: 'completed',
@@ -64,6 +64,7 @@ describe('dealProfit', () => {
     });
 
     assert.equal(slice.cashGrossProfitAed, 60);
+    assert.ok(Math.abs(slice.cashGrossProfitInr - 60 * (1_000_000 / 360)) < 0.05);
     assert.equal(slice.cashSaleUnits, 10);
     assert.equal(slice.metalProfitAed, 0);
     assert.ok(Math.abs(slice.metalProfitInr - 9_994.2) < 1);
@@ -89,7 +90,7 @@ describe('dealProfit', () => {
         customerName: 'A',
         warehouseId: 'w1',
         units: 110,
-        unitRate: 3500,
+        unitRate: 11_000_000 / 385_000,
         aedAmount: 385_000,
         inrTotal: 11_000_000,
         metalWeightG: 500,
@@ -108,8 +109,10 @@ describe('dealProfit', () => {
     assert.equal(slice.cashGrossProfitAed, 0);
     assert.equal(slice.cashCogsAed, 0);
     assert.equal(slice.metalProfitInr, 1_000_000);
-    const { units } = remainingIcStockWac(purchases, sales, 'w1');
+    const { units, rate } = remainingIcStockWac(purchases, sales, 'w1');
     assert.equal(units, 110);
+    const expectedRate = 11_000_000 / 385_000;
+    assert.ok(Math.abs(rate - expectedRate) < 0.02);
   });
 
   it('keeps DEL cash IC 360k/370k separate from metal 10L INR', () => {
@@ -118,7 +121,7 @@ describe('dealProfit', () => {
         id: 'p-ic',
         warehouseId: 'del',
         units: 100,
-        unitRate: 3600,
+        unitRate: (100 * 100_000) / 360_000,
         aedTotal: 360_000,
         settlementMode: 'cash',
         createdAt: '2026-11-01T00:00:00.000Z',
@@ -141,7 +144,7 @@ describe('dealProfit', () => {
         customerName: 'BAVA',
         warehouseId: 'del',
         units: 100,
-        unitRate: 3700,
+        unitRate: (100 * 100_000) / 370_000,
         aedAmount: 370_000,
         settlementMode: 'cash',
         orderStatus: 'completed',
@@ -171,6 +174,9 @@ describe('dealProfit', () => {
       warehouseId: 'del',
     });
     assert.equal(slice.cashGrossProfitAed, 10_000);
+    assert.ok(
+      Math.abs(slice.cashGrossProfitInr - 10_000 * ((100 * 100_000) / 370_000)) < 0.05,
+    );
     assert.equal(slice.cashCogsAed, 360_000);
     assert.equal(slice.cashRevenueAed, 370_000);
     assert.equal(slice.metalProfitInr, 1_000_000);
@@ -236,7 +242,7 @@ describe('dealProfit', () => {
         customerName: 'A',
         warehouseId: 'w1',
         units: 0,
-        aedAmount: 254_302.42,
+        aedAmount: 254302.42,
         inrTotal: 6_995_940,
         metalWeightG: 499.71,
         metalPurchaseId: 'p-inr',
@@ -286,7 +292,7 @@ describe('dealProfit', () => {
         customerName: 'A',
         warehouseId: 'ksd',
         units: 70,
-        unitRate: 3500,
+        unitRate: 7_000_000 / 245_000,
         aedAmount: 245_000,
         inrTotal: 7_000_000,
         metalWeightG: 500,
@@ -301,7 +307,7 @@ describe('dealProfit', () => {
         customerName: 'B',
         warehouseId: 'ksd',
         units: 0,
-        unitRate: 3600,
+        unitRate: 14_000_000 / 504_000,
         aedAmount: 504_000,
         inrTotal: 14_000_000,
         metalWeightG: 1000,

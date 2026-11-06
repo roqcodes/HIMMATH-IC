@@ -26,10 +26,27 @@ function inRange(date: string | null, range: DateFilterRange): boolean {
   return isDateInRange(date, range);
 }
 
+/** Metal + AED agent: stored AED was fixed to gross INR; scale down by lab using the same INR/AED sheet. */
+function metalAgentAedNetOfLab(
+  storedAed: number,
+  grossInr?: number | null,
+  labTotalInr?: number | null,
+): number {
+  const gross = Number(grossInr) || 0;
+  const aed = Number(storedAed) || 0;
+  if (aed <= 0 || gross <= 0) return aed;
+  const netInr = netMetalInr(gross, labTotalInr);
+  return Number(((aed * netInr) / gross).toFixed(4));
+}
+
 /** AED cash IC + metal paid via AED agent. Cash-metal AED is ignored. */
 export function dealPurchaseAed(p: ICPurchase): number {
   if (p.settlementMode === 'metal' && !isMetalAedPayment(p.metalPaymentMethod)) return 0;
-  return Number(p.aedTotal) || 0;
+  const raw = Number(p.aedTotal) || 0;
+  if (p.settlementMode === 'metal' && isMetalAedPayment(p.metalPaymentMethod)) {
+    return metalAgentAedNetOfLab(raw, p.inrTotal, p.labTotalInr);
+  }
+  return raw;
 }
 
 /** Cash-metal INR payable only (net of lab). AED-agent metal INR is a rate memo, not a liability. */
@@ -43,7 +60,11 @@ export function dealSaleAed(s: ICSale): number {
   if (s.settlementMode === 'metal' && !isMetalAedPayment(s.metalPaymentMethod)) {
     return 0;
   }
-  return (Number(s.aedAmount) || 0) + (Number(s.serviceCharge) || 0);
+  const raw = (Number(s.aedAmount) || 0) + (Number(s.serviceCharge) || 0);
+  if (s.settlementMode === 'metal' && isMetalAedPayment(s.metalPaymentMethod)) {
+    return metalAgentAedNetOfLab(raw, s.inrTotal, s.labTotalInr);
+  }
+  return raw;
 }
 
 export function dealSaleInr(s: ICSale): number {

@@ -12,7 +12,7 @@ import {
 } from '@/lib/icTransfer/branchOrderOwnership';
 import { resolveDateFilterRange, getDateFilterLabel } from '@/lib/dateFilterRange';
 import { computeSaleBookKpis, countSalesInRange } from '@/lib/icTransfer/dealBookKpis';
-import { saleDealAed, saleDealInr } from '@/lib/icTransfer/dealTableDisplay';
+import { saleDealInr, saleTableDisplayAed } from '@/lib/icTransfer/dealTableDisplay';
 import { useICTransferFilters } from '../ui';
 import { canManageICTransferGlobalSettings } from '@/lib/icTransfer/settings';
 import AddSaleModal from './AddSaleModal';
@@ -244,8 +244,8 @@ export default function ICTransferSales() {
         valA = saleDealInr(a);
         valB = saleDealInr(b);
       } else if (sortField === 'Total AED') {
-        valA = saleDealAed(a);
-        valB = saleDealAed(b);
+        valA = saleTableDisplayAed(a);
+        valB = saleTableDisplayAed(b);
       } else if (sortField === 'Metal (g)') {
         valA = Number(a.metalWeightG || 0);
         valB = Number(b.metalWeightG || 0);

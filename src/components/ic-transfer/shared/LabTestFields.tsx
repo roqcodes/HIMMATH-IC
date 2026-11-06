@@ -8,11 +8,13 @@ import {
   type LabTestFields,
   type LabTestFieldKey,
 } from '@/lib/icTransfer/labTest';
+import { METAL_AMOUNT_DECIMALS, METAL_WEIGHT_DECIMALS } from '@/lib/icTransfer/metalSettlement';
 
 import {
   icPurchaseDenseInput,
   icPurchaseDenseLabel,
 } from './icTransferFormModalLayout';
+import FormattedNumberInput from './FormattedNumberInput';
 
 type Props = {
   value: LabTestFields;
@@ -23,11 +25,6 @@ type Props = {
   compact?: boolean;
 };
 
-function parseNum(raw: string): number {
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : 0;
-}
-
 export default function LabTestFields({ value, onChange, disabled, compact = false }: Props) {
   const apply = useCallback(
     (next: LabTestFields) => {
@@ -36,8 +33,8 @@ export default function LabTestFields({ value, onChange, disabled, compact = fal
     [onChange],
   );
 
-  const onField = (field: LabTestFieldKey, raw: string) => {
-    apply(applyLabFieldChange(value, field, parseNum(raw)));
+  const onField = (field: LabTestFieldKey, n: number) => {
+    apply(applyLabFieldChange(value, field, n));
   };
 
   const labelClass = compact ? icPurchaseDenseLabel : undefined;
@@ -54,33 +51,33 @@ export default function LabTestFields({ value, onChange, disabled, compact = fal
         </div>
         <div className={gridClass}>
           <AsicFormField label="Weight (g)" labelClassName={labelClass}>
-            <input
+            <FormattedNumberInput
               className={fieldInput}
-              type="number"
-              step="0.0001"
+              book="inr"
+              maxFractionDigits={METAL_WEIGHT_DECIMALS}
               disabled={disabled}
-              value={value.labWeightG || ''}
-              onChange={e => onField('weight', e.target.value)}
+              value={value.labWeightG}
+              onNumericChange={n => onField('weight', n)}
             />
           </AsicFormField>
           <AsicFormField label="Charge (INR/g)" labelClassName={labelClass}>
-            <input
+            <FormattedNumberInput
               className={fieldInput}
-              type="number"
-              step="0.0001"
+              book="inr"
+              maxFractionDigits={METAL_AMOUNT_DECIMALS}
               disabled={disabled}
-              value={value.labChargeInrPerG || ''}
-              onChange={e => onField('charge', e.target.value)}
+              value={value.labChargeInrPerG}
+              onNumericChange={n => onField('charge', n)}
             />
           </AsicFormField>
           <AsicFormField label="Total (INR)" labelClassName={labelClass}>
-            <input
+            <FormattedNumberInput
               className={fieldInput}
-              type="number"
-              step="0.01"
+              book="inr"
+              maxFractionDigits={METAL_AMOUNT_DECIMALS}
               disabled={disabled}
-              value={value.labTotalInr || ''}
-              onChange={e => onField('total', e.target.value)}
+              value={value.labTotalInr}
+              onNumericChange={n => onField('total', n)}
             />
           </AsicFormField>
         </div>
@@ -93,33 +90,33 @@ export default function LabTestFields({ value, onChange, disabled, compact = fal
       <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Lab test (INR)</p>
       <div className={asicFormGrid}>
         <AsicFormField label="Weight (g)" colSpan={4}>
-          <input
+          <FormattedNumberInput
             className={asicInput}
-            type="number"
-            step="0.0001"
+            book="inr"
+            maxFractionDigits={METAL_WEIGHT_DECIMALS}
             disabled={disabled}
-            value={value.labWeightG || ''}
-            onChange={e => onField('weight', e.target.value)}
+            value={value.labWeightG}
+            onNumericChange={n => onField('weight', n)}
           />
         </AsicFormField>
         <AsicFormField label="Charge (INR/g)" colSpan={4}>
-          <input
+          <FormattedNumberInput
             className={asicInput}
-            type="number"
-            step="0.0001"
+            book="inr"
+            maxFractionDigits={METAL_AMOUNT_DECIMALS}
             disabled={disabled}
-            value={value.labChargeInrPerG || ''}
-            onChange={e => onField('charge', e.target.value)}
+            value={value.labChargeInrPerG}
+            onNumericChange={n => onField('charge', n)}
           />
         </AsicFormField>
         <AsicFormField label="Total (INR)" colSpan={4}>
-          <input
+          <FormattedNumberInput
             className={asicInput}
-            type="number"
-            step="0.01"
+            book="inr"
+            maxFractionDigits={METAL_AMOUNT_DECIMALS}
             disabled={disabled}
-            value={value.labTotalInr || ''}
-            onChange={e => onField('total', e.target.value)}
+            value={value.labTotalInr}
+            onNumericChange={n => onField('total', n)}
           />
         </AsicFormField>
       </div>

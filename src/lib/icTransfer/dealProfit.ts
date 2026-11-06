@@ -1,3 +1,4 @@
+import { computeIcCashAedTotal, INR_PER_UNIT } from '@/lib/icTransfer/rateCalculations';
 import { isMetalAedPayment } from '@/lib/domain/books';
 import { isDateInRange, type DateFilterRange } from '@/lib/dateFilterRange';
 import { isVoidIcSaleOrderStatus } from '@/lib/icFunds/icTransferReportFilters';
@@ -16,6 +17,8 @@ import type { ICPurchase, ICSale } from '@/types';
 
 export type DealProfitSlice = {
   cashGrossProfitAed: number;
+  /** IC cash gross profit in implied INR (margin AED × INR-notional ÷ sale revenue AED per sale). */
+  cashGrossProfitInr: number;
   cashRevenueAed: number;
   cashCogsAed: number;
   cashSaleUnits: number;
@@ -27,6 +30,7 @@ export type DealProfitSlice = {
 
 const EMPTY: DealProfitSlice = {
   cashGrossProfitAed: 0,
+  cashGrossProfitInr: 0,
   cashRevenueAed: 0,
   cashCogsAed: 0,
   cashSaleUnits: 0,
@@ -69,10 +73,28 @@ function icStockPurchaseEvents(
       at: purchaseMs(p),
       sortKey: p.id,
       units,
-      cost: Number(p.aedTotal) || units * (Number(p.unitRate) || 0),
+      cost:
+        Number(p.aedTotal) ||
+        computeIcCashAedTotal(units, Number(p.unitRate) || 0),
     });
   }
   return events;
+}
+
+/**
+ * AED “cost” for the **IC unit pool** from a metal·INR completed sale.
+ * True customer AED = net INR × R ÷ 1000, but pool units are **₹1L notional**, so a naïve
+ * (true AED ÷ units) gives **R × 100**. Match cash IC: use notional cost **units × R** so
+ * pool average rate equals the **sheet R** (~23–37). When only `aedAmount` is present,
+ * use **aed ÷ 100** (= units × R) because true AED = 100 × (units × R).
+ */
+function metalInrIcPoolCostAed(sale: ICSale, units: number): number {
+  const u = Number(units);
+  const rate = Number(sale.unitRate) || 0;
+  if (u > 0 && rate > 0) return computeIcCashAedTotal(u, rate);
+  const aed = Number(sale.aedAmount) || 0;
+  if (aed > 0) return Number((aed / 100).toFixed(4));
+  return 0;
 }
 
 function icStockInflowFromMetalInrSales(
@@ -84,13 +106,12 @@ function icStockInflowFromMetalInrSales(
     const units = metalInrSaleIcUnits(s);
     if (units <= 0) continue;
     if (throughIso && !throughIso(s.statusUpdatedAt || s.createdAt)) continue;
-    const aed = Number(s.aedAmount) || 0;
     events.push({
       kind: 'purchase',
       at: saleMs(s),
       sortKey: `metal-inr-${s.id}`,
       units,
-      cost: aed > 0 ? aed : units * (Number(s.unitRate) || 0),
+      cost: metalInrIcPoolCostAed(s, units),
     });
   }
   return events;
@@ -161,6 +182,7 @@ export function sumDealProfit(slices: DealProfitSlice[]): DealProfitSlice {
   return slices.reduce(
     (acc, s) => ({
       cashGrossProfitAed: round2(acc.cashGrossProfitAed + s.cashGrossProfitAed),
+      cashGrossProfitInr: round2(acc.cashGrossProfitInr + s.cashGrossProfitInr),
       cashRevenueAed: round2(acc.cashRevenueAed + s.cashRevenueAed),
       cashCogsAed: round2(acc.cashCogsAed + s.cashCogsAed),
       cashSaleUnits: round4(acc.cashSaleUnits + s.cashSaleUnits),
@@ -224,6 +246,7 @@ function computeOneWarehouse(
 
   const { saleMargins } = simulateWarehouseInventory(events);
   let cashGrossProfitAed = 0;
+  let cashGrossProfitInr = 0;
   let cashRevenueAed = 0;
   let cashCogsAed = 0;
   let cashSaleUnits = 0;
@@ -234,6 +257,12 @@ function computeOneWarehouse(
     cashRevenueAed += margin.revenue;
     cashCogsAed += margin.cogs;
     cashSaleUnits += margin.deliveredUnits;
+    const units = Number(s.units) || 0;
+    const rev = margin.revenue;
+    if (rev > 0 && units > 0) {
+      const inrNotional = units * INR_PER_UNIT;
+      cashGrossProfitInr += margin.grossProfit * (inrNotional / rev);
+    }
   }
 
   const lots = new Map(whPurchases.filter(p => isMetal(p.settlementMode)).map(p => [p.id, p]));
@@ -265,6 +294,7 @@ function computeOneWarehouse(
 
   return {
     cashGrossProfitAed: round2(cashGrossProfitAed),
+    cashGrossProfitInr: round2(cashGrossProfitInr),
     cashRevenueAed: round2(cashRevenueAed),
     cashCogsAed: round2(cashCogsAed),
     cashSaleUnits: round4(cashSaleUnits),

@@ -50,15 +50,19 @@ function emptyMatrixRow(warehouse: ICWarehouse): WarehouseMatrixRow {
     cashSales: 0,
     metalSales: 0,
     cashPurchaseAed: 0,
+    cashPurchaseInr: 0,
     metalPurchaseAed: 0,
     metalPurchaseInr: 0,
     cashSaleAed: 0,
+    cashSaleInr: 0,
     metalSaleAed: 0,
     metalSaleInr: 0,
     cashGrossProfitAed: 0,
+    cashGrossProfitInr: 0,
     metalProfitAed: 0,
     metalProfitInr: 0,
     metalStockInr: 0,
+    icStockAvgAedRate: 0,
   };
 }
 

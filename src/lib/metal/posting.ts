@@ -36,8 +36,8 @@ async function ensureMetalAedAccount(client: DbClient, branchId: string): Promis
   return ensureLinkedAccount(client, {
     branchId,
     sourceType: 'ic_counterparty',
-    sourceId: 'metal_aed_clearing',
-    name: 'Metal (AED)',
+    sourceId: 'metal_sale_reverse',
+    name: 'Metal sale reverse',
   });
 }
 

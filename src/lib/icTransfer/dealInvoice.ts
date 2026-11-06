@@ -3,6 +3,7 @@ import { isMetalAedPayment } from '@/lib/domain/books';
 import { dealPurchaseAed, dealSaleAed } from '@/lib/icTransfer/dealBookKpis';
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
 import { hasLab, netMetalInr } from '@/lib/icTransfer/labTest';
+import { computeIcCashAedTotal } from '@/lib/icTransfer/rateCalculations';
 import { formatSettlementModeLabel } from '@/lib/icTransfer/metalSettlement';
 import type { Branch, ICPurchase, ICSale, ICWarehouse } from '@/types';
 
@@ -161,18 +162,40 @@ export function buildPurchaseInvoice(
   const agentAed = isMetal && isMetalAedPayment(purchase.metalPaymentMethod);
   const currency: DealInvoiceCurrency = isMetal && !agentAed ? 'INR' : 'AED';
   const number = getFormattedTxnId(purchase.id, 'purchase', purchase);
+
+  const grossInrMetal = metalGrossInr(purchase);
+  const storedAedPurchase = round2(Number(purchase.aedTotal) || 0);
+  const netAedPurchase = round2(dealPurchaseAed(purchase));
+
   const gross = isMetal
     ? agentAed
-      ? round2(dealPurchaseAed(purchase))
-      : metalGrossInr(purchase)
-    : round2(Number(purchase.aedTotal) || Number(purchase.units) * Number(purchase.unitRate) || 0);
-  const lab = isMetal && !agentAed && hasLab(purchase) ? round2(Number(purchase.labTotalInr) || 0) : 0;
-  const net = isMetal && !agentAed ? metalNetInr(purchase) : gross;
+      ? storedAedPurchase
+      : grossInrMetal
+    : round2(
+        Number(purchase.aedTotal) ||
+          computeIcCashAedTotal(Number(purchase.units) || 0, Number(purchase.unitRate) || 0) ||
+          0,
+      );
+  const lab = isMetal
+    ? agentAed
+      ? hasLab(purchase)
+        ? round2(Math.max(0, storedAedPurchase - netAedPurchase))
+        : 0
+      : hasLab(purchase)
+        ? round2(Number(purchase.labTotalInr) || 0)
+        : 0
+    : 0;
+  const net = isMetal
+    ? agentAed
+      ? netAedPurchase
+      : metalNetInr(purchase)
+    : gross;
   const weight = Number(purchase.metalWeightG) || 0;
   const rate = isMetal
     ? agentAed
-      ? Number(purchase.metalRateAedPerG) || (weight > 0 ? gross / weight : 0)
-      : Number(purchase.metalRateInrPerG) || (weight > 0 ? metalGrossInr(purchase) / weight : 0)
+      ? Number(purchase.metalRateAedPerG) ||
+        (weight > 0 ? storedAedPurchase / weight : 0)
+      : Number(purchase.metalRateInrPerG) || (weight > 0 ? grossInrMetal / weight : 0)
     : Number(purchase.unitRate) || 0;
   const settlement = formatSettlementModeLabel(purchase.settlementMode, purchase.metalPaymentMethod);
 
@@ -222,7 +245,7 @@ export function buildPurchaseInvoice(
       pcs: isMetal ? '1' : formatPcs(purchase.units),
       grossG: isMetal ? weightLabel(weight) : '—',
       pureG: isMetal ? weightLabel(weight) : '—',
-      value: formatInvoiceMoney(gross, currency),
+      value: formatInvoiceMoney(net, currency),
     },
     valueHeader: `Receipt value - ${currency}`,
     pricing: {
@@ -251,18 +274,42 @@ export function buildSaleInvoice(sale: ICSale, ctx: DealInvoiceBuildContext): De
   const agentAed = isMetal && isMetalAedPayment(sale.metalPaymentMethod);
   const currency: DealInvoiceCurrency = isMetal && !agentAed ? 'INR' : 'AED';
   const number = getFormattedTxnId(sale.id, 'sale', sale);
+
+  const grossInrMetal = metalGrossInr(sale);
+  const storedAedSale = round2(
+    (Number(sale.aedAmount) || 0) + (Number(sale.serviceCharge) || 0),
+  );
+  const netAedSale = round2(dealSaleAed(sale));
+
   const gross = isMetal
     ? agentAed
-      ? round2(dealSaleAed(sale))
-      : metalGrossInr(sale)
-    : round2((Number(sale.aedAmount) || Number(sale.units) * Number(sale.unitRate) || 0) + (Number(sale.serviceCharge) || 0));
-  const lab = isMetal && !agentAed && hasLab(sale) ? round2(Number(sale.labTotalInr) || 0) : 0;
-  const net = isMetal && !agentAed ? metalNetInr(sale) : gross;
+      ? storedAedSale
+      : grossInrMetal
+    : round2(
+        (Number(sale.aedAmount) ||
+          computeIcCashAedTotal(Number(sale.units) || 0, Number(sale.unitRate) || 0) ||
+          0) + (Number(sale.serviceCharge) || 0),
+      );
+  const lab = isMetal
+    ? agentAed
+      ? hasLab(sale)
+        ? round2(Math.max(0, storedAedSale - netAedSale))
+        : 0
+      : hasLab(sale)
+        ? round2(Number(sale.labTotalInr) || 0)
+        : 0
+    : 0;
+  const net = isMetal
+    ? agentAed
+      ? netAedSale
+      : metalNetInr(sale)
+    : gross;
   const weight = Number(sale.metalWeightG) || 0;
   const rate = isMetal
     ? agentAed
-      ? Number(sale.metalRateAedPerG) || (weight > 0 ? gross / weight : 0)
-      : Number(sale.metalRateInrPerG) || (weight > 0 ? metalGrossInr(sale) / weight : 0)
+      ? Number(sale.metalRateAedPerG) ||
+        (weight > 0 ? storedAedSale / weight : 0)
+      : Number(sale.metalRateInrPerG) || (weight > 0 ? grossInrMetal / weight : 0)
     : Number(sale.unitRate) || 0;
   const settlement = formatSettlementModeLabel(sale.settlementMode, sale.metalPaymentMethod);
 
@@ -312,7 +359,7 @@ export function buildSaleInvoice(sale: ICSale, ctx: DealInvoiceBuildContext): De
       pcs: isMetal ? '1' : formatPcs(sale.units),
       grossG: isMetal ? weightLabel(weight) : '—',
       pureG: isMetal ? weightLabel(weight) : '—',
-      value: formatInvoiceMoney(gross, currency),
+      value: formatInvoiceMoney(net, currency),
     },
     valueHeader: `Receipt value - ${currency}`,
     pricing: {

@@ -12,6 +12,15 @@ export function computeWarehouseIcUnitsOnHand(
   return remainingIcStockWac(purchases, sales, warehouseId).units;
 }
 
+/** Weighted average **AED rate per IC unit** on remaining stock (cash IC + metal INR inflows). */
+export function computeWarehouseIcStockWac(
+  purchases: ICPurchase[],
+  sales: ICSale[],
+  warehouseId: string,
+): number {
+  return remainingIcStockWac(purchases, sales, warehouseId).rate;
+}
+
 /** Reconcile `ic_warehouses.current_stock` from purchase/sale rows (fixes legacy double-counts). */
 export async function syncWarehouseIcStockColumn(
   client: PoolClient,

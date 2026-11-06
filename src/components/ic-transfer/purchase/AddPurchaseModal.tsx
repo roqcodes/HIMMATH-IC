@@ -11,14 +11,24 @@ import { useApp } from '@/context/AppContext';
 import { ICPurchase, ICWarehouse } from '@/types';
 import SettlementModeToggle from '../shared/SettlementModeToggle';
 import { emptyMetalFields } from '../shared/MetalSettlementFields';
+import FormattedNumberInput from '../shared/FormattedNumberInput';
 import MetalPaymentToggle from '../shared/MetalPaymentToggle';
 import type { MetalPaymentMethod } from '@/lib/domain/books';
 import { normalizeMetalPaymentMethod } from '@/lib/domain/books';
-import { computeICSaleAmounts, formatAmount } from '@/lib/icTransfer/rateCalculations';
+import {
+  computeICSaleAmounts,
+  formatAmount,
+  RATE_DECIMAL_PLACES,
+} from '@/lib/icTransfer/rateCalculations';
 import {
   applyMetalFieldChange,
+  computeImpliedMetalRateAedPerG,
+  computeMetalAedFromInr,
+  computeMetalSheetRateAed,
   metalFieldsFromRecord,
   METAL_AED_RATE_DIVISOR,
+  METAL_AMOUNT_DECIMALS,
+  METAL_WEIGHT_DECIMALS,
   type ICSettlementMode,
 } from '@/lib/icTransfer/metalSettlement';
 import {
@@ -207,11 +217,6 @@ function formatModalTimestamp(d: Date): string {
   });
 }
 
-function parseNum(raw: string): number {
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : 0;
-}
-
 export default function AddPurchaseModal({
   open,
   onClose,
@@ -247,8 +252,8 @@ export default function AddPurchaseModal({
       ? filterCounterpartiesForAgent(icSuppliers, branchId)
       : filterCounterpartiesForAgent(icSuppliers);
   }, [icSuppliers, branchId]);
-  const [units, setUnits] = useState(initialData?.units?.toString() || '');
-  const [rate, setRate] = useState(initialData?.unitRate?.toString() || '');
+  const [units, setUnits] = useState(initialData?.units ?? 0);
+  const [rate, setRate] = useState(initialData?.unitRate ?? 0);
   const [supplierId, setSupplierId] = useState(
     initialData?.counterpartyId || initialData?.supplierId || '',
   );
@@ -322,8 +327,8 @@ export default function AddPurchaseModal({
       setNow(new Date());
       const mode = initialData?.settlementMode === 'metal' ? 'metal' : 'cash';
       setSettlementMode(mode);
-      setUnits(initialData?.units?.toString() || '');
-      setRate(initialData?.unitRate?.toString() || '');
+      setUnits(initialData?.units ?? 0);
+      setRate(initialData?.unitRate ?? 0);
       setSupplierId(initialData?.counterpartyId || initialData?.supplierId || '');
       setWarehouseId(lockedWarehouseId || initialData?.warehouseId || '');
       setNotes(initialData?.notes || '');
@@ -352,23 +357,56 @@ export default function AddPurchaseModal({
     }
   }, [open, initialData, lockedWarehouseId, warehouseOptions]);
 
-  const unitNum = parseFloat(units) || 0;
-  const rateNum = parseFloat(rate) || 0;
+  const unitNum = units;
+  const rateNum = rate;
   const amounts = computeICSaleAmounts(unitNum, rateNum);
   const metalNetInr = netMetalInr(metal.inrTotal, lab.labTotalInr);
+
+  const metalAedTotal = useMemo(() => {
+    if (!isMetal || !metalAed) return metal.aedTotal;
+    const sheet = metal.metalSheetRateAed;
+    if (!sheet || sheet <= 0) return metal.aedTotal;
+    return computeMetalAedFromInr(metalNetInr, sheet);
+  }, [isMetal, metalAed, metal.aedTotal, metal.metalSheetRateAed, metalNetInr]);
+
+  useEffect(() => {
+    if (!isMetal || !metalAed || settlementMode !== 'metal') return;
+    const sheet = metal.metalSheetRateAed;
+    if (!sheet || sheet <= 0 || !metal.inrTotal) return;
+    const nextAed = computeMetalAedFromInr(metalNetInr, sheet);
+    const nextPerG = computeImpliedMetalRateAedPerG(metal.metalWeightG, nextAed);
+    setMetal(prev => {
+      if (
+        Math.abs((prev.aedTotal || 0) - nextAed) < 0.0001 &&
+        Math.abs((prev.metalRateAedPerG || 0) - nextPerG) < 0.0001
+      ) {
+        return prev;
+      }
+      return { ...prev, aedTotal: nextAed, metalRateAedPerG: nextPerG };
+    });
+  }, [
+    isMetal,
+    metalAed,
+    settlementMode,
+    metal.metalSheetRateAed,
+    metal.inrTotal,
+    metal.metalWeightG,
+    metalNetInr,
+  ]);
+
   const kpiMetalG = isMetal ? metal.metalWeightG : 0;
   const kpiInr = isMetal ? metalNetInr : amounts.inrTotal;
-  const kpiAed = isMetal ? (metalAed ? metal.aedTotal : 0) : amounts.aedNetTotal;
+  const kpiAed = isMetal ? (metalAed ? metalAedTotal : 0) : amounts.aedNetTotal;
 
   const onMetalField = useCallback(
-    (field: 'weight' | 'rateInr' | 'sheetRateAed' | 'totalInr' | 'totalAed', raw: string) => {
-      setMetal(prev => applyMetalFieldChange(prev, field, parseNum(raw)));
+    (field: 'weight' | 'rateInr' | 'sheetRateAed' | 'totalInr' | 'totalAed', n: number) => {
+      setMetal(prev => applyMetalFieldChange(prev, field, n));
     },
     [],
   );
 
-  const onLabField = useCallback((field: LabTestFieldKey, raw: string) => {
-    setLab(prev => applyLabFieldChange(prev, field, parseNum(raw)));
+  const onLabField = useCallback((field: LabTestFieldKey, n: number) => {
+    setLab(prev => applyLabFieldChange(prev, field, n));
   }, []);
 
   const canSubmitCash = unitNum > 0 && rateNum > 0 && supplierId && warehouseId;
@@ -381,7 +419,7 @@ export default function AddPurchaseModal({
     (!metalAed ||
       (metal.metalSheetRateAed > 0 &&
         metal.metalRateAedPerG > 0 &&
-        metal.aedTotal > 0 &&
+        metalAedTotal > 0 &&
         aedAgentId.trim().length > 0));
   const canSubmit = isMetal ? canSubmitMetal : canSubmitCash;
 
@@ -441,7 +479,7 @@ export default function AddPurchaseModal({
       items.push({
         id: 'aedt',
         label: 'Total (AED)',
-        value: <FmtLedgerAed amount={metal.aedTotal} />,
+        value: <FmtLedgerAed amount={metalAedTotal} />,
         strong: true,
       });
     }
@@ -456,6 +494,7 @@ export default function AddPurchaseModal({
     lab.labTotalInr,
     metalNetInr,
     metalAed,
+    metalAedTotal,
   ]);
 
   const stockContext =
@@ -512,9 +551,11 @@ export default function AddPurchaseModal({
           units: 0,
           metalWeightG: metal.metalWeightG,
           metalRateInrPerG: metal.metalRateInrPerG,
-          metalRateAedPerG: metalAed ? metal.metalRateAedPerG : 0,
+          metalRateAedPerG: metalAed
+            ? computeImpliedMetalRateAedPerG(metal.metalWeightG, metalAedTotal)
+            : 0,
           inrTotal: metal.inrTotal,
-          aedTotal: metalAed ? metal.aedTotal : undefined,
+          aedTotal: metalAed ? metalAedTotal : undefined,
           labWeightG: lab.labWeightG || undefined,
           labChargeInrPerG: lab.labChargeInrPerG || undefined,
           labTotalInr: lab.labTotalInr || undefined,
@@ -682,58 +723,58 @@ export default function AddPurchaseModal({
                   <div className="flex min-h-0 flex-col gap-3 lg:flex-1 lg:justify-between">
                     <div className={metalAmountRows}>
                       <PurchaseField label="Weight (g) *" className="max-w-md">
-                        <input
+                        <FormattedNumberInput
                           className={denseInput}
-                          type="number"
-                          step="0.0001"
+                          book="inr"
+                          maxFractionDigits={METAL_WEIGHT_DECIMALS}
                           disabled={isSubmitting}
-                          value={metal.metalWeightG || ''}
-                          onChange={e => onMetalField('weight', e.target.value)}
+                          value={metal.metalWeightG}
+                          onNumericChange={n => onMetalField('weight', n)}
                         />
                       </PurchaseField>
                       <div className={metalAmountPairRow}>
                         <PurchaseField label="G rate (INR) *">
-                          <input
+                          <FormattedNumberInput
                             className={denseInput}
-                            type="number"
-                            step="0.0001"
+                            book="inr"
+                            maxFractionDigits={METAL_AMOUNT_DECIMALS}
                             disabled={isSubmitting}
-                            value={metal.metalRateInrPerG || ''}
-                            onChange={e => onMetalField('rateInr', e.target.value)}
+                            value={metal.metalRateInrPerG}
+                            onNumericChange={n => onMetalField('rateInr', n)}
                           />
                         </PurchaseField>
                         <PurchaseField label="Total (INR)">
-                          <input
+                          <FormattedNumberInput
                             className={denseInput}
-                            type="number"
-                            step="0.01"
+                            book="inr"
+                            maxFractionDigits={METAL_AMOUNT_DECIMALS}
                             disabled={isSubmitting}
-                            value={metal.inrTotal || ''}
-                            onChange={e => onMetalField('totalInr', e.target.value)}
+                            value={metal.inrTotal}
+                            onNumericChange={n => onMetalField('totalInr', n)}
                           />
                         </PurchaseField>
                       </div>
                       <SmoothCollapse open={metalAed}>
                         <div className={metalAmountPairRow}>
                           <PurchaseField label="Rate (AED)">
-                            <input
+                            <FormattedNumberInput
                               className={denseInput}
-                              type="number"
-                              step="0.0001"
+                              book="aed"
+                              maxFractionDigits={METAL_AMOUNT_DECIMALS}
                               disabled={isSubmitting}
-                              value={metal.metalSheetRateAed || ''}
-                              onChange={e => onMetalField('sheetRateAed', e.target.value)}
+                              value={metal.metalSheetRateAed}
+                              onNumericChange={n => onMetalField('sheetRateAed', n)}
                               title={`AED = INR × rate ÷ ${METAL_AED_RATE_DIVISOR.toLocaleString()}`}
                             />
                           </PurchaseField>
                           <PurchaseField label="Total (AED)">
-                            <input
+                            <FormattedNumberInput
                               className={denseInput}
-                              type="number"
-                              step="0.01"
+                              book="aed"
+                              maxFractionDigits={METAL_AMOUNT_DECIMALS}
                               disabled={isSubmitting}
-                              value={metal.aedTotal || ''}
-                              onChange={e => onMetalField('totalAed', e.target.value)}
+                              value={metal.aedTotal}
+                              onNumericChange={n => onMetalField('totalAed', n)}
                             />
                           </PurchaseField>
                         </div>
@@ -746,33 +787,33 @@ export default function AddPurchaseModal({
                       </div>
                       <div className={leftBottomGridMetal}>
                         <PurchaseField label="Weight (g)">
-                          <input
+                          <FormattedNumberInput
                             className={denseInput}
-                            type="number"
-                            step="0.0001"
+                            book="inr"
+                            maxFractionDigits={METAL_WEIGHT_DECIMALS}
                             disabled={isSubmitting}
-                            value={lab.labWeightG || ''}
-                            onChange={e => onLabField('weight', e.target.value)}
+                            value={lab.labWeightG}
+                            onNumericChange={n => onLabField('weight', n)}
                           />
                         </PurchaseField>
                         <PurchaseField label="Charge (INR/g)">
-                          <input
+                          <FormattedNumberInput
                             className={denseInput}
-                            type="number"
-                            step="0.0001"
+                            book="inr"
+                            maxFractionDigits={METAL_AMOUNT_DECIMALS}
                             disabled={isSubmitting}
-                            value={lab.labChargeInrPerG || ''}
-                            onChange={e => onLabField('charge', e.target.value)}
+                            value={lab.labChargeInrPerG}
+                            onNumericChange={n => onLabField('charge', n)}
                           />
                         </PurchaseField>
                         <PurchaseField label="Total (INR)">
-                          <input
+                          <FormattedNumberInput
                             className={denseInput}
-                            type="number"
-                            step="0.01"
+                            book="inr"
+                            maxFractionDigits={METAL_AMOUNT_DECIMALS}
                             disabled={isSubmitting}
-                            value={lab.labTotalInr || ''}
-                            onChange={e => onLabField('total', e.target.value)}
+                            value={lab.labTotalInr}
+                            onNumericChange={n => onLabField('total', n)}
                           />
                         </PurchaseField>
                       </div>
@@ -781,22 +822,24 @@ export default function AddPurchaseModal({
                 ) : (
                   <div className={leftTopGrid}>
                     <PurchaseField label="Unit rate (AED) *">
-                      <input
+                      <FormattedNumberInput
                         className={denseInput}
+                        book="aed"
+                        maxFractionDigits={RATE_DECIMAL_PLACES}
+                        disabled={isSubmitting}
                         value={rate}
-                        onChange={e => setRate(e.target.value)}
-                        type="number"
-                        step="any"
-                        placeholder="0.00"
+                        onNumericChange={setRate}
+                        placeholder="0"
                       />
                     </PurchaseField>
                     <PurchaseField label="Units *">
-                      <input
+                      <FormattedNumberInput
                         className={denseInput}
+                        book="aed"
+                        maxFractionDigits={RATE_DECIMAL_PLACES}
+                        disabled={isSubmitting}
                         value={units}
-                        onChange={e => setUnits(e.target.value)}
-                        type="number"
-                        step="any"
+                        onNumericChange={setUnits}
                         placeholder="0"
                       />
                     </PurchaseField>

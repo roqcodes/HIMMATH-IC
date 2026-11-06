@@ -31,7 +31,12 @@ import {
 } from '@/lib/icTransfer/branchOrderOwnership';
 import { SALE_PARTY_COLUMN_LABEL, SALE_FILTER_ALL_PARTIES_LABEL, SALE_FILTER_BY_PARTY_ARIA } from '@/lib/counterparties/labels';
 import { getBranchPortalDisplayName } from '@/lib/icTransfer/branchPortalScope';
-import { formatDealTableAed, formatDealTableInr, saleDealAed, saleDealInr } from '@/lib/icTransfer/dealTableDisplay';
+import {
+  formatDealTableAed,
+  formatDealTableInr,
+  saleDealInr,
+  saleTableDisplayAed,
+} from '@/lib/icTransfer/dealTableDisplay';
 import { canEditOrder } from '@/lib/icTransfer/customerOrderReview';
 
 const ORDER_COLUMNS = [
@@ -174,7 +179,7 @@ export default function ICTransferBranch() {
         case 'totalinr':
           return (saleDealInr(a) - saleDealInr(b)) * dir;
         case 'totalaed':
-          return (saleDealAed(a) - saleDealAed(b)) * dir;
+          return (saleTableDisplayAed(a) - saleTableDisplayAed(b)) * dir;
         case 'metal':
           return ((a.metalWeightG ?? 0) - (b.metalWeightG ?? 0)) * dir;
         case 'settlement': {
@@ -328,7 +333,7 @@ export default function ICTransferBranch() {
                 </div>
                 <div className="flex justify-between items-center rounded-xl bg-slate-50/70 p-2.5 text-xs text-slate-500">
                   <span>{s.settlementMode === 'metal' ? 'Metal' : 'IC'} · Units: <strong className="text-slate-700">{s.units.toLocaleString()}</strong></span>
-                  <span>Total: <strong className="text-slate-700">{formatDealTableAed(saleDealAed(s))}</strong></span>
+                  <span>Total: <strong className="text-slate-700">{formatDealTableAed(saleTableDisplayAed(s))}</strong></span>
                   <span>{formatDealTableInr(saleDealInr(s))}</span>
                 </div>
                 {s.settlementMode === 'metal' ? (
@@ -373,7 +378,7 @@ export default function ICTransferBranch() {
             <td className={icTdClass('right')}>
               <span className="font-mono tabular-nums text-indigo-900">{formatDealTableInr(saleDealInr(s))}</span>
             </td>
-            <td className={icTdClass('right')}><span className="font-bold text-slate-900">{formatDealTableAed(saleDealAed(s))}</span></td>
+            <td className={icTdClass('right')}><span className="font-bold text-slate-900">{formatDealTableAed(saleTableDisplayAed(s))}</span></td>
             <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
               <BranchOrderStatusCell sale={s} />
             </td>

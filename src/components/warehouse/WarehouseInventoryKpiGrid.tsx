@@ -14,18 +14,29 @@ type Props = {
   rangeLabel: string;
 };
 
+/** Weighted avg AED **rate** per IC unit (~36), not a dirham amount. */
+function formatIcAvgAedRate(rate: number): string {
+  if (!Number.isFinite(rate) || Math.abs(rate) < 0.00005) return '';
+  return rate.toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  });
+}
+
 function KpiCell({
   label,
   value,
   tone = 'default',
   align = 'left',
   count,
+  sub,
 }: {
   label: string;
   value: React.ReactNode;
   tone?: 'default' | 'emerald' | 'amber' | 'red' | 'blue' | 'slate';
   align?: 'left' | 'right' | 'center';
   count?: number;
+  sub?: React.ReactNode;
 }) {
   const tones = {
     default: 'text-slate-900 dark:text-slate-100',
@@ -57,6 +68,9 @@ function KpiCell({
           </span>
         )}
       </div>
+      {sub ? (
+        <div className="mt-0.5 text-[11px] font-semibold tabular-nums text-slate-500 dark:text-slate-400">{sub}</div>
+      ) : null}
     </div>
   );
 }
@@ -67,21 +81,50 @@ export default function WarehouseInventoryKpiGrid({ metrics, books, rangeLabel }
       {/* Container 1: Inventory & Transactions */}
       <section className={`${icfCard} overflow-hidden`} aria-label="Inventory & Transactions">
         <div className="grid grid-cols-2 divide-x divide-y divide-slate-100 border-b border-slate-100 dark:divide-slate-800 dark:border-slate-800 sm:grid-cols-3 lg:grid-cols-6">
-          <KpiCell 
-            label="IC Purchases" 
-            value={<FmtLedgerAed amount={metrics.cashPurchaseAed} />} 
+          <KpiCell
+            label="IC Purchases"
+            value={<FmtLedgerInr amount={metrics.cashPurchaseInr} />}
             tone="red"
             count={metrics.cashPurchases}
+            sub={
+              Math.abs(metrics.cashPurchaseAed) >= 0.005 ? (
+                <span className="text-slate-400">
+                  Booked <FmtLedgerAed amount={metrics.cashPurchaseAed} />
+                </span>
+              ) : null
+            }
           />
-          <KpiCell 
-            label="IC Sales" 
-            value={<FmtLedgerAed amount={metrics.cashSaleAed} />} 
+          <KpiCell
+            label="IC Sales"
+            value={<FmtLedgerInr amount={metrics.cashSaleInr} />}
             tone="emerald"
             count={metrics.cashSales}
+            sub={
+              Math.abs(metrics.cashSaleAed) >= 0.005 ? (
+                <span className="text-slate-400">
+                  Booked <FmtLedgerAed amount={metrics.cashSaleAed} />
+                </span>
+              ) : null
+            }
           />
           <KpiCell
             label="IC Stock"
             value={<FmtLedgerInr amount={metrics.currentStock * INR_PER_UNIT} />}
+            sub={
+              Math.abs(metrics.icStockAvgAedRate) >= 0.00005 ? (
+                <span
+                  title="Weighted average AED rate per IC unit (cash IC purchases + metal INR sales that add stock)."
+                  className="inline-flex flex-wrap items-baseline gap-x-1"
+                >
+                  <span className="font-semibold text-slate-400 dark:text-slate-500">Avg rate</span>
+                  <span className="tabular-nums text-slate-600 dark:text-slate-300">
+                    {formatIcAvgAedRate(metrics.icStockAvgAedRate)}
+                  </span>
+                </span>
+              ) : (
+                <span className="text-slate-400">Avg rate —</span>
+              )
+            }
           />
 
           <KpiCell 
@@ -118,7 +161,9 @@ export default function WarehouseInventoryKpiGrid({ metrics, books, rangeLabel }
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">IC P&L</span>
                 <span className="text-[11px] text-slate-400">{rangeLabel}</span>
              </div>
-             <p className={`text-base font-bold tabular-nums sm:text-lg ${metrics.cashGrossProfitAed >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+             <p
+                className={`text-base font-bold tabular-nums sm:text-lg ${metrics.cashGrossProfitAed >= 0 ? 'text-emerald-600' : 'text-red-600'}`}
+             >
                 <FmtLedgerAed amount={metrics.cashGrossProfitAed} />
              </p>
           </div>

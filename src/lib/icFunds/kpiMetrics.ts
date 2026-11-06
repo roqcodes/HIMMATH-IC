@@ -23,25 +23,25 @@ type ProfitLossSummary = {
 function computePlKpisFromStatement(statement: PlStatement, voucherCount?: number): AsicKpiMetric[] {
   const metrics: AsicKpiMetric[] = [
     {
-      label: 'Sales (AED)',
+      label: 'Sales',
       value: ledgerAedNode(statement.salesTotal),
-      hint: 'Income in the AED ledger',
+      hint: 'Income plus transfers to reserve',
       tone: statement.salesTotal > 0 ? 'emerald' : 'slate',
     },
     {
-      label: 'Direct costs (AED)',
+      label: 'Direct costs',
       value: ledgerAedNode(statement.directCostsTotal),
-      hint: 'Cost of IC sold on completed cash sales',
+      hint: 'COGS on completed sales (WAC); unsold stock stays in inventory',
       tone: statement.directCostsTotal > 0 ? 'red' : 'slate',
     },
     {
-      label: 'Gross profit (AED)',
+      label: 'Gross result',
       value: ledgerAedNode(statement.grossResult),
-      hint: 'Sales minus direct costs',
+      hint: 'Sales less direct costs',
       tone: statement.grossResult >= 0 ? 'emerald' : 'red',
     },
     {
-      label: 'Net profit (AED)',
+      label: 'Net result',
       value: ledgerAedNode(statement.netForPeriod),
       hint:
         voucherCount != null
@@ -242,19 +242,19 @@ export function computePlKpis(summary: ProfitLossSummary, voucherCount?: number)
 
   return [
     {
-      label: 'Income (AED)',
+      label: 'Income',
       value: ledgerAedNode(summary.income),
-      hint: 'Revenue credited in the AED ledger',
+      hint: 'Revenue credited in period',
       tone: summary.income > 0 ? 'emerald' : 'slate',
     },
     {
-      label: 'Total costs (AED)',
+      label: 'Total costs',
       value: ledgerAedNode(totalCosts),
       hint: `Op ${fmtLedgerAed(summary.expense)} · Direct ${fmtLedgerAed(summary.dExpense)}`,
       tone: totalCosts > 0 ? 'red' : 'slate',
     },
     {
-      label: 'Net profit (AED)',
+      label: 'Net result',
       value: ledgerAedNode(summary.net),
       hint: summary.net >= 0 ? 'Profit for the period' : 'Loss for the period',
       tone: summary.net >= 0 ? 'emerald' : 'red',
@@ -289,8 +289,6 @@ export function computeBooksKpis(input: {
     currency?: 'AED' | 'INR';
     lines: Array<{ debit: number; credit: number; status?: string }>;
   } | null;
-  /** Active tab: P&L AED vs metal INR, warehouse IC vs metal, metal register INR vs AED. */
-  reportSlice?: 'aed' | 'inr' | 'ic' | 'metal';
 }): AsicKpiMetric[] {
   const {
     reportView,
@@ -305,35 +303,20 @@ export function computeBooksKpis(input: {
     warehousePl,
     settlementTradeReport,
     statement,
-    reportSlice,
   } = input;
 
-  if (reportView === 'profit-loss' && reportSlice === 'inr') {
-    const t = warehousePl?.totals;
-    const metalInr = t?.metalProfitInr ?? 0;
-    const grams = t?.metalSoldG ?? 0;
-    const metalLines = (warehousePl?.lines ?? []).filter(
-      l => l.settlementMode === 'metal' && l.bookedCurrency !== 'AED',
-    );
-    const saleInr = metalLines.reduce((s, l) => s + l.revenue, 0);
-    return [
-      {
-        label: 'Metal sold (INR)',
-        value: ledgerInrNode(saleInr),
-        hint: `${grams.toLocaleString(undefined, { maximumFractionDigits: 2 })} g sold`,
-        tone: saleInr > 0 ? 'emerald' : 'slate',
-      },
-      {
-        label: 'Metal profit (INR)',
-        value: ledgerInrNode(metalInr),
-        hint: 'Sale rupees minus purchase rupees — not added to AED profit',
-        tone: metalInr >= 0 ? 'emerald' : 'red',
-      },
-    ];
-  }
-
   if (reportView === 'profit-loss' && plStatement) {
-    return computePlKpisFromStatement(plStatement, vouchers.length);
+    const metrics = computePlKpisFromStatement(plStatement, vouchers.length);
+    const metalInr = warehousePl?.totals.metalProfitInr;
+    if (metalInr != null && (Math.abs(metalInr) > 0.005 || warehousePl!.totals.metalSoldG > 0)) {
+      metrics.push({
+        label: 'Metal P&L (INR)',
+        value: ledgerInrNode(metalInr),
+        hint: 'Commodity book · not included in AED net',
+        tone: metalInr >= 0 ? 'emerald' : 'red',
+      });
+    }
+    return metrics;
   }
 
   if (reportView === 'profit-loss' && profitLoss) {
@@ -349,7 +332,7 @@ export function computeBooksKpis(input: {
         value: ledgerAedNode(balanceSheet.totalAssets),
         hint:
           inventory > 0.005
-            ? `Cash ${fmtLedgerAed(balanceSheet.bank)} · AR ${fmtLedgerAed(balanceSheet.receivables)} · Unsold IC ${fmtLedgerAed(inventory)}`
+            ? `Cash ${fmtLedgerAed(balanceSheet.bank)} · AR ${fmtLedgerAed(balanceSheet.receivables)} · IC stock ${fmtLedgerAed(inventory)}`
             : `Cash ${fmtLedgerAed(balanceSheet.bank)} · AR ${fmtLedgerAed(balanceSheet.receivables)}`,
         tone: 'emerald',
       },
@@ -471,9 +454,9 @@ export function computeBooksKpis(input: {
         tone: ap > 0 ? 'amber' : 'slate',
       },
       {
-        label: 'Net (AED)',
+        label: 'Net personal',
         value: ledgerAedNode(ar - ap),
-        hint: 'Customers owe us minus we owe suppliers',
+        hint: 'Receivables minus payables',
         tone: ar - ap >= 0 ? 'emerald' : 'red',
       },
       {
@@ -488,52 +471,30 @@ export function computeBooksKpis(input: {
   if ((reportView === 'fund-trades' || reportView === 'metal-trades') && settlementTradeReport) {
     const s = settlementTradeReport.summary;
     const isMetal = settlementTradeReport.settlementMode === 'metal';
-    if (isMetal && reportSlice === 'aed') {
-      return [
-        {
-          label: 'Purchases (AED)',
-          value: ledgerAedNode(s.purchaseAed),
-          hint: `${s.purchaseCount} agent buys`,
-          tone: 'amber',
-        },
-        {
-          label: 'Sales (AED)',
-          value: ledgerAedNode(s.saleAed),
-          hint: `${s.saleCount} agent sells`,
-          tone: 'emerald',
-        },
-        {
-          label: 'Net with agent',
-          value: ledgerAedNode(s.saleAed - s.purchaseAed),
-          hint: 'Cash with the AED agent — not metal profit',
-          tone: s.saleAed - s.purchaseAed >= 0 ? 'emerald' : 'red',
-        },
-        {
-          label: 'Entries',
-          value: (s.purchaseCount + s.saleCount).toLocaleString(),
-          hint: 'Buy + sell lines',
-          tone: 'indigo',
-        },
-      ];
-    }
     if (isMetal) {
       return [
         {
-          label: 'Purchased (INR)',
+          label: 'INR purchased',
           value: ledgerInrNode(s.purchaseInr),
           valueTitle: fmtLedgerInr(s.purchaseInr),
-          hint: `${s.purchaseCount} buys · ${s.metalWeightPurchasedG.toLocaleString(undefined, { maximumFractionDigits: 2 })} g`,
+          hint: `${s.purchaseCount} cash-metal buys · ${s.metalWeightPurchasedG.toLocaleString(undefined, { maximumFractionDigits: 2 })} g`,
           tone: 'indigo',
         },
         {
-          label: 'Sold (INR)',
+          label: 'INR sold',
           value: ledgerInrNode(s.saleInr),
           valueTitle: fmtLedgerInr(s.saleInr),
-          hint: `${s.saleCount} sells · ${s.metalWeightSoldG.toLocaleString(undefined, { maximumFractionDigits: 2 })} g`,
+          hint: `${s.saleCount} cash-metal sells · ${s.metalWeightSoldG.toLocaleString(undefined, { maximumFractionDigits: 2 })} g`,
           tone: 'slate',
         },
         {
-          label: 'Metal profit (INR)',
+          label: 'Agent AED',
+          value: ledgerAedNode(s.purchaseAed + s.saleAed),
+          hint: `In ${fmtLedgerAed(s.purchaseAed)} · out ${fmtLedgerAed(s.saleAed)}`,
+          tone: 'amber',
+        },
+        {
+          label: 'Metal P&L',
           ...formatMetalPlKpi({
             metalProfitAed: 0,
             metalProfitInr: s.bookedInrProfit,
@@ -544,27 +505,27 @@ export function computeBooksKpis(input: {
     }
     return [
       {
-        label: 'Purchases (AED)',
+        label: 'Purchase (fund)',
         value: ledgerAedNode(s.purchaseAed),
         hint: `${s.purchaseCount} entries · ${s.purchaseUnits.toLocaleString(undefined, { maximumFractionDigits: 2 })} units`,
         tone: 'amber',
       },
       {
-        label: 'Sales (AED)',
+        label: 'Sales (fund)',
         value: ledgerAedNode(s.saleAed),
         hint: `${s.saleCount} entries · ${s.saleUnits.toLocaleString(undefined, { maximumFractionDigits: 2 })} units`,
         tone: 'emerald',
       },
       {
-        label: 'Net cash (AED)',
+        label: 'Net movement',
         value: ledgerAedNode(s.saleAed - s.purchaseAed),
-        hint: 'Cash in minus cash out — not profit',
+        hint: 'Cash AED in minus out — not gross profit (see P&L / warehouse GP)',
         tone: s.saleAed - s.purchaseAed >= 0 ? 'emerald' : 'red',
       },
       {
-        label: 'Entries',
+        label: 'Total entries',
         value: (s.purchaseCount + s.saleCount).toLocaleString(),
-        hint: 'Buy + sell lines',
+        hint: 'Buy + sell lines in register',
         tone: 'indigo',
       },
     ];
@@ -572,45 +533,26 @@ export function computeBooksKpis(input: {
 
   if (reportView === 'warehouse-pl' && warehousePl) {
     const t = warehousePl.totals;
-    if (reportSlice === 'metal') {
-      const metrics: AsicKpiMetric[] = [
-        {
-          label: 'Metal profit (INR)',
-          ...formatMetalPlKpi({
-            metalProfitAed: 0,
-            metalProfitInr: t.metalProfitInr,
-            rangeLabel: `${t.metalSoldG.toLocaleString(undefined, { maximumFractionDigits: 2 })} g sold`,
-          }),
-        },
-      ];
-      if (Math.abs(t.metalProfitAed) > 0.005) {
-        metrics.push({
-          label: 'Agent P&L (AED)',
-          value: ledgerAedNode(t.metalProfitAed),
-          hint: 'Metal settled with an AED agent — not added to INR',
-          tone: t.metalProfitAed >= 0 ? 'emerald' : 'red',
-        });
-      }
-      metrics.push({
-        label: 'Warehouses',
-        value: warehousePl.warehouses.length.toLocaleString(),
-        hint: 'With metal activity in period',
-        tone: 'slate',
-      });
-      return metrics;
-    }
     return [
       {
-        label: 'IC sales (AED)',
+        label: 'IC revenue',
         value: ledgerAedNode(t.revenue),
-        hint: `${t.saleUnits.toLocaleString(undefined, { maximumFractionDigits: 2 })} units sold`,
+        hint: `${t.saleUnits.toLocaleString(undefined, { maximumFractionDigits: 2 })} cash IC units sold`,
         tone: 'emerald',
       },
       {
-        label: 'IC profit (AED)',
+        label: 'IC gross profit',
         value: ledgerAedNode(t.grossProfit),
-        hint: `Cost of sales ${fmtLedgerAed(t.cogs)}`,
+        hint: `COGS ${fmtLedgerAed(t.cogs)} · WAC`,
         tone: t.grossProfit >= 0 ? 'emerald' : 'red',
+      },
+      {
+        label: 'Metal P&L',
+        ...formatMetalPlKpi({
+          metalProfitAed: t.metalProfitAed,
+          metalProfitInr: t.metalProfitInr,
+          rangeLabel: '',
+        }),
       },
       {
         label: 'Warehouses',

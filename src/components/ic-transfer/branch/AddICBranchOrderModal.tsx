@@ -14,7 +14,8 @@ import { WorkflowNotice } from '../shared/orderWorkflow';
 import RateGroupBanner from '../shared/RateGroupBanner';
 import CopyOrderDetailsButton from '../shared/CopyOrderDetailsButton';
 import TransactionTypeSelector from '../shared/TransactionTypeSelector';
-import { computeICSaleAmounts, formatAmount } from '@/lib/icTransfer/rateCalculations';
+import { computeICSaleAmounts, formatAmount, RATE_DECIMAL_PLACES } from '@/lib/icTransfer/rateCalculations';
+import FormattedNumberInput from '../shared/FormattedNumberInput';
 import { resolveGroupOrderRate } from '@/lib/icTransfer/ratePricing';
 import InrAmountInWords from '../shared/InrAmountInWords';
 import { DEFAULT_IC_SALE_TRANSACTION_TYPE, normalizeICSaleTransactionType, transactionTypeRequiresBank, type ICSaleTransactionType } from '@/lib/icTransfer/transactionTypes';
@@ -42,7 +43,7 @@ const InputField = ({ label, children }: { label: string; children: React.ReactN
 export default function AddICBranchOrderModal({ open, onClose, initialData }: Props) {
   const { addICSale, resubmitICSale, branches, currentSlug, icRateGroups, user, showToast } = useApp();
   const isBranchManager = user?.role === 'branch_manager';
-  const [units, setUnits] = useState(initialData?.units?.toString() || '');
+  const [units, setUnits] = useState(initialData?.units ?? 0);
   const [transactionType, setTransactionType] = useState<ICSaleTransactionType>(() =>
     normalizeICSaleTransactionType(initialData?.transactionType),
   );
@@ -99,7 +100,7 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
 
   const resolvedBranchRate = useMemo(() => {
     if (!applicableGroup) return { saleRate: 0, conversionRate: 1 };
-    return resolveGroupOrderRate(applicableGroup, transactionType, parseFloat(units) || 0);
+    return resolveGroupOrderRate(applicableGroup, transactionType, units);
   }, [applicableGroup, transactionType, units]);
 
   const groupSaleRate = initialData ? initialData.unitRate : resolvedBranchRate.saleRate;
@@ -121,7 +122,7 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
 
   useEffect(() => {
     if (open) {
-      setUnits(initialData?.units?.toString() || '');
+      setUnits(initialData?.units ?? 0);
       setTransactionType(normalizeICSaleTransactionType(initialData?.transactionType));
       setBank(
         initialData?.transactionType === 'by_hand' ? '' : (initialData?.bank || ''),
@@ -173,7 +174,7 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
     setDeleteToken('');
   };
 
-  const unitNum = parseFloat(units) || 0;
+  const unitNum = units;
   const rateNum = groupSaleRate;
   const serviceChargeNum = 0;
 
@@ -398,24 +399,26 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
 
               <div className="order-1 md:order-2 grid grid-cols-1 md:grid-cols-2 gap-4">
                 <InputField label="Order Units">
-                  <input 
-                    className={formInput} 
-                    value={units} 
-                    onChange={e => setUnits(e.target.value)} 
-                    type="number" 
-                    step="0.01" 
+                  <FormattedNumberInput
+                    className={formInput}
+                    book="aed"
+                    maxFractionDigits={RATE_DECIMAL_PLACES}
+                    disabled={isSubmitting}
+                    value={units}
+                    onNumericChange={setUnits}
                     placeholder="Enter units quantity"
-                    required
                   />
                 </InputField>
 
                 <InputField label="Unit Rate (AED) (Locked)">
-                  <input 
-                    className={`${formInput} bg-slate-50 text-slate-500 font-semibold cursor-not-allowed`} 
-                    value={rateNum} 
-                    disabled 
-                    readOnly 
-                    type="number" 
+                  <FormattedNumberInput
+                    className={`${formInput} bg-slate-50 text-slate-500 font-semibold cursor-not-allowed`}
+                    book="aed"
+                    maxFractionDigits={RATE_DECIMAL_PLACES}
+                    value={rateNum}
+                    disabled
+                    readOnly
+                    onNumericChange={() => {}}
                   />
                 </InputField>
               </div>

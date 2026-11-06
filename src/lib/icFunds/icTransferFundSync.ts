@@ -4,8 +4,10 @@ import type { QueryResult } from 'pg';
 import { query, withTransaction, sortedIds } from '@/lib/db';
 import { validateVoucherAccounts } from '@/lib/icFunds/voucherRules';
 import { validateVoucherCurrencyPolicy, roundLedgerAmount, IC_FUNDS_BASE_CURRENCY } from '@/lib/icFunds/currencyPolicy';
+import { isMetalAedPayment } from '@/lib/domain/books';
 import { ensureHqIcFundsBranch } from '@/lib/icFunds/ensureHqBranch';
 import { HQ_IC_FUNDS_BRANCH_ID } from '@/lib/icFunds/hqBranch';
+import { computeIcCashAedTotal } from '@/lib/icTransfer/rateCalculations';
 import {
   addPurchaseToPool,
   compareInventoryEvents,
@@ -300,6 +302,32 @@ async function voidMetalCashIcStockVoucher(
   await voidVoucherByReference(client, branchId, 'metal_sale_ic_stock', saleId);
 }
 
+/**
+ * Metal·INR completed sales add IC units to the WAC pool (same as dealProfit / warehouse KPI).
+ * Agent-AED metal is excluded.
+ */
+function metalInrSaleIcUnitsFromRow(row: {
+  settlement_mode?: unknown;
+  metal_payment_method?: unknown;
+  units?: unknown;
+}): number {
+  if (String(row.settlement_mode || '') !== 'metal') return 0;
+  if (isMetalAedPayment(String(row.metal_payment_method ?? ''))) return 0;
+  return Number(row.units) || 0;
+}
+
+function metalInrIcPoolCostAedFromRow(
+  row: { unit_rate?: unknown; aed_amount?: unknown },
+  units: number,
+): number {
+  const u = Number(units);
+  const rate = Number(row.unit_rate) || 0;
+  if (u > 0 && rate > 0) return computeIcCashAedTotal(u, rate);
+  const aed = Number(row.aed_amount) || 0;
+  if (aed > 0) return Number((aed / 100).toFixed(4));
+  return 0;
+}
+
 async function voidSaleMarginVouchers(
   client: DbClient,
   branchId: string,
@@ -347,6 +375,32 @@ async function loadWarehouseInventoryEvents(
       sortKey: String(row.id),
       units,
       cost: purchaseAedTotal(units, Number(row.unit_rate) || 0, row.aed_total),
+    });
+  }
+
+  const metalInrSalesRes = await client.query(
+    `SELECT id, units, unit_rate, aed_amount, settlement_mode, metal_payment_method,
+            COALESCE(status_updated_at, created_at) AS completed_at, created_at
+     FROM ic_sales
+     WHERE warehouse_id = $1
+       AND order_status = 'completed'
+       AND COALESCE(settlement_mode, 'cash') = 'metal'
+       AND COALESCE(metal_payment_method, '') <> 'AED'
+       AND id <> $2::uuid
+       AND COALESCE(status_updated_at, created_at) <= $3::timestamptz
+     ORDER BY completed_at ASC, created_at ASC, id ASC`,
+    [warehouseId, excludeSaleId, asOf],
+  );
+
+  for (const row of metalInrSalesRes.rows) {
+    const units = metalInrSaleIcUnitsFromRow(row);
+    if (units <= 0) continue;
+    events.push({
+      kind: 'purchase',
+      at: new Date(String(row.completed_at)).getTime(),
+      sortKey: `metal-inr-${String(row.id)}`,
+      units,
+      cost: metalInrIcPoolCostAedFromRow(row, units),
     });
   }
 
@@ -403,6 +457,31 @@ async function loadGlobalInventoryEvents(
       sortKey: String(row.id),
       units,
       cost: purchaseAedTotal(units, Number(row.unit_rate) || 0, row.aed_total),
+    });
+  }
+
+  const metalInrSalesRes = await client.query(
+    `SELECT id, units, unit_rate, aed_amount, settlement_mode, metal_payment_method,
+            COALESCE(status_updated_at, created_at) AS completed_at, created_at
+     FROM ic_sales
+     WHERE order_status = 'completed'
+       AND COALESCE(settlement_mode, 'cash') = 'metal'
+       AND COALESCE(metal_payment_method, '') <> 'AED'
+       AND id <> $2::uuid
+       AND COALESCE(status_updated_at, created_at) <= $3::timestamptz
+     ORDER BY completed_at ASC, created_at ASC, id ASC`,
+    [asOf, excludeSaleId, asOf],
+  );
+
+  for (const row of metalInrSalesRes.rows) {
+    const units = metalInrSaleIcUnitsFromRow(row);
+    if (units <= 0) continue;
+    events.push({
+      kind: 'purchase',
+      at: new Date(String(row.completed_at)).getTime(),
+      sortKey: `metal-inr-${String(row.id)}`,
+      units,
+      cost: metalInrIcPoolCostAedFromRow(row, units),
     });
   }
 

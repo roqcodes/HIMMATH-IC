@@ -59,6 +59,7 @@ import { isMetalAedPayment } from '@/lib/domain/books';
 import { allocateLotAmount, computeMetalLotProfit } from '@/lib/icTransfer/metalInventory';
 import { allocateMetalLotCostAed, allocateMetalLotCostInr } from '@/lib/icTransfer/metalLotCost';
 import { netMetalInr } from '@/lib/icTransfer/labTest';
+import { INR_PER_UNIT } from '@/lib/icTransfer/rateCalculations';
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
 import { validateVoucherAccounts } from '@/lib/icFunds/voucherRules';
 import { validateVoucherCurrencyPolicy, roundLedgerAmount } from '@/lib/icFunds/currencyPolicy';
@@ -2261,9 +2262,11 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
          p.metal_weight_g,
          p.metal_payment_method,
          p.created_at,
-         w.name AS warehouse_name
+         w.name AS warehouse_name,
+         cp.name AS supplier_name
        FROM ic_purchases p
        JOIN ic_warehouses w ON w.id = p.warehouse_id
+       LEFT JOIN ic_counterparties cp ON cp.id = p.counterparty_id
        WHERE p.warehouse_id IS NOT NULL ${branchFilter}
        ORDER BY p.created_at ASC, p.id ASC`,
       branchParams,
@@ -2334,21 +2337,68 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
       }>
     >();
 
+    const lines: ICWarehousePLReport['lines'] = [];
+
     for (const row of purchasesRes.rows) {
       const warehouseId = String(row.warehouse_id);
       warehouseMeta.set(warehouseId, String(row.warehouse_name ?? 'Warehouse'));
       if (row.settlement_mode === 'metal') {
-        metalLots.set(String(row.id), {
+        const purchaseId = String(row.id);
+        metalLots.set(purchaseId, {
           inrTotal: Number(row.inr_total) || 0,
           aedTotal: Number(row.aed_total) || 0,
           metalWeightG: Number(row.metal_weight_g) || 0,
           paymentMethod: row.metal_payment_method ? String(row.metal_payment_method) : null,
           labTotalInr: Number(row.lab_total_inr) || 0,
         });
+        const createdAt = new Date(String(row.created_at));
+        const purchaseMs = createdAt.getTime();
+        const metalWg = Number(row.metal_weight_g) || 0;
+        const isAedPur = isMetalAedPayment(row.metal_payment_method);
+        const purchaseInrForLine = allocateMetalLotCostInr(
+          {
+            inrTotal: Number(row.inr_total) || 0,
+            metalWeightG: metalWg,
+            labTotalInr: Number(row.lab_total_inr) || 0,
+          },
+          metalWg,
+        );
+        const purchaseAedForLine = allocateMetalLotCostAed(
+          { aedTotal: Number(row.aed_total) || 0, metalWeightG: metalWg },
+          metalWg,
+        );
+        const inPeriod =
+          (periodStartMs == null || purchaseMs >= periodStartMs) &&
+          (periodEndMs == null || purchaseMs <= periodEndMs);
+        if (inPeriod) {
+          lines.push({
+            lineKind: 'metal_purchase',
+            saleId: purchaseId,
+            eventAtMs: purchaseMs,
+            saleDate: isoDate(createdAt),
+            warehouseId,
+            warehouseName: String(row.warehouse_name ?? 'Warehouse'),
+            customerName: String(row.supplier_name ?? 'Supplier'),
+            units: metalWg,
+            saleRate: 0,
+            revenue: 0,
+            avgPurchaseRate: 0,
+            cogs: isAedPur ? purchaseAedForLine : purchaseInrForLine,
+            grossProfit: 0,
+            marginPct: 0,
+            settlementMode: 'metal',
+            metalWeightG: metalWg,
+            bookedCurrency: isAedPur ? 'AED' : 'INR',
+            referenceId: purchaseId,
+            metalDisplayRevenueInr: 0,
+            metalDisplayCostInr: purchaseInrForLine,
+            metalDisplayProfitInr: 0,
+          });
+        }
         const metalEv = metalEventsByWarehouse.get(warehouseId) ?? [];
         metalEv.push({
-          at: new Date(String(row.created_at)).getTime(),
-          grams: Number(row.metal_weight_g) || 0,
+          at: purchaseMs,
+          grams: metalWg,
         });
         metalEventsByWarehouse.set(warehouseId, metalEv);
         continue;
@@ -2417,7 +2467,6 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
       salesByWarehouse.set(warehouseId, sales);
     }
 
-    const lines: ICWarehousePLReport['lines'] = [];
     const warehouseSummaries = new Map<
       string,
       {
@@ -2496,7 +2545,9 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
         if (!margin) continue;
 
         lines.push({
+          lineKind: 'sale',
           saleId: sale.id,
+          eventAtMs: saleMs,
           saleDate: isoDate(sale.saleAt),
           warehouseId,
           warehouseName: sale.warehouseName,
@@ -2509,6 +2560,7 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
           grossProfit: margin.grossProfit,
           marginPct: margin.marginPct,
           settlementMode: 'cash',
+          referenceId: sale.id,
         });
 
         periodSaleUnits += margin.deliveredUnits;
@@ -2594,7 +2646,9 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
         metalSoldG += sale.saleG;
         const isAedMetal = sale.paymentMethod === 'AED';
         lines.push({
+          lineKind: 'sale',
           saleId: sale.id,
+          eventAtMs: saleMs,
           saleDate: isoDate(sale.saleAt),
           warehouseId,
           warehouseName: sale.warehouseName,
@@ -2609,6 +2663,10 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
           settlementMode: 'metal',
           metalWeightG: sale.saleG,
           bookedCurrency: isAedMetal ? 'AED' : 'INR',
+          referenceId: sale.id,
+          metalDisplayRevenueInr: pl.saleInr,
+          metalDisplayCostInr: pl.purchaseInr,
+          metalDisplayProfitInr: pl.profitInr,
         });
       }
 
@@ -2637,7 +2695,13 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
       });
     }
 
-    lines.sort((a, b) => a.saleDate.localeCompare(b.saleDate) || a.saleId.localeCompare(b.saleId));
+    lines.sort(
+      (a, b) =>
+        a.saleDate.localeCompare(b.saleDate) ||
+        a.eventAtMs - b.eventAtMs ||
+        a.lineKind.localeCompare(b.lineKind) ||
+        a.saleId.localeCompare(b.saleId),
+    );
 
     const warehouses = [...warehouseSummaries.entries()]
       .map(([warehouseId, summary]) => ({
@@ -2823,7 +2887,18 @@ export async function getICSettlementTradeReportAction(params: unknown): Promise
     const purchases: ICSettlementTradeLine[] = purchaseRes.rows.map(row => {
       const units = Number(row.units) || 0;
       const aedTotal = purchaseAedTotal(units, Number(row.unit_rate) || 0, row.aed_total);
-      const unitRate = resolveTradeUnitRateAed(units, Number(row.unit_rate) || 0, aedTotal);
+      const inrNotional =
+        settlementMode === 'cash'
+          ? row.inr_total != null
+            ? Number(row.inr_total)
+            : units * INR_PER_UNIT
+          : undefined;
+      const unitRate = resolveTradeUnitRateAed(
+        units,
+        Number(row.unit_rate) || 0,
+        aedTotal,
+        inrNotional,
+      );
       const id = String(row.id);
       return {
         id,
@@ -2860,7 +2935,18 @@ export async function getICSettlementTradeReportAction(params: unknown): Promise
     const sales: ICSettlementTradeLine[] = salesRes.rows.map(row => {
       const units = Number(row.units) || 0;
       const aedTotal = (Number(row.aed_amount) || 0) + (Number(row.service_charge) || 0);
-      const unitRate = resolveTradeUnitRateAed(units, Number(row.unit_rate) || 0, aedTotal);
+      const inrNotional =
+        settlementMode === 'cash'
+          ? row.inr_total != null
+            ? Number(row.inr_total)
+            : units * INR_PER_UNIT
+          : undefined;
+      const unitRate = resolveTradeUnitRateAed(
+        units,
+        Number(row.unit_rate) || 0,
+        aedTotal,
+        inrNotional,
+      );
       const id = String(row.id);
       const counterparty = String(row.order_customer_name || row.customer_master_name || row.customer_name || 'Customer');
       const saleG = row.metal_weight_g != null ? Number(row.metal_weight_g) : 0;

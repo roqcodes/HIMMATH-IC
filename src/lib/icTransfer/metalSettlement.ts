@@ -1,4 +1,4 @@
-import { INR_PER_UNIT } from './rateCalculations';
+import { computeIcCashAedTotal, INR_PER_UNIT } from './rateCalculations';
 import { netMetalInr } from '@/lib/icTransfer/labTest';
 import { isMetalAedPayment, normalizeMetalPaymentMethod, type MetalPaymentMethod } from '@/lib/domain/books';
 
@@ -9,8 +9,8 @@ export const METAL_WEIGHT_DECIMALS = 4;
 export const METAL_AMOUNT_DECIMALS = 4;
 
 /**
- * Metal sheet RATE column: AED = INR × RATE / 1,000.
- * This is not AED per gram and not IC units (1 unit = 1 lakh).
+ * Metal sheet RATE (~36, same range as cash IC): **AED = INR × RATE ÷ 1,000**.
+ * Example: 6,995,940 × 36.35 ÷ 1,000 = 254,302.42.
  */
 export const METAL_AED_RATE_DIVISOR = 1_000;
 
@@ -26,13 +26,13 @@ export type MetalSettlementInput = {
 export type MetalSettlementFields = {
   metalWeightG: number;
   metalRateInrPerG: number;
-  /** Sheet RATE (purchases) or IC unit rate (sales) depending on aedRateMode. */
+  /** Sheet RATE: AED = INR × rate ÷ 1000 (same ~36 range as cash IC unit rate). */
   metalSheetRateAed: number;
   /** Implied AED per gram, stored on the row. */
   metalRateAedPerG: number;
   inrTotal: number;
   aedTotal: number;
-  /** Sales: AED rate is per IC unit (1 unit = ₹1 lakh). Purchases keep sheet RATE. */
+  /** Legacy: unit mode used per-IC-unit rate on sales; prefer sheet formula everywhere. */
   aedRateMode?: 'sheet' | 'unit';
 };
 
@@ -121,10 +121,21 @@ export function computeMetalAedFromInr(inrTotal: number, sheetRateAed: number): 
   return round4((round4(inrTotal) * round4(sheetRateAed)) / METAL_AED_RATE_DIVISOR);
 }
 
+/** Implied sheet RATE from INR and AED (AED × 1000 ÷ INR). */
 export function computeMetalSheetRateAed(inrTotal: number, aedTotal: number): number {
   const inr = round4(inrTotal);
   if (inr <= 0) return 0;
   return round4((round4(aedTotal) * METAL_AED_RATE_DIVISOR) / inr);
+}
+
+/**
+ * Cash IC RATE and metal sheet RATE are the same ~36 field (AED per IC unit vs INR×rate÷1000).
+ * Prefill metal from warehouse WAC 1:1.
+ */
+export function metalSheetRateFromIcUnitRate(icUnitRateAed: number): number {
+  const u = Number(icUnitRateAed);
+  if (!Number.isFinite(u) || u <= 0) return 0;
+  return round4(u);
 }
 
 export function computeImpliedMetalRateAedPerG(weightG: number, aedTotal: number): number {
@@ -173,21 +184,15 @@ export function metalFieldsFromRecord(input: {
   };
 }
 
-/** Metal sale form: AED rate is IC unit rate, not the sheet RATE column. */
+/** Metal sale form: same sheet RATE as purchases (AED = INR × rate ÷ 1000). */
 export function metalSaleFieldsFromRecord(
   input: Parameters<typeof metalFieldsFromRecord>[0] & { unitRate?: number | null },
 ): MetalSettlementFields {
   const base = metalFieldsFromRecord(input);
-  const unitRate =
-    Number(input.unitRate) > 0
-      ? round4(Number(input.unitRate))
-      : icUnitRateFromAedTotal(base.inrTotal, base.aedTotal);
   return {
     ...base,
-    aedRateMode: 'unit',
-    metalSheetRateAed: unitRate,
-    aedTotal:
-      base.aedTotal > 0 ? base.aedTotal : aedTotalFromIcUnitRate(base.inrTotal, unitRate),
+    /** Omit aedRateMode — purchases and sales both use sheet formula in applyMetalFieldChange. */
+    aedTotal: base.aedTotal > 0 ? base.aedTotal : computeMetalAedFromInr(base.inrTotal, base.metalSheetRateAed),
   };
 }
 
@@ -310,10 +315,12 @@ export function validateMetalSaleSettlementInput(input: MetalSettlementInput): v
   if (round4(input.totalInr) <= 0) throw new Error('Total INR must be greater than zero.');
   if (round4(input.metalRateInrPerG) <= 0) throw new Error('Rate per gram (INR) must be greater than zero.');
   if (round4(input.totalAed) <= 0) throw new Error('Total AED must be greater than zero.');
-  const units = icUnitsFromInrTotal(input.totalInr);
-  if (units <= 0) throw new Error('INR total must convert to IC units (₹1 lakh = 1 unit).');
-  if (icUnitRateFromAedTotal(input.totalInr, input.totalAed) <= 0) {
-    throw new Error('AED unit rate must be greater than zero.');
+  const labTotal = round4(input.labTotalInr ?? 0);
+  const netInr = netMetalInr(round4(input.totalInr), labTotal);
+  const units = icUnitsFromInrTotal(netInr);
+  if (units <= 0) throw new Error('INR total (after lab) must convert to IC units (₹1 lakh = 1 unit).');
+  if (computeMetalSheetRateAed(netInr, input.totalAed) <= 0) {
+    throw new Error('AED sheet rate must be greater than zero.');
   }
 }
 
@@ -351,7 +358,7 @@ export function normalizeCashPurchase(params: {
   const aedTotal =
     params.aedTotal != null && Number.isFinite(Number(params.aedTotal))
       ? round4(Number(params.aedTotal))
-      : round4(units * unitRate);
+      : round4(computeIcCashAedTotal(units, unitRate));
   if (aedTotal <= 0) throw new Error('AED total must be greater than zero.');
   return {
     settlementMode: 'cash',
@@ -377,7 +384,8 @@ export function normalizeMetalSale(
   const netInr = netMetalInr(inrTotal, labTotal);
   const units = deriveUnitsFromInrTotal(netInr);
   const aedTotal = round4(input.totalAed);
-  const unitRate = icUnitRateFromAedTotal(inrTotal, aedTotal);
+  /** Stored RATE is the metal sheet field (AED × 1000 ÷ net INR), same ~36 range as cash IC. */
+  const unitRate = computeMetalSheetRateAed(netInr, aedTotal);
   const charge = round4(Math.max(0, serviceCharge));
   const aedAmount = round4(Math.max(0, aedTotal - charge));
   return {
@@ -460,6 +468,7 @@ export type PurchaseFormInput = {
   metalRateInrPerG?: number;
   metalRateAedPerG?: number;
   inrTotal?: number;
+  labTotalInr?: number | null;
   metalPaymentMethod?: MetalPaymentMethod | 'INR' | 'AED' | string | null;
   aedAgentId?: string | null;
 };
@@ -532,6 +541,7 @@ export function resolveNormalizedSale(
         metalRateAedPerG: Number(input.metalRateAedPerG),
         totalInr: Number(input.inrTotal),
         totalAed: Number(input.aedAmount ?? input.aedTotal),
+        labTotalInr: Number(input.labTotalInr ?? 0),
       },
       input.serviceCharge ?? 0,
       { paymentMethod, aedAgentId: input.aedAgentId },

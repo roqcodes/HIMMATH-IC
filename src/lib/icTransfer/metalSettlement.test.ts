@@ -4,11 +4,11 @@ import {
   applyMetalFieldChange,
   computeMetalRateInrFromTotal,
   computeMetalSheetRateAed,
+  metalSheetRateFromIcUnitRate,
   computeMetalTotalsFromWeight,
   deriveImputedUnitRateAed,
   deriveUnitsFromInrTotal,
   metalFieldsFromRecord,
-  applyMetalFieldChange,
   normalizeCashPurchase,
   normalizeMetalPurchase,
   normalizeMetalSale,
@@ -21,13 +21,18 @@ describe('metalSettlement', () => {
     assert.equal(deriveUnitsFromInrTotal(250_000), 2.5);
   });
 
+  it('prefills metal sheet RATE from cash IC WAC 1:1 (same ~36 field)', () => {
+    assert.equal(metalSheetRateFromIcUnitRate(36.2), 36.2);
+    assert.equal(metalSheetRateFromIcUnitRate(36.35), 36.35);
+  });
+
   it('computes weight-based totals with sheet RATE (AED = INR × rate ÷ 1000)', () => {
     const { totalInr, totalAed } = computeMetalTotalsFromWeight(10.5, 5000, 220);
     assert.equal(totalInr, 52500);
     assert.equal(totalAed, 11550);
   });
 
-  it('matches the metal P&L sheet purchase row', () => {
+  it('matches the client metal P&L sheet (AED = INR × RATE ÷ 1000)', () => {
     const { totalInr, totalAed } = computeMetalTotalsFromWeight(499.71, 13980, 36.23);
     assert.equal(totalInr, 6_985_945.8);
     assert.equal(totalAed, 253_100.8163);
@@ -104,9 +109,9 @@ describe('metalSettlement', () => {
     assert.equal(n.aedTotal, null);
   });
 
-  it('normalizes cash purchase unchanged', () => {
-    const n = normalizeCashPurchase({ units: 2, unitRate: 3.5 });
-    assert.equal(n.aedTotal, 7);
+  it('normalizes cash purchase (AED = units × RATE)', () => {
+    const n = normalizeCashPurchase({ units: 50, unitRate: 36.2 });
+    assert.equal(n.aedTotal, 1810);
     assert.equal(n.settlementMode, 'cash');
   });
 
@@ -114,7 +119,7 @@ describe('metalSettlement', () => {
     assert.equal(deriveImputedUnitRateAed(2200, 0.5), 4400);
   });
 
-  it('metal cash sale stores IC units at the entered AED unit rate', () => {
+  it('metal cash sale stores IC units and sheet RATE (AED × 1000 ÷ INR)', () => {
     const n = normalizeMetalSale(
       {
         metalWeightG: 500,
@@ -127,12 +132,12 @@ describe('metalSettlement', () => {
       { paymentMethod: 'CASH' },
     );
     assert.equal(n.units, 70);
-    assert.equal(n.unitRate, 3500);
+    assert.equal(n.unitRate, 35);
     assert.equal(n.aedAmount, 245_000);
     assert.equal(n.metalPaymentMethod, 'CASH');
   });
 
-  it('metal AED sale keeps unit rate but does not add IC units', () => {
+  it('metal AED sale keeps sheet RATE but does not add IC units', () => {
     const n = normalizeMetalSale(
       {
         metalWeightG: 1000,
@@ -145,25 +150,24 @@ describe('metalSettlement', () => {
       { paymentMethod: 'AED', aedAgentId: 'agent-1' },
     );
     assert.equal(n.units, 0);
-    assert.equal(n.unitRate, 3600);
+    assert.equal(n.unitRate, 36);
     assert.equal(n.aedAmount, 504_000);
   });
 
-  it('recomputes AED total from IC unit rate when INR changes', () => {
+  it('recomputes AED from sheet RATE when INR changes (AED = INR × rate ÷ 1000)', () => {
     const next = applyMetalFieldChange(
       {
         metalWeightG: 500,
         metalRateInrPerG: 14000,
-        metalSheetRateAed: 3500,
+        metalSheetRateAed: 35,
         metalRateAedPerG: 0,
         inrTotal: 7_000_000,
         aedTotal: 245_000,
-        aedRateMode: 'unit',
       },
       'totalInr',
       11_000_000,
     );
     assert.equal(next.aedTotal, 385_000);
-    assert.equal(next.metalSheetRateAed, 3500);
+    assert.equal(next.metalSheetRateAed, 35);
   });
 });

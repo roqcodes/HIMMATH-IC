@@ -19,13 +19,20 @@ import { ICSale } from '@/types';
 import TransactionTypeSelector from '../shared/TransactionTypeSelector';
 import SettlementModeToggle from '../shared/SettlementModeToggle';
 import { emptyMetalFields } from '../shared/MetalSettlementFields';
+import FormattedNumberInput from '../shared/FormattedNumberInput';
 import MetalPaymentToggle from '../shared/MetalPaymentToggle';
 import type { MetalPaymentMethod } from '@/lib/domain/books';
 import { normalizeMetalPaymentMethod } from '@/lib/domain/books';
 import { SmoothCollapse, SmoothModeSwap } from '@/components/ui/SmoothHeight';
 import {
   applyMetalFieldChange,
+  computeImpliedMetalRateAedPerG,
+  computeMetalAedFromInr,
+  computeMetalSheetRateAed,
   metalSaleFieldsFromRecord,
+  metalSheetRateFromIcUnitRate,
+  METAL_AMOUNT_DECIMALS,
+  METAL_WEIGHT_DECIMALS,
   type ICSettlementMode,
 } from '@/lib/icTransfer/metalSettlement';
 import { remainingIcStockWac } from '@/lib/icTransfer/dealProfit';
@@ -43,8 +50,8 @@ import { effectiveSaleCounterpartyId } from '@/lib/counterparties/effectiveId';
 import {
   computeICSaleAmounts,
   formatAmount,
-  formatRateInputValue,
   INR_PER_UNIT,
+  RATE_DECIMAL_PLACES,
 } from '@/lib/icTransfer/rateCalculations';
 import { resolveGroupOrderRate } from '@/lib/icTransfer/ratePricing';
 import {
@@ -120,11 +127,6 @@ function formatModalTimestamp(d: Date): string {
   });
 }
 
-function parseNum(raw: string): number {
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : 0;
-}
-
 function LotSelectLoading() {
   return (
     <div className="relative" aria-busy="true" aria-label="Loading purchase lots">
@@ -169,8 +171,8 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
   const isMetal = settlementMode === 'metal';
   const lockMode = Boolean(initialData?.id);
 
-  const [units, setUnits] = useState(initialData?.units?.toString() || '');
-  const [rate, setRate] = useState(initialData?.unitRate?.toString() || '');
+  const [units, setUnits] = useState(initialData?.units ?? 0);
+  const [rate, setRate] = useState(initialData?.unitRate ?? 0);
   const [customerName, setCustomerName] = useState(initialData?.customerName || '');
   const [counterpartyId, setCounterpartyId] = useState('');
   const [warehouseId, setWarehouseId] = useState(initialData?.warehouseId || '');
@@ -387,7 +389,7 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
     />
   );
 
-  const unitNum = parseFloat(units) || 0;
+  const unitNum = units;
   const groupOrderRate = useMemo(() => {
     if (!customerRateGroup) return null;
     return resolveGroupOrderRate(customerRateGroup, transactionType, unitNum);
@@ -398,7 +400,7 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
     if (isMetal || !customerRateGroup) return;
     const resolved = resolveGroupOrderRate(customerRateGroup, transactionType, unitNum);
     if (resolved.saleRate > 0) {
-      setRate(formatRateInputValue(resolved.saleRate));
+      setRate(resolved.saleRate);
     }
   }, [open, customerRateGroup?.id, transactionType, unitNum, isMetal, customerRateGroup]);
 
@@ -420,7 +422,13 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
         if (wh) {
           const wac = remainingIcStockWac(icPurchases, icSales, wh);
           if (wac.rate > 0) {
-            setMetal(applyMetalFieldChange(saleMetal, 'sheetRateAed', wac.rate));
+            setMetal(
+              applyMetalFieldChange(
+                saleMetal,
+                'sheetRateAed',
+                metalSheetRateFromIcUnitRate(wac.rate),
+              ),
+            );
           } else {
             setMetal(saleMetal);
           }
@@ -430,8 +438,8 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
       } else {
         setMetal(saleMetal);
       }
-      setUnits(initialData?.units?.toString() || '');
-      setRate(initialData?.unitRate?.toString() || '');
+      setUnits(initialData?.units ?? 0);
+      setRate(initialData?.unitRate ?? 0);
       setCustomerName(initialData?.orderCustomerName || initialData?.customerName || '');
       setCounterpartyId(resolveInitialCounterpartyId(initialData, scopedCounterparties));
       setWarehouseId(lockedWarehouseId || initialData?.warehouseId || '');
@@ -487,7 +495,7 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
     setDeleteToken('');
   };
 
-  const rateNum = parseFloat(rate) || 0;
+  const rateNum = rate;
   const serviceChargeNum = initialData?.serviceCharge ?? 0;
 
   const ratesMatchGroup =
@@ -502,17 +510,46 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
   const metalAed = metalPayment === 'AED';
   const metalNetInr = netMetalInr(metal.inrTotal, lab.labTotalInr);
 
+  const metalAedTotal = useMemo(() => {
+    if (!isMetal) return metal.aedTotal;
+    const sheet = metal.metalSheetRateAed;
+    if (!sheet || sheet <= 0) return metal.aedTotal;
+    return computeMetalAedFromInr(metalNetInr, sheet);
+  }, [isMetal, metal.aedTotal, metal.metalSheetRateAed, metalNetInr]);
+
+  useEffect(() => {
+    if (!isMetal || settlementMode !== 'metal') return;
+    const sheet = metal.metalSheetRateAed;
+    if (!sheet || sheet <= 0 || !metal.inrTotal) return;
+    const nextAed = computeMetalAedFromInr(metalNetInr, sheet);
+    const nextPerG = computeImpliedMetalRateAedPerG(metal.metalWeightG, nextAed);
+    setMetal(prev => {
+      if (
+        Math.abs((prev.aedTotal || 0) - nextAed) < 0.0001 &&
+        Math.abs((prev.metalRateAedPerG || 0) - nextPerG) < 0.0001
+      ) {
+        return prev;
+      }
+      return { ...prev, aedTotal: nextAed, metalRateAedPerG: nextPerG };
+    });
+  }, [
+    isMetal,
+    settlementMode,
+    metal.metalSheetRateAed,
+    metal.inrTotal,
+    metal.metalWeightG,
+    metalNetInr,
+  ]);
+
   const onMetalField = useCallback(
-    (field: 'weight' | 'rateInr' | 'sheetRateAed' | 'totalInr' | 'totalAed', raw: string) => {
-      setMetal(prev =>
-        applyMetalFieldChange({ ...prev, aedRateMode: 'unit' }, field, parseNum(raw)),
-      );
+    (field: 'weight' | 'rateInr' | 'sheetRateAed' | 'totalInr' | 'totalAed', n: number) => {
+      setMetal(prev => applyMetalFieldChange(prev, field, n));
     },
     [],
   );
 
-  const onLabField = useCallback((field: LabTestFieldKey, raw: string) => {
-    setLab(prev => applyLabFieldChange(prev, field, parseNum(raw)));
+  const onLabField = useCallback((field: LabTestFieldKey, n: number) => {
+    setLab(prev => applyLabFieldChange(prev, field, n));
   }, []);
 
   const canSubmit = isMetal
@@ -524,7 +561,7 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
           metal.metalRateInrPerG > 0 &&
           metal.inrTotal > 0 &&
           metal.metalSheetRateAed > 0 &&
-          metal.aedTotal > 0 &&
+          metalAedTotal > 0 &&
           (!metalAed || aedAgentId.trim().length > 0),
       )
     : unitNum > 0 &&
@@ -534,13 +571,13 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
 
   const kpiMetalG = isMetal ? metal.metalWeightG : 0;
   const kpiInr = isMetal ? metalNetInr : amounts.inrTotal;
-  const kpiAed = isMetal ? metal.aedTotal : amounts.aedNetTotal;
+  const kpiAed = isMetal ? metalAedTotal : amounts.aedNetTotal;
 
   const breakdownItems = useMemo((): ICTransferBreakdownItem[] => {
     if (!isMetal) {
       return [
         { id: 'units', label: 'Units', value: formatAmount(unitNum, 4) },
-        { id: 'rate', label: 'Unit rate (AED)', value: formatAmount(rateNum) },
+        { id: 'rate', label: 'Rate (AED)', value: formatAmount(rateNum) },
         {
           id: 'txn',
           label: 'Transaction',
@@ -594,13 +631,13 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
     });
     items.push({
       id: 'aedr',
-      label: 'Unit rate (AED)',
+      label: 'Rate (AED)',
       value: formatAmount(metal.metalSheetRateAed),
     });
     items.push({
       id: 'aedt',
       label: 'Total (AED)',
-      value: <FmtLedgerAed amount={metal.aedTotal} />,
+      value: <FmtLedgerAed amount={metalAedTotal} />,
       strong: true,
     });
     return items;
@@ -614,6 +651,7 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
     metal,
     lab.labTotalInr,
     metalNetInr,
+    metalAedTotal,
   ]);
 
   const stockContext =
@@ -658,13 +696,13 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
           metalPurchaseId,
           metalPaymentMethod: metalPayment,
           aedAgentId: metalAed ? aedAgentId : null,
-          unitRate: metal.metalSheetRateAed,
+          unitRate: computeMetalSheetRateAed(metalNetInr, metalAedTotal),
           units: metalPayment === 'CASH' ? netMetalInr(metal.inrTotal, lab.labTotalInr) / INR_PER_UNIT : 0,
           metalWeightG: metal.metalWeightG,
           metalRateInrPerG: metal.metalRateInrPerG,
-          metalRateAedPerG: metal.metalRateAedPerG,
+          metalRateAedPerG: computeImpliedMetalRateAedPerG(metal.metalWeightG, metalAedTotal),
           inrTotal: metal.inrTotal,
-          aedAmount: metal.aedTotal,
+          aedAmount: metalAedTotal,
           labWeightG: lab.labWeightG || undefined,
           labChargeInrPerG: lab.labChargeInrPerG || undefined,
           labTotalInr: lab.labTotalInr || undefined,
@@ -862,59 +900,60 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
                           {purchaseLotControl}
                         </ICTransferFormField>
                         <ICTransferFormField label="Weight (g) *">
-                          <input
+                          <FormattedNumberInput
                             className={denseInput}
-                            type="number"
-                            step="0.0001"
+                            book="inr"
+                            maxFractionDigits={METAL_WEIGHT_DECIMALS}
                             readOnly
                             disabled
-                            value={metal.metalWeightG || ''}
+                            value={metal.metalWeightG}
+                            onNumericChange={() => {}}
                             aria-readonly
                           />
                         </ICTransferFormField>
                       </div>
                       <div className={metalAmountPairRow}>
                         <ICTransferFormField label="G rate (INR) *">
-                          <input
+                          <FormattedNumberInput
                             className={denseInput}
-                            type="number"
-                            step="0.0001"
+                            book="inr"
+                            maxFractionDigits={METAL_AMOUNT_DECIMALS}
                             disabled={formDisabled}
-                            value={metal.metalRateInrPerG || ''}
-                            onChange={e => onMetalField('rateInr', e.target.value)}
+                            value={metal.metalRateInrPerG}
+                            onNumericChange={n => onMetalField('rateInr', n)}
                           />
                         </ICTransferFormField>
                         <ICTransferFormField label="Total (INR)">
-                          <input
+                          <FormattedNumberInput
                             className={denseInput}
-                            type="number"
-                            step="0.01"
+                            book="inr"
+                            maxFractionDigits={METAL_AMOUNT_DECIMALS}
                             disabled={formDisabled}
-                            value={metal.inrTotal || ''}
-                            onChange={e => onMetalField('totalInr', e.target.value)}
+                            value={metal.inrTotal}
+                            onNumericChange={n => onMetalField('totalInr', n)}
                           />
                         </ICTransferFormField>
                       </div>
                       <div className={metalAmountPairRow}>
-                        <ICTransferFormField label="Unit rate (AED) *">
-                  <input
+                        <ICTransferFormField label="Rate (AED) *">
+                          <FormattedNumberInput
                             className={denseInput}
-                            type="number"
-                            step="0.0001"
+                            book="aed"
+                            maxFractionDigits={METAL_AMOUNT_DECIMALS}
                             disabled={formDisabled}
-                            value={metal.metalSheetRateAed || ''}
-                            onChange={e => onMetalField('sheetRateAed', e.target.value)}
-                            title="IC unit rate (AED) — 1 unit = ₹1 lakh"
+                            value={metal.metalSheetRateAed}
+                            onNumericChange={n => onMetalField('sheetRateAed', n)}
+                            title="AED = INR × rate ÷ 1,000 (e.g. 6,995,940 × 36.35 ÷ 1,000 = 254,302.42)"
                           />
                         </ICTransferFormField>
                         <ICTransferFormField label="Total (AED) *">
-                          <input
+                          <FormattedNumberInput
                             className={denseInput}
-                            type="number"
-                            step="0.01"
+                            book="aed"
+                            maxFractionDigits={METAL_AMOUNT_DECIMALS}
                             disabled={formDisabled}
-                            value={metal.aedTotal || ''}
-                            onChange={e => onMetalField('totalAed', e.target.value)}
+                            value={metal.aedTotal}
+                            onNumericChange={n => onMetalField('totalAed', n)}
                           />
                         </ICTransferFormField>
                       </div>
@@ -926,33 +965,33 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
                       </div>
                       <div className={leftBottomGridMetal}>
                         <ICTransferFormField label="Weight (g)">
-                          <input
+                          <FormattedNumberInput
                             className={denseInput}
-                            type="number"
-                            step="0.0001"
+                            book="inr"
+                            maxFractionDigits={METAL_WEIGHT_DECIMALS}
                             disabled={formDisabled}
-                            value={lab.labWeightG || ''}
-                            onChange={e => onLabField('weight', e.target.value)}
+                            value={lab.labWeightG}
+                            onNumericChange={n => onLabField('weight', n)}
                           />
                         </ICTransferFormField>
                         <ICTransferFormField label="Charge (INR/g)">
-                          <input
+                          <FormattedNumberInput
                             className={denseInput}
-                            type="number"
-                            step="0.0001"
+                            book="inr"
+                            maxFractionDigits={METAL_AMOUNT_DECIMALS}
                             disabled={formDisabled}
-                            value={lab.labChargeInrPerG || ''}
-                            onChange={e => onLabField('charge', e.target.value)}
+                            value={lab.labChargeInrPerG}
+                            onNumericChange={n => onLabField('charge', n)}
                           />
                         </ICTransferFormField>
                         <ICTransferFormField label="Total (INR)">
-                          <input
+                          <FormattedNumberInput
                             className={denseInput}
-                            type="number"
-                            step="0.01"
+                            book="inr"
+                            maxFractionDigits={METAL_AMOUNT_DECIMALS}
                             disabled={formDisabled}
-                            value={lab.labTotalInr || ''}
-                            onChange={e => onLabField('total', e.target.value)}
+                            value={lab.labTotalInr}
+                            onNumericChange={n => onLabField('total', n)}
                           />
                         </ICTransferFormField>
                       </div>
@@ -961,19 +1000,20 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
                 ) : (
                   <div className="flex flex-col gap-2">
                     <div className={metalAmountPairRow}>
-                      <ICTransferFormField label="Unit rate (AED) *">
+                      <ICTransferFormField label="Rate (AED) *">
                         <div className="flex items-stretch gap-2">
-                          <input
+                          <FormattedNumberInput
                             className={`${denseInput} min-w-0 flex-1`}
-                            value={rate}
-                            onChange={e => setRate(e.target.value)}
-                            type="number"
-                            step="0.01"
+                            book="aed"
+                            maxFractionDigits={RATE_DECIMAL_PLACES}
                             disabled={formDisabled}
+                            value={rate}
+                            onNumericChange={setRate}
+                            title="AED = units × rate (e.g. 50 × 36.2 = 1,810 AED)"
                             placeholder={
                               customerRateGroup
                                 ? 'Filled from rate group when available'
-                                : 'Enter unit rate'
+                                : 'Enter rate'
                             }
                           />
                           {showRateGroupLabel && customerRateGroup ? (
@@ -988,13 +1028,13 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
                       </ICTransferFormField>
 
                       <ICTransferFormField label="Units *">
-                        <input
+                        <FormattedNumberInput
                           className={denseInput}
-                          value={units}
-                          onChange={e => setUnits(e.target.value)}
-                          type="number"
-                          step="0.01"
+                          book="aed"
+                          maxFractionDigits={RATE_DECIMAL_PLACES}
                           disabled={formDisabled}
+                          value={units}
+                          onNumericChange={setUnits}
                         />
                       </ICTransferFormField>
               </div>

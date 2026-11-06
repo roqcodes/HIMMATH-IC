@@ -13,9 +13,12 @@ import {
 } from './icTransferFormModalLayout';
 import {
   applyMetalFieldChange,
+  METAL_AMOUNT_DECIMALS,
+  METAL_WEIGHT_DECIMALS,
   type MetalSettlementFields,
 } from '@/lib/icTransfer/metalSettlement';
 import { formatAmount } from '@/lib/icTransfer/rateCalculations';
+import FormattedNumberInput from '@/components/ic-transfer/shared/FormattedNumberInput';
 import InrAmountInWords from '@/components/ic-transfer/shared/InrAmountInWords';
 import { SmoothCollapse } from '@/components/ui/SmoothHeight';
 import { netMetalInr } from '@/lib/icTransfer/labTest';
@@ -48,11 +51,6 @@ type Props = {
   readOnlyTotals?: boolean;
 };
 
-function parseNum(raw: string): number {
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : 0;
-}
-
 export default function MetalSettlementFields({
   value,
   onChange,
@@ -74,8 +72,8 @@ export default function MetalSettlementFields({
     [onChange],
   );
 
-  const onField = (field: MetalFieldKey, raw: string) => {
-    apply(applyMetalFieldChange(value, field, parseNum(raw)));
+  const onField = (field: MetalFieldKey, n: number) => {
+    apply(applyMetalFieldChange(value, field, n));
   };
 
   const unitMode = value.aedRateMode === 'unit';
@@ -92,13 +90,13 @@ export default function MetalSettlementFields({
   const weightRow = (
     <>
       <AsicFormField label="Weight (g)" colSpan={dense ? 4 : 12} labelClassName={labelClass}>
-        <input
+        <FormattedNumberInput
           className={fieldInput}
-          type="number"
-          step="0.0001"
+          book="inr"
+          maxFractionDigits={METAL_WEIGHT_DECIMALS}
           disabled={disabled || lockWeight}
-          value={value.metalWeightG || ''}
-          onChange={e => onField('weight', e.target.value)}
+          value={value.metalWeightG}
+          onNumericChange={n => onField('weight', n)}
         />
       </AsicFormField>
       {afterWeight ? (
@@ -118,25 +116,24 @@ export default function MetalSettlementFields({
           weightRow
         )}
         <AsicFormField label="G rate (INR)" colSpan={dense ? 4 : 6} labelClassName={labelClass}>
-          <input
+          <FormattedNumberInput
             className={fieldInput}
-            type="number"
-            step="0.0001"
+            book="inr"
+            maxFractionDigits={METAL_AMOUNT_DECIMALS}
             disabled={disabled}
-            value={value.metalRateInrPerG || ''}
-            onChange={e => onField('rateInr', e.target.value)}
+            value={value.metalRateInrPerG}
+            onNumericChange={n => onField('rateInr', n)}
           />
         </AsicFormField>
         <AsicFormField label="Total (INR)" colSpan={dense ? 4 : 6} labelClassName={labelClass}>
-          <input
+          <FormattedNumberInput
             className={readOnlyTotals ? computedInput : fieldInput}
-            type="number"
-            step="0.01"
+            book="inr"
+            maxFractionDigits={METAL_AMOUNT_DECIMALS}
             disabled={disabled}
             readOnly={readOnlyTotals}
-            tabIndex={readOnlyTotals ? -1 : undefined}
-            value={value.inrTotal || ''}
-            onChange={readOnlyTotals ? undefined : e => onField('totalInr', e.target.value)}
+            value={value.inrTotal}
+            onNumericChange={n => onField('totalInr', n)}
           />
         </AsicFormField>
         {showAedFields ? (
@@ -147,25 +144,24 @@ export default function MetalSettlementFields({
                 colSpan={dense ? 4 : 6}
                 labelClassName={labelClass}
               >
-                <input
+                <FormattedNumberInput
                   className={fieldInput}
-                  type="number"
-                  step="0.0001"
+                  book="aed"
+                  maxFractionDigits={METAL_AMOUNT_DECIMALS}
                   disabled={disabled}
-                  value={value.metalSheetRateAed || ''}
-                  onChange={e => onField('sheetRateAed', e.target.value)}
+                  value={value.metalSheetRateAed}
+                  onNumericChange={n => onField('sheetRateAed', n)}
                 />
               </AsicFormField>
               <AsicFormField label="Total (AED)" colSpan={dense ? 4 : 6} labelClassName={labelClass}>
-                <input
+                <FormattedNumberInput
                   className={readOnlyTotals ? computedInput : fieldInput}
-                  type="number"
-                  step="0.01"
+                  book="aed"
+                  maxFractionDigits={METAL_AMOUNT_DECIMALS}
                   disabled={disabled}
                   readOnly={readOnlyTotals}
-                  tabIndex={readOnlyTotals ? -1 : undefined}
-                  value={value.aedTotal || ''}
-                  onChange={readOnlyTotals ? undefined : e => onField('totalAed', e.target.value)}
+                  value={value.aedTotal}
+                  onNumericChange={n => onField('totalAed', n)}
                 />
               </AsicFormField>
             </>
@@ -177,25 +173,24 @@ export default function MetalSettlementFields({
                   colSpan={dense ? 4 : 6}
                   labelClassName={labelClass}
                 >
-                  <input
+                  <FormattedNumberInput
                     className={fieldInput}
-                    type="number"
-                    step="0.0001"
+                    book="aed"
+                    maxFractionDigits={METAL_AMOUNT_DECIMALS}
                     disabled={disabled}
-                    value={value.metalSheetRateAed || ''}
-                    onChange={e => onField('sheetRateAed', e.target.value)}
+                    value={value.metalSheetRateAed}
+                    onNumericChange={n => onField('sheetRateAed', n)}
                   />
                 </AsicFormField>
                 <AsicFormField label="Total (AED)" colSpan={dense ? 4 : 6} labelClassName={labelClass}>
-                  <input
+                  <FormattedNumberInput
                     className={readOnlyTotals ? computedInput : fieldInput}
-                    type="number"
-                    step="0.01"
+                    book="aed"
+                    maxFractionDigits={METAL_AMOUNT_DECIMALS}
                     disabled={disabled}
                     readOnly={readOnlyTotals}
-                    tabIndex={readOnlyTotals ? -1 : undefined}
-                    value={value.aedTotal || ''}
-                    onChange={readOnlyTotals ? undefined : e => onField('totalAed', e.target.value)}
+                    value={value.aedTotal}
+                    onNumericChange={n => onField('totalAed', n)}
                   />
                 </AsicFormField>
               </div>

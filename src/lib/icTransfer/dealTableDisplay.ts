@@ -1,8 +1,11 @@
 import React from 'react';
 import CurrencyAmount from '@/components/currency/CurrencyAmount';
 import { fmtLedgerAed, fmtLedgerInr } from '@/lib/icFunds/format';
+import { isMetalAedPayment } from '@/lib/domain/books';
 import { dealPurchaseAed, dealSaleAed } from '@/lib/icTransfer/dealBookKpis';
-import { resolvePurchaseInrDisplay, resolveSaleInrDisplay } from '@/lib/icTransfer/metalSettlement';
+import { netMetalInr } from '@/lib/icTransfer/labTest';
+import { computeMetalAedFromInr, resolvePurchaseInrDisplay, resolveSaleInrDisplay } from '@/lib/icTransfer/metalSettlement';
+import { computeIcCashAedTotal } from '@/lib/icTransfer/rateCalculations';
 import type { ICPurchase, ICSale } from '@/types';
 
 export function purchaseDealInr(
@@ -28,6 +31,31 @@ export function purchaseDealAed(p: ICPurchase): number {
 
 export function saleDealAed(s: ICSale): number {
   return dealSaleAed(s);
+}
+
+/**
+ * AED for **table/UX** when the booked AED leg is intentionally empty:
+ * - Metal · INR: implied from net INR × sheet RATE ÷ 1000 (`unit_rate` stores sheet RATE).
+ * - Cash: if `aed_amount` is missing, `units × unit_rate`.
+ * Agent-AED metal still uses booked AED only.
+ */
+export function saleTableDisplayAed(s: ICSale): number {
+  const booked = dealSaleAed(s);
+  if (Math.abs(Number(booked) || 0) >= 0.005) return booked;
+
+  if (s.settlementMode === 'metal' && !isMetalAedPayment(s.metalPaymentMethod)) {
+    const netInr = netMetalInr(Number(s.inrTotal) || 0, Number(s.labTotalInr) || 0);
+    const rate = Number(s.unitRate) || 0;
+    if (netInr > 0 && rate > 0) return computeMetalAedFromInr(netInr, rate);
+  }
+
+  if (s.settlementMode === 'cash') {
+    const units = Number(s.units) || 0;
+    const rate = Number(s.unitRate) || 0;
+    if (units > 0 && rate > 0) return computeIcCashAedTotal(units, rate);
+  }
+
+  return 0;
 }
 
 export function formatDealTableAed(amount: number): React.ReactNode {

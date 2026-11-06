@@ -207,20 +207,22 @@ export function filterWarehousePlLines(
   const n = normSearch(search);
   if (!n) return out;
   return out.filter(l =>
-    [l.warehouseName, l.customerName, l.saleId].some(part => haystackIncludes(String(part), n)),
+    [l.warehouseName, l.customerName, l.saleId, l.referenceId, l.lineKind].some(part =>
+      haystackIncludes(String(part ?? ''), n),
+    ),
   );
 }
 
 export function formatReportFilterSummary(
   filters: ReportFilterState,
-  extras?: { period?: string; accountName?: string; book?: string },
+  extras?: { period?: string; accountName?: string; book?: string; omitWarehouseCaption?: boolean },
 ): string {
   const parts: string[] = [];
   if (extras?.period) parts.push(extras.period);
   if (extras?.accountName) parts.push(`Account: ${extras.accountName}`);
   if (extras?.book) parts.push(`Book: ${extras.book}`);
   if (filters.search) parts.push(`Search: "${filters.search.trim()}"`);
-  if (filters.warehouseId) parts.push('Warehouse filter applied');
+  if (filters.warehouseId && !extras?.omitWarehouseCaption) parts.push('Warehouse filter applied');
   if (filters.counterpartyId) parts.push('Party filter applied');
   if (filters.tradeType !== 'all') parts.push(`Type: ${filters.tradeType}`);
   if (filters.voucherStatus !== 'all') parts.push(`Status: ${filters.voucherStatus}`);

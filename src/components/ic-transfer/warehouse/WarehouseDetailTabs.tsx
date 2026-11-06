@@ -25,8 +25,8 @@ import {
   formatDealTableInr,
   purchaseDealAed,
   purchaseDealInr,
-  saleDealAed,
   saleDealInr,
+  saleTableDisplayAed,
 } from '@/lib/icTransfer/dealTableDisplay';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import JournalVoucherDetailModal from '@/components/ic-transfer/journal/JournalVoucherDetailModal';
@@ -344,7 +344,7 @@ export default function WarehouseDetailTabs({
       </td>
       <td className={icTdClass('right')}>
         <span className="font-mono font-medium tabular-nums text-slate-900">
-          {formatDealTableAed(saleDealAed(s))}
+          {formatDealTableAed(saleTableDisplayAed(s))}
         </span>
       </td>
       <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
