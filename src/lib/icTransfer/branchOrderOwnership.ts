@@ -209,6 +209,7 @@ export function saleMatchesSearchQuery(
     sale.id.toLowerCase().includes(q) ||
     displayName.includes(q) ||
     (sale.orderCustomerName?.toLowerCase().includes(q) ?? false) ||
-    sale.customerName.toLowerCase().includes(q)
+    sale.customerName.toLowerCase().includes(q) ||
+    (sale.aedAgentName?.toLowerCase().includes(q) ?? false)
   );
 }

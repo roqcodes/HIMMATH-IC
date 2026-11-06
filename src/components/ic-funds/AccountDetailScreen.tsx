@@ -28,7 +28,8 @@ import {
   type ICFundAccountDetail,
 } from '@/lib/icFunds/accountDetailAnalytics';
 import { accountTypeLabel, IC_FUND_VOUCHER_LABELS } from '@/lib/icFunds/constants';
-import { fmtICDate, fmtLedgerAed, icfLedgerColumnLabel } from '@/lib/icFunds/format';
+import { fmtICDate, fmtLedgerAed, icfLedgerColumnLabel, FmtLedgerAed } from '@/lib/icFunds/format';
+import { formatSettlementModeLabel } from '@/lib/icTransfer/metalSettlement';
 import { icFundsReportPath } from '@/lib/icFunds/nav';
 import { ASICPageSkeleton, ASICTableRowsSkeleton } from '@/components/asic/ASICTableSkeleton';
 import { useApp } from '@/context/AppContext';
@@ -41,7 +42,7 @@ type TabId = 'ledger' | 'vouchers' | 'related';
 function AmountCell({ n, danger }: { n: number; danger?: boolean }) {
   return (
     <td className={`${icfTd} text-right font-mono tabular-nums ${danger || n < 0 ? 'text-red-600' : ''}`}>
-      {n === 0 ? '—' : fmtLedgerAed(n)}
+      <FmtLedgerAed amount={n} />
     </td>
   );
 }
@@ -121,7 +122,7 @@ function StatementTable({
                 </td>
                 <AmountCell n={line.debit} />
                 <AmountCell n={line.credit} danger />
-                <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(line.balance)}</td>
+                <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={line.balance} /></td>
                 <td className={icfTd}>
                   <VoucherUserCell
                     voucher={{ createdByName: line.userName, createdAt: line.userAt ?? '' }}
@@ -138,9 +139,9 @@ function StatementTable({
               <td className={icfTd} colSpan={4}>
                 Totals
               </td>
-              <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(totalDr)}</td>
-              <td className={`${icfTd} text-right font-mono tabular-nums text-red-600`}>{fmtLedgerAed(totalCr)}</td>
-              <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(closing)}</td>
+              <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={totalDr} /></td>
+              <td className={`${icfTd} text-right font-mono tabular-nums text-red-600`}><FmtLedgerAed amount={totalCr} /></td>
+              <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={closing} /></td>
               <td className={icfTd} colSpan={2} />
             </tr>
           </tfoot>
@@ -191,21 +192,29 @@ export default function AccountDetailScreen() {
 
   const navSlug = detail?.account.branchSlug || slug;
 
-  const hasRelated = Boolean(detail?.relatedPurchases?.length || detail?.relatedSales?.length);
+  const relatedPurchaseCount = detail?.relatedPurchases?.length ?? 0;
+  const relatedSaleCount = detail?.relatedSales?.length ?? 0;
+  const hasRelated = relatedPurchaseCount + relatedSaleCount > 0;
   const tabs = useMemo(() => {
     const items: Array<{ id: TabId; label: string; count?: number }> = [
       { id: 'ledger', label: 'Ledger', count: Math.max(0, (detail?.statement.lines.length ?? 1) - 1) },
       { id: 'vouchers', label: 'Vouchers', count: detail?.vouchers.length ?? 0 },
     ];
     if (hasRelated) {
+      const relatedLabel =
+        relatedPurchaseCount > 0 && relatedSaleCount > 0
+          ? 'Deals'
+          : relatedPurchaseCount > 0
+            ? 'Purchases'
+            : 'Sales';
       items.push({
         id: 'related',
-        label: detail?.relatedPurchases ? 'Purchases' : 'Sales',
-        count: (detail?.relatedPurchases?.length ?? detail?.relatedSales?.length) ?? 0,
+        label: relatedLabel,
+        count: relatedPurchaseCount + relatedSaleCount,
       });
     }
     return items;
-  }, [detail, hasRelated]);
+  }, [detail, hasRelated, relatedPurchaseCount, relatedSaleCount]);
 
   if (!branchId && loading && !detail && !error) {
     return <ASICPageSkeleton variant="detail" />;
@@ -400,7 +409,7 @@ export default function AccountDetailScreen() {
                             name={counterparty}
                           />
                         </td>
-                        <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(v.amount)}</td>
+                        <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={v.amount} /></td>
                         <td className={`${icfTd} text-right text-slate-500`}>{isDebit ? 'Dr' : 'Cr'}</td>
                         <td className={`${icfTd} font-mono text-[11px] text-slate-500`}>
                           {v.referenceType && v.referenceId ? `${v.referenceType}:${v.referenceId.slice(0, 8)}` : '—'}
@@ -415,7 +424,7 @@ export default function AccountDetailScreen() {
           </div>
         ) : null}
 
-        {activeTab === 'related' && relatedPurchases ? (
+        {activeTab === 'related' && relatedPurchases && relatedPurchases.length > 0 ? (
           <div className={icfTableWrap}>
             <table className="w-full min-w-[720px] text-left">
               <thead>
@@ -442,9 +451,11 @@ export default function AccountDetailScreen() {
                       <td className={`${icfTd} font-mono text-[11px]`}>{p.id.slice(0, 8)}…</td>
                       <td className={icfTd}>{p.warehouseName || '—'}</td>
                       <td className={`${icfTd} text-right font-mono tabular-nums`}>{p.units}</td>
-                      <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(p.aedAmount)}</td>
+                      <td className={`${icfTd} text-right font-mono tabular-nums`}>
+                        {p.aedAmount ? <FmtLedgerAed amount={p.aedAmount} /> : '—'}
+                      </td>
                       <td className={`${icfTd} capitalize text-slate-500`}>
-                        {p.settlementMode === 'metal' ? 'Metal' : 'Cash'}
+                        {formatSettlementModeLabel(p.settlementMode, p.paymentMethod)}
                         {p.settlementMode === 'metal' && p.inrTotal
                           ? ` · ${p.inrTotal.toLocaleString('en-IN')} INR`
                           : ''}
@@ -457,7 +468,7 @@ export default function AccountDetailScreen() {
           </div>
         ) : null}
 
-        {activeTab === 'related' && relatedSales ? (
+        {activeTab === 'related' && relatedSales && relatedSales.length > 0 ? (
           <div className={icfTableWrap}>
             <table className="w-full min-w-[720px] text-left">
               <thead>
@@ -485,7 +496,9 @@ export default function AccountDetailScreen() {
                       <td className={`${icfTd} font-mono text-[11px]`}>{s.id.slice(0, 8)}…</td>
                       <td className={icfTd}>{s.customerName || '—'}</td>
                       <td className={`${icfTd} text-right font-mono tabular-nums`}>{s.units}</td>
-                      <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(s.aedAmount)}</td>
+                      <td className={`${icfTd} text-right font-mono tabular-nums`}>
+                        {s.aedAmount ? <FmtLedgerAed amount={s.aedAmount} /> : '—'}
+                      </td>
                       <td className={`${icfTd} capitalize text-slate-500`}>{s.orderStatus || '—'}</td>
                       <td className={`${icfTd} capitalize text-slate-500`}>{s.paymentStatus || '—'}</td>
                     </tr>

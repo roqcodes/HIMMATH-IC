@@ -1,8 +1,13 @@
-import { fmtICAmount } from '@/lib/icFunds/format';
-import { computeWarehouseAvailableUnits } from '@/lib/icTransfer/warehouseMatrixMetrics';
+import { fmtICAmount, fmtLedgerAed, fmtLedgerInr } from '@/lib/icFunds/format';
+import { computeWarehouseAvailableUnits, formatMetalGrams } from '@/lib/icTransfer/warehouseMatrixMetrics';
 import type { ComboOption } from '@/components/ui/ComboSearchInput';
 import { formatEntitySelectLabel } from '@/lib/validations/entityCode';
-import type { ICSale, ICSupplier, ICWarehouse } from '@/types';
+import type { ICPurchase, ICSale, ICSupplier, ICWarehouse } from '@/types';
+
+export type EntityLedgerBalances = {
+  aed: number;
+  inr: number;
+};
 
 export type EntitySearchOption = {
   value: string;
@@ -12,14 +17,19 @@ export type EntitySearchOption = {
   detail?: string;
 };
 
-function formatLabeledBalance(amount: number): string {
-  return `Balance: ${fmtICAmount(amount)} AED`;
+const ZERO_LEDGER: EntityLedgerBalances = { aed: 0, inr: 0 };
+
+export function formatEntityLedgerDetail(balances: EntityLedgerBalances): string {
+  return `Balance: ${fmtLedgerAed(balances.aed)} · ${fmtLedgerInr(balances.inr)}`;
 }
 
-function formatLabeledAvailableUnits(units: number, metalG?: number): string {
-  const unitsLabel = `Stock: ${fmtICAmount(units)} units`;
-  if (metalG == null || metalG === 0) return unitsLabel;
-  return `${unitsLabel} · ${fmtICAmount(metalG)} g metal`;
+function formatWarehouseStockDetail(units: number, metalG: number): string {
+  return `Stock: ${fmtICAmount(units)} units · ${formatMetalGrams(metalG)}`;
+}
+
+function addToBalanceMap(map: Record<string, number>, key: string | undefined, amount: number): void {
+  if (!key) return;
+  map[key] = (map[key] ?? 0) + amount;
 }
 
 export function entitySearchOptionsToComboOptions(options: EntitySearchOption[]): ComboOption[] {
@@ -32,19 +42,23 @@ export function entitySearchOptionsToComboOptions(options: EntitySearchOption[])
   }));
 }
 
+function ledgerForEntity(
+  entityId: string,
+  ledgerByEntityId?: Record<string, EntityLedgerBalances>,
+): EntityLedgerBalances {
+  return ledgerByEntityId?.[entityId] ?? ZERO_LEDGER;
+}
+
 export function buildSupplierSearchOptions(
   suppliers: ICSupplier[],
-  balanceBySupplierId?: Record<string, number>,
+  ledgerByEntityId?: Record<string, EntityLedgerBalances>,
 ): EntitySearchOption[] {
-  return suppliers.map(s => {
-    const balance = balanceBySupplierId?.[s.id] ?? 0;
-    return {
-      value: s.id,
-      label: s.name,
-      code: s.code,
-      detail: formatLabeledBalance(balance),
-    };
-  });
+  return suppliers.map(s => ({
+    value: s.id,
+    label: s.name,
+    code: s.code,
+    detail: formatEntityLedgerDetail(ledgerForEntity(s.id, ledgerByEntityId)),
+  }));
 }
 
 export function buildWarehouseSearchOptions(
@@ -52,18 +66,21 @@ export function buildWarehouseSearchOptions(
   sales: ICSale[],
   availableById?: Record<string, number>,
   metalGById?: Record<string, number>,
+  purchases?: ICPurchase[],
 ): EntitySearchOption[] {
   return warehouses.map(w => {
-    const available =
+    const units =
       availableById && availableById[w.id] !== undefined
         ? availableById[w.id]!
-        : computeWarehouseAvailableUnits(w, sales);
+        : purchases
+          ? computeWarehouseAvailableUnits(w, purchases, sales)
+          : Number(w.currentStock ?? 0);
     const metalG = metalGById?.[w.id] ?? w.currentMetalG ?? 0;
     return {
       value: w.id,
       label: w.name,
       code: w.code,
-      detail: formatLabeledAvailableUnits(available, metalG),
+      detail: formatWarehouseStockDetail(units, metalG),
     };
   });
 }
@@ -75,21 +92,30 @@ export function buildCustomerSearchOptions(
     code?: string;
     balance?: string | number | null;
   }[],
+  ledgerByEntityId?: Record<string, EntityLedgerBalances>,
+  /** @deprecated use ledgerByEntityId — legacy AED-only map */
   balanceByCustomerId?: Record<string, number>,
 ): EntitySearchOption[] {
   return customers.map(c => {
-    const balance =
-      balanceByCustomerId?.[c.id] ?? (c.balance !== undefined && c.balance !== null ? Number(c.balance) : 0);
+    const fromLedger = ledgerByEntityId?.[c.id];
+    const balances: EntityLedgerBalances = fromLedger
+      ? fromLedger
+      : {
+          aed:
+            balanceByCustomerId?.[c.id] ??
+            (c.balance !== undefined && c.balance !== null ? Number(c.balance) : 0),
+          inr: 0,
+        };
     return {
       value: c.id,
       label: c.name,
       code: c.code,
-      detail: formatLabeledBalance(balance),
+      detail: formatEntityLedgerDetail(balances),
     };
   });
 }
 
-/** Map HQ IC fund accounts to counterparty / legacy source ids. */
+/** Map HQ IC fund accounts to counterparty / legacy source ids (AED book). */
 export function indexICFundBalancesBySource(
   accounts: { sourceType?: string; sourceId?: string; customerId?: string; balance: number }[],
 ): {
@@ -101,23 +127,59 @@ export function indexICFundBalancesBySource(
   const suppliers: Record<string, number> = {};
   const customers: Record<string, number> = {};
   for (const a of accounts) {
+    const amount = Number(a.balance) || 0;
     if (a.sourceType === 'ic_counterparty' && a.sourceId) {
-      counterparties[a.sourceId] = a.balance;
+      addToBalanceMap(counterparties, a.sourceId, amount);
     }
     if (a.sourceType === 'ic_supplier' && a.sourceId) {
-      suppliers[a.sourceId] = a.balance;
+      addToBalanceMap(suppliers, a.sourceId, amount);
     }
     const customerKey = a.customerId || (a.sourceType === 'ic_customer' ? a.sourceId : undefined);
     if (customerKey) {
-      customers[customerKey] = a.balance;
+      addToBalanceMap(customers, customerKey, amount);
     }
   }
   return { counterparties, suppliers, customers };
 }
 
+/** Merge AED maps from HQ accounts with INR balances keyed by entity id. */
+export function buildEntityLedgerMap(
+  aedIndexed: ReturnType<typeof indexICFundBalancesBySource>,
+  inrByEntityId: Record<string, number> = {},
+): Record<string, EntityLedgerBalances> {
+  const aedById: Record<string, number> = {};
+  for (const [id, bal] of Object.entries(aedIndexed.suppliers)) {
+    addToBalanceMap(aedById, id, bal);
+  }
+  for (const [id, bal] of Object.entries(aedIndexed.customers)) {
+    addToBalanceMap(aedById, id, bal);
+  }
+  for (const [id, bal] of Object.entries(aedIndexed.counterparties)) {
+    addToBalanceMap(aedById, id, bal);
+  }
+
+  const keys = new Set([...Object.keys(aedById), ...Object.keys(inrByEntityId)]);
+  const out: Record<string, EntityLedgerBalances> = {};
+  for (const id of keys) {
+    out[id] = { aed: aedById[id] ?? 0, inr: inrByEntityId[id] ?? 0 };
+  }
+  return out;
+}
+
 export function buildCounterpartySearchOptions(
   counterparties: ICSupplier[],
+  ledgerByEntityId?: Record<string, EntityLedgerBalances>,
+  /** @deprecated use ledgerByEntityId */
   balanceByCounterpartyId?: Record<string, number>,
 ): EntitySearchOption[] {
-  return buildSupplierSearchOptions(counterparties, balanceByCounterpartyId);
+  if (ledgerByEntityId) {
+    return buildSupplierSearchOptions(counterparties, ledgerByEntityId);
+  }
+  const legacy: Record<string, EntityLedgerBalances> = {};
+  if (balanceByCounterpartyId) {
+    for (const [id, aed] of Object.entries(balanceByCounterpartyId)) {
+      legacy[id] = { aed, inr: 0 };
+    }
+  }
+  return buildSupplierSearchOptions(counterparties, legacy);
 }

@@ -5,8 +5,9 @@ import { notFound } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
 import WarehouseModal from '@/components/ic-transfer/settings/WarehouseModal';
 import { findWarehouseByRouteParam } from '@/lib/icTransfer/warehouseSlug';
-import { computeSingleWarehouseMetrics, formatMetalGrams } from '@/lib/icTransfer/warehouseMatrixMetrics';
-import { warehouseTotalProfitAed } from '@/lib/icTransfer/warehouseActivity';
+import { computeSingleWarehouseMetrics } from '@/lib/icTransfer/warehouseMatrixMetrics';
+import { computeCombinedTradeBookKpis } from '@/lib/icTransfer/dealBookKpis';
+import WarehouseInventoryKpiGrid from '@/components/warehouse/WarehouseInventoryKpiGrid';
 import WarehouseDetailTabs from '@/components/ic-transfer/warehouse/WarehouseDetailTabs';
 import {
   getICTransferWarehouseBase,
@@ -14,12 +15,11 @@ import {
 } from '@/lib/icTransfer/branchPortalScope';
 import { resolveDateFilterRange, getDateFilterLabel } from '@/lib/dateFilterRange';
 import AsicPageHeader from '@/components/asic/AsicPageHeader';
-import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
 import ICTransferDateFilterBar from '@/components/ic-transfer/shared/ICTransferDateFilterBar';
 import { useICTransferFilters } from '@/components/ic-transfer/ui';
 import AddPurchaseModal from '@/components/ic-transfer/purchase/AddPurchaseModal';
 import AddSaleModal from '@/components/ic-transfer/sales/AddSaleModal';
-import { asicBtnOutline, asicCard, asicFormGridLoose } from '@/components/asic/ui';
+import { asicBtnOutline } from '@/components/asic/ui';
 import { useWriteAccess } from '@/context/RbacWriteContext';
 
 interface Props {
@@ -34,23 +34,6 @@ const subtleTxnBtnBase =
 const subtlePurchaseBtnClass = `${subtleTxnBtnBase} border-sky-200/90 bg-sky-50/70 text-sky-900 hover:border-sky-300 hover:bg-sky-100/80 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-100 dark:hover:bg-sky-950/50`;
 
 const subtleSaleBtnClass = `${subtleTxnBtnBase} border-emerald-200/90 bg-emerald-50/70 text-emerald-900 hover:border-emerald-300 hover:bg-emerald-100/80 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-100 dark:hover:bg-emerald-950/50`;
-
-function fmtKpiAed(n: number): string {
-  return `AED ${n.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function dealCountHint(count: number, rangeLabel: string): string {
-  return `${count} ${count === 1 ? 'deal' : 'deals'} · ${rangeLabel}`;
-}
-
-function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="min-w-0">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-0.5 text-sm text-slate-900">{value}</p>
-    </div>
-  );
-}
 
 export default function WarehouseDetailsClient({
   branchSlug,
@@ -100,19 +83,32 @@ export default function WarehouseDetailsClient({
         metalSales: 0,
         cashPurchaseAed: 0,
         metalPurchaseAed: 0,
+        metalPurchaseInr: 0,
         cashSaleAed: 0,
         metalSaleAed: 0,
+        metalSaleInr: 0,
         cashGrossProfitAed: 0,
         metalProfitAed: 0,
         metalProfitInr: 0,
+        metalStockInr: 0,
       };
     }
     return computeSingleWarehouseMetrics(warehouse, icRegions, icPurchases, icSales, range);
   }, [warehouse, icRegions, icPurchases, icSales, range]);
 
-  const totalProfitAed = useMemo(
-    () => warehouseTotalProfitAed(kpiMetrics.cashGrossProfitAed, kpiMetrics.metalProfitAed),
-    [kpiMetrics.cashGrossProfitAed, kpiMetrics.metalProfitAed],
+  const warehousePurchases = useMemo(
+    () => (warehouse ? icPurchases.filter(p => p.warehouseId === warehouse.id) : []),
+    [icPurchases, warehouse],
+  );
+
+  const warehouseSales = useMemo(
+    () => (warehouse ? icSales.filter(s => s.warehouseId === warehouse.id) : []),
+    [icSales, warehouse],
+  );
+
+  const tradeBookKpis = useMemo(
+    () => computeCombinedTradeBookKpis(warehousePurchases, warehouseSales, range),
+    [warehousePurchases, warehouseSales, range],
   );
 
   const purchaseBranchId =
@@ -125,7 +121,6 @@ export default function WarehouseDetailsClient({
   if (!warehouse) return null;
 
   const warehouseListHref = getICTransferWarehouseBase(portalMode, branchSlug);
-  const indiaLocationLabel = [warehouse.indiaCity, warehouse.indiaState].filter(Boolean).join(', ') || '—';
 
   const purchaseBlocked = !canWrite;
   const saleBlocked = !canWrite || salesPaused;
@@ -178,90 +173,11 @@ export default function WarehouseDetailsClient({
         setCustomEndDate={setCustomEndDate}
       />
 
-      <AsicKpiStrip
-        metrics={[
-          {
-            label: 'Stock (units)',
-            value: kpiMetrics.currentStock.toLocaleString('en-US', { maximumFractionDigits: 4 }),
-            hint: 'On hand',
-          },
-          {
-            label: 'IC purchases',
-            value: fmtKpiAed(kpiMetrics.cashPurchaseAed),
-            hint: dealCountHint(kpiMetrics.cashPurchases, rangeLabel),
-          },
-          {
-            label: 'IC sales',
-            value: fmtKpiAed(kpiMetrics.cashSaleAed),
-            hint: dealCountHint(kpiMetrics.cashSales, rangeLabel),
-            tone: 'emerald',
-          },
-          {
-            label: 'Metal on hand',
-            value: formatMetalGrams(kpiMetrics.currentMetalG),
-            hint: 'Available gold',
-            tone: 'amber',
-          },
-          {
-            label: 'Metal purchases',
-            value: fmtKpiAed(kpiMetrics.metalPurchaseAed),
-            hint: dealCountHint(kpiMetrics.metalPurchases, rangeLabel),
-            tone: 'indigo',
-          },
-          {
-            label: 'Metal sales',
-            value: fmtKpiAed(kpiMetrics.metalSaleAed),
-            hint: dealCountHint(kpiMetrics.metalSales, rangeLabel),
-            tone: 'amber',
-          },
-          {
-            label: 'IC profit',
-            value: fmtKpiAed(kpiMetrics.cashGrossProfitAed),
-            hint: 'WAC on IC sales',
-            tone: kpiMetrics.cashGrossProfitAed >= 0 ? 'emerald' : 'red',
-          },
-          {
-            label: 'Metal profit',
-            value: fmtKpiAed(kpiMetrics.metalProfitAed),
-            hint: 'Sale − purchase AED',
-            tone: kpiMetrics.metalProfitAed >= 0 ? 'emerald' : 'red',
-          },
-          {
-            label: 'Total profit',
-            value: fmtKpiAed(totalProfitAed),
-            hint: rangeLabel,
-            tone: totalProfitAed >= 0 ? 'emerald' : 'red',
-          },
-        ]}
-        columns={3}
+      <WarehouseInventoryKpiGrid
+        metrics={kpiMetrics}
+        books={tradeBookKpis}
+        rangeLabel={rangeLabel}
       />
-
-      <div className={`${asicCard} mb-3`}>
-        <div className="border-b border-slate-100 px-3 py-2.5 sm:px-4">
-          <h3 className="text-sm font-semibold text-slate-900">Profile</h3>
-        </div>
-        <div className={`${asicFormGridLoose} p-3 sm:p-4`}>
-          <DetailRow label="Location (India)" value={indiaLocationLabel} />
-          <DetailRow label="Phone" value={warehouse.phone || '—'} />
-          <DetailRow label="Email" value={warehouse.email || '—'} />
-          <DetailRow
-            label="Address"
-            value={
-              warehouse.address ? (
-                <span className="line-clamp-3" title={warehouse.address}>
-                  {warehouse.address}
-                </span>
-              ) : (
-                '—'
-              )
-            }
-          />
-          <DetailRow
-            label="Commission"
-            value={warehouse.commission != null ? `${warehouse.commission}%` : '—'}
-          />
-        </div>
-      </div>
 
       <WarehouseDetailTabs
         warehouseId={warehouse.id}

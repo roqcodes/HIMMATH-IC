@@ -6,17 +6,39 @@ import Link from 'next/link';
 import {
   getICFundReportBundleAction,
   getICFundStatementAction,
+  getInrFundStatementAction,
+  getInrMetalPlReportAction,
   getICSettlementTradeReportAction,
   getICWarehousePLReportAction,
   listICFundAccountsLiteAction,
+  listInrFundAccountsLiteAction,
+  type InrFundAccountLite,
 } from '@/app/actions/icFundsActions';
 import { accountTypeLabel, IC_FUND_VOUCHER_LABELS } from '@/lib/icFunds/constants';
-import { fmtICAmount, fmtICDate, fmtLedgerAed, icfLedgerColumnLabel } from '@/lib/icFunds/format';
+import { fmtICDate, fmtLedgerAed, fmtLedgerAmount, icfLedgerColumnLabel, FmtLedgerAed, FmtLedgerAmount } from '@/lib/icFunds/format';
 import { formatReportPeriodCaption } from '@/lib/icFunds/reportCaptions';
-import { downloadCsv, printReportArea } from '@/lib/icFunds/booksExport';
+import { downloadCsv, exportReportPdfFromElement, openReportPreviewNewTab } from '@/lib/icFunds/booksExport';
+import { reportCatalogTitle } from '@/lib/icFunds/reportCatalog';
+import {
+  DEFAULT_REPORT_FILTERS,
+  filterAccounts,
+  filterSettlementTradeReport,
+  filterStatementLines,
+  filterTrialBalanceLines,
+  filterVouchers,
+  filterWarehousePlLines,
+  filterWarehouseSummaries,
+  formatReportFilterSummary,
+  type ReportFilterState,
+} from '@/lib/icFunds/reportFilters';
+import { buildSupplierSearchOptions, buildWarehouseSearchOptions } from '@/lib/icTransfer/entitySearchOptions';
+import type { EntitySearchOption } from '@/lib/icTransfer/entitySearchOptions';
+import FinancialReportFilterPanel from '@/components/ic-funds/reports/FinancialReportFilterPanel';
+import WarehouseStatementReport from '@/components/ic-funds/reports/WarehouseStatementReport';
 import { btnSecondary } from '@/lib/ui';
 import TrialBalanceReport from '@/components/ic-funds/reports/TrialBalanceReport';
 import ProfitLossReport from '@/components/ic-funds/reports/ProfitLossReport';
+import MetalProfitLossReport from '@/components/ic-funds/reports/MetalProfitLossReport';
 import BalanceSheetReport from '@/components/ic-funds/reports/BalanceSheetReport';
 import DayBookReport from '@/components/ic-funds/reports/DayBookReport';
 import CashBankBookReport from '@/components/ic-funds/reports/CashBankBookReport';
@@ -24,9 +46,8 @@ import SettlementTradeReport from '@/components/ic-funds/reports/SettlementTrade
 import { icFundsReportPath, type ICFundsReportId } from '@/lib/icFunds/nav';
 import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
 import { computeBooksKpis } from '@/lib/icFunds/kpiMetrics';
-import { icfCard, icfInput, icfLabel, icfTableWrap, icfTd, icfTh, icfThAlign, icfTheadRow, icfAccountLink } from '@/components/ic-funds/ui';
+import { icfCard, icfTableWrap, icfTd, icfTh, icfThAlign, icfTheadRow, icfAccountLink } from '@/components/ic-funds/ui';
 import { ASICTableRowsSkeleton, ASICTableSkeleton } from '@/components/asic/ASICTableSkeleton';
-import ICFundsDateFilterBar from '@/components/ic-funds/ICFundsDateFilterBar';
 import { useICFundsDateFilter } from '@/components/ic-funds/useICFundsDateFilter';
 import VoucherUserCell from '@/components/ic-funds/VoucherUserCell';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
@@ -39,16 +60,25 @@ import { logClientActionError } from '@/lib/errors/actionError';
 import { trackLoading } from '@/lib/loadingBar';
 import type { ICWarehousePLReport } from '@/lib/icFunds/warehouseProfit';
 import type { ICSettlementTradeReport } from '@/lib/icFunds/settlementTradeReport';
+import type { PlStatement } from '@/lib/icFunds/reportPresentation';
 import type { ICFundAccount, ICFundStatementLine, ICFundVoucher } from '@/types';
 
 type ReportBundle = NonNullable<
   Extract<Awaited<ReturnType<typeof getICFundReportBundleAction>>, { success: true }>['data']
 >;
 
-function AmountCell({ n, danger }: { n: number; danger?: boolean }) {
+function AmountCell({
+  n,
+  danger,
+  currency = 'AED',
+}: {
+  n: number;
+  danger?: boolean;
+  currency?: 'AED' | 'INR';
+}) {
   return (
     <td className={`${icfTd} text-right font-mono tabular-nums ${danger || n < 0 ? 'text-red-600' : ''}`}>
-      {n === 0 ? '—' : fmtLedgerAed(n)}
+      {n === 0 ? '—' : <FmtLedgerAmount amount={n} book={currency} />}
     </td>
   );
 }
@@ -64,7 +94,7 @@ export default function BooksScreen({
   reportView: ICFundsReportId;
   portal?: 'admin' | 'branch';
 }) {
-  const { branches } = useApp();
+  const { branches, icSuppliers, icWarehouses, icPurchases, icSales } = useApp();
   const { alert, confirmDialog } = useConfirmDialog();
   const branch = branches.find(b => b.slug === slug);
   const {
@@ -90,6 +120,16 @@ export default function BooksScreen({
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reportFilters, setReportFilters] = useState<ReportFilterState>(DEFAULT_REPORT_FILTERS);
+  const [inrAccounts, setInrAccounts] = useState<InrFundAccountLite[]>([]);
+  const [inrAccountId, setInrAccountId] = useState('');
+  const [inrStatement, setInrStatement] = useState<{
+    opening: number;
+    closing: number;
+    lines: ICFundStatementLine[];
+    accountName: string;
+  } | null>(null);
+  const [metalPlStatement, setMetalPlStatement] = useState<PlStatement | null>(null);
 
   const showLoadError = useCallback(
     async (scope: string, message: string) => {
@@ -118,11 +158,21 @@ export default function BooksScreen({
   }, [branchId, endDate, showLoadError, startDate]);
 
   const loadSettlementTradeReport = useCallback(async () => {
-    const mode = reportView === 'metal-trades' ? 'metal' : 'cash';
+    const settlementMode =
+      reportView === 'fund-trades' ? 'cash' : ('metal' as const);
+    const metalPaymentBook =
+      reportView === 'metal-agent-trades' ? ('aed' as const) : reportView === 'metal-trades' ? ('cash' as const) : undefined;
     setLoading(true);
     setError(null);
     const result = await trackLoading(() =>
-      getICSettlementTradeReportAction({ branchId, startDate, endDate, settlementMode: mode }),
+      getICSettlementTradeReportAction({
+        branchId,
+        startDate,
+        endDate,
+        settlementMode,
+        metalPaymentBook,
+        includeVoidOrders: reportFilters.includeVoidOrders,
+      }),
     );
     if (!result.success) {
       await showLoadError('BooksScreen.loadSettlementTradeReport', result.error);
@@ -131,7 +181,45 @@ export default function BooksScreen({
       setSettlementTradeReport(result.data);
     }
     setLoading(false);
-  }, [branchId, endDate, reportView, showLoadError, startDate]);
+  }, [branchId, endDate, reportView, reportFilters.includeVoidOrders, showLoadError, startDate]);
+
+  const loadMetalPl = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    const result = await trackLoading(() => getInrMetalPlReportAction({ branchId, startDate, endDate }));
+    if (!result.success) {
+      await showLoadError('BooksScreen.loadMetalPl', result.error);
+      setMetalPlStatement(null);
+    } else {
+      setMetalPlStatement(result.data.plStatement);
+    }
+    setLoading(false);
+  }, [branchId, endDate, showLoadError, startDate]);
+
+  const loadInrStatement = useCallback(async () => {
+    if (!inrAccountId) {
+      setInrStatement(null);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    const result = await trackLoading(() =>
+      getInrFundStatementAction({ branchId, accountId: inrAccountId, startDate, endDate }),
+    );
+    if (!result.success) {
+      await showLoadError('BooksScreen.loadInrStatement', result.error);
+      setInrStatement(null);
+    } else {
+      setInrStatement({
+        opening: result.data.opening,
+        closing: result.data.closing,
+        lines: result.data.lines,
+        accountName: result.data.account.name,
+      });
+    }
+    setLoading(false);
+  }, [branchId, endDate, inrAccountId, showLoadError, startDate]);
 
   const loadBundle = useCallback(async () => {
     setLoading(true);
@@ -168,6 +256,7 @@ export default function BooksScreen({
 
   useEffect(() => {
     void trackLoading(() => listICFundAccountsLiteAction(branchId).then(setAccounts));
+    void trackLoading(() => listInrFundAccountsLiteAction(branchId).then(setInrAccounts));
   }, [branchId]);
 
   useEffect(() => {
@@ -175,16 +264,32 @@ export default function BooksScreen({
       void loadStatement();
       return;
     }
-    if (reportView === 'warehouse-pl') {
+    if (reportView === 'inr-statement') {
+      void loadInrStatement();
+      return;
+    }
+    if (reportView === 'warehouse-pl' || reportView === 'warehouse-metal') {
       void loadWarehousePl();
       return;
     }
-    if (reportView === 'fund-trades' || reportView === 'metal-trades') {
+    if (reportView === 'metal-pl') {
+      void loadMetalPl();
+      return;
+    }
+    if (reportView === 'fund-trades' || reportView === 'metal-trades' || reportView === 'metal-agent-trades') {
       void loadSettlementTradeReport();
       return;
     }
     void loadBundle();
-  }, [loadBundle, loadStatement, loadSettlementTradeReport, loadWarehousePl, reportView]);
+  }, [
+    loadBundle,
+    loadInrStatement,
+    loadMetalPl,
+    loadStatement,
+    loadSettlementTradeReport,
+    loadWarehousePl,
+    reportView,
+  ]);
 
   const { periodLabel, asAtLabel } = formatReportPeriodCaption({
     startDate: bundle?.startDate ?? startDate,
@@ -194,13 +299,130 @@ export default function BooksScreen({
     ? `As at ${fmtICDate(bundle.asOfDate)}`
     : asAtLabel;
 
+  const ledgerById = useMemo(
+    () => new Map((bundle?.accountLedgers ?? []).map(l => [l.accountId, l])),
+    [bundle?.accountLedgers],
+  );
+
+  const accountSearchOptions: EntitySearchOption[] = useMemo(
+    () =>
+      accounts.map(a => ({
+        value: a.id,
+        label: a.name,
+        detail: accountTypeLabel(a.accountType),
+      })),
+    [accounts],
+  );
+
+  const warehouseSearchOptions = useMemo(
+    () => buildWarehouseSearchOptions(icWarehouses, icSales, undefined, undefined, icPurchases),
+    [icPurchases, icSales, icWarehouses],
+  );
+
+  const counterpartySearchOptions = useMemo(
+    () => buildSupplierSearchOptions(icSuppliers),
+    [icSuppliers],
+  );
+
+  const filteredSettlementReport = useMemo(
+    () => (settlementTradeReport ? filterSettlementTradeReport(settlementTradeReport, reportFilters) : null),
+    [reportFilters, settlementTradeReport],
+  );
+
+  const filteredWarehouseSummaries = useMemo(
+    () =>
+      warehousePl
+        ? filterWarehouseSummaries(warehousePl.warehouses, reportFilters.warehouseId, reportFilters.search)
+        : [],
+    [reportFilters.search, reportFilters.warehouseId, warehousePl],
+  );
+
+  const filteredWarehouseLines = useMemo(
+    () =>
+      warehousePl
+        ? filterWarehousePlLines(warehousePl.lines, reportFilters.warehouseId, reportFilters.search)
+        : [],
+    [reportFilters.search, reportFilters.warehouseId, warehousePl],
+  );
+
+  const filteredAllVouchers = useMemo(
+    () => (bundle ? filterVouchers(bundle.allVouchers, reportFilters) : []),
+    [bundle, reportFilters],
+  );
+
+  const filteredExpenseRegister = useMemo(
+    () => (bundle ? filterVouchers(bundle.expenseRegister ?? bundle.dExpenses, reportFilters) : []),
+    [bundle, reportFilters],
+  );
+
+  const filteredTrialBalance = useMemo(
+    () => (bundle ? filterTrialBalanceLines(bundle.trialBalance, reportFilters) : []),
+    [bundle, reportFilters],
+  );
+
+  const filteredReceivables = useMemo(
+    () => (bundle ? filterAccounts(bundle.receivables, reportFilters) : []),
+    [bundle, reportFilters],
+  );
+
+  const filteredPayables = useMemo(
+    () => (bundle ? filterAccounts(bundle.payables, reportFilters) : []),
+    [bundle, reportFilters],
+  );
+
+  const inrAccountSearchOptions: EntitySearchOption[] = useMemo(
+    () =>
+      inrAccounts.map(a => ({
+        value: a.id,
+        label: a.name,
+        detail: a.accountType,
+      })),
+    [inrAccounts],
+  );
+
+  const activeStatement = useMemo(() => {
+    if (reportView === 'inr-statement' && inrStatement) {
+      return {
+        account: { name: inrStatement.accountName } as ICFundAccount,
+        opening: inrStatement.opening,
+        closing: inrStatement.closing,
+        lines: filterStatementLines(inrStatement.lines, reportFilters),
+        currency: 'INR' as const,
+      };
+    }
+    if (reportView !== 'statement' || !statement) return null;
+    return {
+      ...statement,
+      lines: filterStatementLines(statement.lines, reportFilters),
+      currency: 'AED' as const,
+    };
+  }, [inrStatement, reportFilters, reportView, statement]);
+
+  const exportSubtitle = useMemo(
+    () =>
+      formatReportFilterSummary(reportFilters, {
+        period: periodLabel,
+        accountName: activeStatement?.account.name,
+        book: reportView === 'inr-statement' ? 'INR' : undefined,
+      }),
+    [activeStatement?.account.name, periodLabel, reportFilters, reportView],
+  );
+
+  const reportTitle = reportCatalogTitle(reportView);
+
   const booksKpiMetrics = useMemo(() => {
-    if (reportView === 'statement') {
-      if (!statement) return [];
-    } else if (reportView === 'warehouse-pl') {
+    if (reportView === 'statement' || reportView === 'inr-statement') {
+      if (!activeStatement) return [];
+    } else if (reportView === 'warehouse-pl' || reportView === 'warehouse-metal') {
       if (!warehousePl) return [];
-    } else if (reportView === 'fund-trades' || reportView === 'metal-trades') {
-      if (!settlementTradeReport) return [];
+    } else if (reportView === 'metal-pl') {
+      if (!metalPlStatement) return [];
+    } else if (
+      reportView === 'fund-trades' ||
+      reportView === 'metal-trades' ||
+      reportView === 'metal-agent-trades'
+    ) {
+      if (!filteredSettlementReport) return [];
     } else if (!bundle) {
       return [];
     }
@@ -208,56 +430,103 @@ export default function BooksScreen({
     return computeBooksKpis({
       reportView,
       profitLoss: bundle?.profitLoss,
-      plStatement: bundle?.plStatement,
+      plStatement: reportView === 'metal-pl' ? metalPlStatement ?? undefined : bundle?.plStatement,
       balanceSheet: bundle?.balanceSheet,
-      trialBalance: bundle?.trialBalance,
+      trialBalance: filteredTrialBalance,
       vouchers:
         reportView === 'd-expenses'
-          ? bundle?.dExpenses
+          ? filteredExpenseRegister
           : reportView === 'all-vouchers'
-            ? bundle?.allVouchers
+            ? filteredAllVouchers
             : [],
       cashBank: bundle?.cashBank,
-      receivables: bundle?.receivables,
-      payables: bundle?.payables,
-      warehousePl,
-      settlementTradeReport,
-      statement,
+      receivables: filteredReceivables,
+      payables: filteredPayables,
+      warehousePl:
+        warehousePl && (reportView === 'warehouse-pl' || reportView === 'warehouse-metal')
+          ? {
+              ...warehousePl,
+              warehouses: filteredWarehouseSummaries,
+              lines: filteredWarehouseLines,
+            }
+          : null,
+      settlementTradeReport: filteredSettlementReport,
+      statement: activeStatement,
+      warehouseBook: reportView === 'warehouse-metal' ? 'metal' : reportView === 'warehouse-pl' ? 'ic' : undefined,
     });
-  }, [reportView, bundle, warehousePl, settlementTradeReport, statement]);
-
-  const ledgerById = useMemo(
-    () => new Map((bundle?.accountLedgers ?? []).map(l => [l.accountId, l])),
-    [bundle?.accountLedgers],
-  );
+  }, [
+    activeStatement,
+    bundle,
+    filteredAllVouchers,
+    filteredExpenseRegister,
+    filteredPayables,
+    filteredReceivables,
+    filteredSettlementReport,
+    filteredTrialBalance,
+    filteredWarehouseLines,
+    filteredWarehouseSummaries,
+    metalPlStatement,
+    reportView,
+    warehousePl,
+  ]);
 
   const handleExportCsv = useCallback(() => {
-    if (reportView === 'fund-trades' || reportView === 'metal-trades') {
-      if (!settlementTradeReport) return;
-      const isMetal = settlementTradeReport.settlementMode === 'metal';
-      const headers = isMetal
-        ? [
-            'Type',
-            'Date',
-            'Reference',
-            'Counterparty',
-            'Warehouse',
-            'Fine weight (g)',
-            'INR/g',
-            'AED/g',
-            'INR value',
-            'Units',
-            'Rate (AED)',
-            'Amount (AED)',
-            'P&L',
-            'P&L currency',
-            'Status',
-          ]
-        : ['Type', 'Date', 'Reference', 'Counterparty', 'Warehouse', 'Units', 'Rate (AED)', 'Amount (AED)', 'Status'];
-      const rows = [...settlementTradeReport.purchases, ...settlementTradeReport.sales].map(r => {
-        const status =
-          r.txnKind === 'purchase' ? r.paymentStatus || r.paymentMethod || '' : r.orderStatus || r.paymentStatus || '';
-        if (isMetal) {
+    if (
+      reportView === 'fund-trades' ||
+      reportView === 'metal-trades' ||
+      reportView === 'metal-agent-trades'
+    ) {
+      if (!filteredSettlementReport) return;
+      if (reportView === 'fund-trades') {
+        const headers = [
+          'Type',
+          'Date',
+          'Reference',
+          'Counterparty',
+          'Warehouse',
+          'Units',
+          'Rate (AED)',
+          'Amount (AED)',
+          'Status',
+        ];
+        const rows = [...filteredSettlementReport.purchases, ...filteredSettlementReport.sales].map(r => {
+          const status =
+            r.txnKind === 'purchase'
+              ? r.paymentStatus || r.paymentMethod || ''
+              : r.orderStatus || r.paymentStatus || '';
+          return [
+            r.txnKind,
+            r.date.slice(0, 10),
+            r.reference,
+            r.counterparty,
+            r.warehouseName || '',
+            r.units,
+            r.unitRateAed,
+            r.aedTotal,
+            status,
+          ];
+        });
+        downloadCsv('fund-register.csv', headers, rows);
+        return;
+      }
+      if (reportView === 'metal-trades') {
+        const headers = [
+          'Type',
+          'Date',
+          'Reference',
+          'Counterparty',
+          'Warehouse',
+          'Fine weight (g)',
+          'INR/g',
+          'INR value',
+          'P&L (INR)',
+          'Status',
+        ];
+        const rows = [...filteredSettlementReport.purchases, ...filteredSettlementReport.sales].map(r => {
+          const status =
+            r.txnKind === 'purchase'
+              ? r.paymentStatus || r.paymentMethod || ''
+              : r.orderStatus || r.paymentStatus || '';
           return [
             r.txnKind,
             r.date.slice(0, 10),
@@ -266,53 +535,174 @@ export default function BooksScreen({
             r.warehouseName || '',
             r.metalWeightG ?? '',
             r.metalRateInrPerG ?? '',
-            r.metalRateAedPerG ?? '',
             r.inrTotal ?? '',
-            r.units,
-            r.unitRateAed,
-            r.aedTotal,
-            r.bookedProfit ?? '',
-            r.bookedCurrency ?? '',
+            r.bookedProfitInr ?? r.bookedProfit ?? '',
             status,
           ];
-        }
+        });
+        downloadCsv('metal-register-inr.csv', headers, rows);
+        return;
+      }
+      const headers = [
+        'Type',
+        'Date',
+        'Reference',
+        'Counterparty',
+        'AED agent',
+        'Warehouse',
+        'Fine weight (g)',
+        'Amount (AED)',
+        'Status',
+      ];
+      const rows = [...filteredSettlementReport.purchases, ...filteredSettlementReport.sales].map(r => {
+        const status =
+          r.txnKind === 'purchase'
+            ? r.paymentStatus || r.paymentMethod || ''
+            : r.orderStatus || r.paymentStatus || '';
         return [
           r.txnKind,
           r.date.slice(0, 10),
           r.reference,
           r.counterparty,
+          r.aedAgentName || '',
           r.warehouseName || '',
-          r.units,
-          r.unitRateAed,
+          r.metalWeightG ?? '',
           r.aedTotal,
           status,
         ];
       });
-      const name = reportView === 'metal-trades' ? 'metal-purchase-sales.csv' : 'fund-purchase-sales.csv';
-      downloadCsv(name, headers, rows);
+      downloadCsv('metal-agent-register.csv', headers, rows);
       return;
     }
-    if (!bundle) return;
-    if (reportView === 'trial-balance') {
+
+    if ((reportView === 'statement' || reportView === 'inr-statement') && activeStatement) {
       downloadCsv(
-        'trial-balance.csv',
-        ['Account', 'Type', 'Opening Dr', 'Opening Cr', 'Period Dr', 'Period Cr', 'Closing Dr', 'Closing Cr'],
-        bundle.trialBalance.map(l => [
-          l.accountName,
-          l.accountType,
-          l.openingDebit ?? 0,
-          l.openingCredit ?? 0,
-          l.periodDebit ?? 0,
-          l.periodCredit ?? 0,
-          l.closingDebit ?? l.debit,
-          l.closingCredit ?? l.credit,
+        'statement-of-account.csv',
+        ['Date', '#', 'Type', 'Particulars', 'Debit', 'Credit', 'Balance', 'Remark'],
+        [
+          ...activeStatement.lines.map(l => [
+            l.date,
+            l.voucherNo,
+            l.voucherType,
+            l.particulars,
+            l.debit,
+            l.credit,
+            l.balance,
+            l.notes || '',
+          ]),
+        ],
+      );
+      return;
+    }
+
+    if (reportView === 'warehouse-pl' && warehousePl) {
+      downloadCsv(
+        'warehouse-ic.csv',
+        ['Warehouse', 'Opening units', 'In units', 'Out units', 'Closing units', 'Revenue AED', 'COGS AED', 'GP AED'],
+        filteredWarehouseSummaries.map(w => [
+          w.warehouseName,
+          w.openingUnits,
+          w.unitsIn,
+          w.unitsOut,
+          w.closingUnits,
+          w.revenue,
+          w.cogs,
+          w.grossProfit,
         ]),
       );
       return;
     }
+
+    if (reportView === 'warehouse-metal' && warehousePl) {
+      downloadCsv(
+        'warehouse-metal.csv',
+        ['Warehouse', 'Opening g', 'In g', 'Out g', 'Closing g', 'Metal P&L INR'],
+        filteredWarehouseSummaries.map(w => [
+          w.warehouseName,
+          w.openingMetalG,
+          w.metalInG,
+          w.metalOutG,
+          w.closingMetalG,
+          w.metalProfitInr,
+        ]),
+      );
+      return;
+    }
+
+    if (reportView === 'metal-pl' && metalPlStatement) {
+      const s = metalPlStatement;
+      downloadCsv('metal-profit-and-loss.csv', ['Section', 'Amount (INR)'], [
+        ['Metal sales / income', s.salesTotal],
+        ['Cost of metal sold', -s.directCostsTotal],
+        ['Gross result', s.grossResult],
+        ['Net for period', s.netForPeriod],
+      ]);
+      return;
+    }
+
+    if (!bundle) return;
+
+    if (reportView === 'all-vouchers') {
+      downloadCsv(
+        'day-book.csv',
+        ['Date', 'Vch #', 'Type', 'Debit', 'Credit', 'Amount', 'Notes'],
+        [
+          ...filteredAllVouchers.map(v => [
+            v.voucherDate,
+            v.voucherNo,
+            v.voucherType,
+            v.debitAccountName,
+            v.creditAccountName,
+            v.amount,
+            v.notes || '',
+          ]),
+        ],
+      );
+      return;
+    }
+
+    if (reportView === 'd-expenses') {
+      downloadCsv(
+        'expense-register.csv',
+        ['Date', 'Vch #', 'Type', 'Debit', 'Credit', 'Amount', 'Notes'],
+        [
+          ...filteredExpenseRegister.map(v => [
+            v.voucherDate,
+            v.voucherNo,
+            v.voucherType,
+            v.debitAccountName,
+            v.creditAccountName,
+            v.amount,
+            v.notes || '',
+          ]),
+        ],
+      );
+      return;
+    }
+
+    if (reportView === 'trial-balance') {
+      downloadCsv(
+        'trial-balance.csv',
+        ['Account', 'Type', 'Opening Dr', 'Opening Cr', 'Period Dr', 'Period Cr', 'Closing Dr', 'Closing Cr'],
+        [
+          ...filteredTrialBalance.map(l => [
+            l.accountName,
+            l.accountType,
+            l.openingDebit ?? 0,
+            l.openingCredit ?? 0,
+            l.periodDebit ?? 0,
+            l.periodCredit ?? 0,
+            l.closingDebit ?? l.debit,
+            l.closingCredit ?? l.credit,
+          ]),
+        ],
+      );
+      return;
+    }
+
     if (reportView === 'profit-loss' && bundle.plStatement) {
       const s = bundle.plStatement;
-      downloadCsv('profit-and-loss.csv', ['Section', 'Amount (AED)'], [
+      downloadCsv('profit-and-loss-aed.csv', ['Section', 'Amount (AED)'], [
         ['Sales / income', s.salesTotal],
         ['Direct costs', -s.directCostsTotal],
         ['Gross result', s.grossResult],
@@ -320,26 +710,42 @@ export default function BooksScreen({
         ['Net for period', s.netForPeriod],
       ]);
     }
-  }, [bundle, reportView, settlementTradeReport]);
-
-  const showCsvExport =
-    ((reportView === 'trial-balance' || reportView === 'profit-loss') && Boolean(bundle)) ||
-    ((reportView === 'fund-trades' || reportView === 'metal-trades') && Boolean(settlementTradeReport));
+  }, [
+    activeStatement,
+    bundle,
+    filteredAllVouchers,
+    filteredExpenseRegister,
+    filteredSettlementReport,
+    filteredTrialBalance,
+    filteredWarehouseSummaries,
+    metalPlStatement,
+    reportView,
+    warehousePl,
+  ]);
 
   const headerToolbar = useMemo(
     () => (
       <>
-        <button type="button" className={btnSecondary} onClick={() => printReportArea('icf-report-print')}>
-          Print
+        <button
+          type="button"
+          className={btnSecondary}
+          onClick={() => openReportPreviewNewTab('icf-report-print', { title: reportTitle, subtitle: exportSubtitle })}
+        >
+          View
         </button>
-        {showCsvExport ? (
-          <button type="button" className={btnSecondary} onClick={handleExportCsv}>
-            Export CSV
-          </button>
-        ) : null}
+        <button
+          type="button"
+          className={btnSecondary}
+          onClick={() => exportReportPdfFromElement('icf-report-print', { title: reportTitle, subtitle: exportSubtitle })}
+        >
+          Export PDF
+        </button>
+        <button type="button" className={btnSecondary} onClick={handleExportCsv}>
+          Export CSV
+        </button>
       </>
     ),
-    [showCsvExport, handleExportCsv],
+    [exportSubtitle, handleExportCsv, reportTitle],
   );
 
   useICFundsReportHeaderToolbar(headerToolbar);
@@ -426,7 +832,7 @@ export default function BooksScreen({
                     accounts={accounts}
                   />
                 </td>
-                <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(row.amount)}</td>
+                <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={row.amount} /></td>
                 <td className={icfTd}><VoucherUserCell voucher={row} /></td>
                 <td className={`${icfTd} max-w-[12rem] truncate text-slate-500`}>{row.notes || '—'}</td>
               </tr>
@@ -437,54 +843,72 @@ export default function BooksScreen({
     </div>
   );
 
-  const totalDr = statement?.lines.reduce((s, l) => s + (l.status === 'pending' ? 0 : l.debit), 0) ?? 0;
-  const totalCr = statement?.lines.reduce((s, l) => s + (l.status === 'pending' ? 0 : l.credit), 0) ?? 0;
+  const totalDr =
+    activeStatement?.lines.reduce((s, l) => s + (l.status === 'pending' ? 0 : l.debit), 0) ?? 0;
+  const totalCr =
+    activeStatement?.lines.reduce((s, l) => s + (l.status === 'pending' ? 0 : l.credit), 0) ?? 0;
+  const statementCurrency = activeStatement?.currency ?? 'AED';
 
   return (
     <div>
       {confirmDialog}
       <div className={`${icfCard} min-w-0`}>
-        <div className="border-b border-slate-200 px-3 pt-2 dark:border-[var(--theme-border)]">
-          <div className="flex flex-wrap items-center gap-3 pb-2">
-            {reportView === 'statement' ? (
-              <div className="min-w-[12rem]">
-                <label className={icfLabel} htmlFor="icf-stmt-acc">Account</label>
-                <select id="icf-stmt-acc" className={icfInput} value={accountId} onChange={e => setAccountId(e.target.value)}>
-                  <option value="">Select account</option>
-                  {accounts.map(a => (
-                    <option key={a.id} value={a.id}>{a.name} · {accountTypeLabel(a.accountType)}</option>
-                  ))}
-                </select>
-              </div>
-            ) : null}
-          </div>
-          <ICFundsDateFilterBar
-            dateFilter={dateFilter}
-            setDateFilter={setDateFilter}
-            customStartDate={customStartDate}
-            setCustomStartDate={setCustomStartDate}
-            customEndDate={customEndDate}
-            setCustomEndDate={setCustomEndDate}
-          />
-        </div>
+        <FinancialReportFilterPanel
+          date={{
+            dateFilter,
+            setDateFilter,
+            customStartDate,
+            setCustomStartDate,
+            customEndDate,
+            setCustomEndDate,
+          }}
+          filters={{
+            reportView,
+            filters: reportFilters,
+            onChange: setReportFilters,
+            accountOptions: accountSearchOptions,
+            accountId,
+            onAccountId: setAccountId,
+            inrAccountOptions: inrAccountSearchOptions,
+            inrAccountId,
+            onInrAccountId: setInrAccountId,
+            warehouseOptions: warehouseSearchOptions,
+            counterpartyOptions: counterpartySearchOptions,
+          }}
+        />
 
-        {booksKpiMetrics.length > 0 ? <AsicKpiStrip metrics={booksKpiMetrics} className="mx-3 mb-2" /> : null}
+        {booksKpiMetrics.length > 0 ? <AsicKpiStrip metrics={booksKpiMetrics} className="mx-4 mb-2 mt-2" /> : null}
 
-        {error ? <p className="px-3 py-2 text-sm text-red-600">{error}</p> : null}
+        {error ? <p className="px-4 py-2 text-sm text-red-600">{error}</p> : null}
         <div id="icf-report-print">
-        {loading && reportView !== 'statement' && reportView !== 'warehouse-pl' && !bundle ? (
+        {exportSubtitle ? (
+          <p className="border-b border-slate-100 px-4 py-2 text-[11px] leading-snug text-slate-600 text-justify dark:text-[var(--theme-text-secondary)]">
+            {exportSubtitle}
+          </p>
+        ) : null}
+        {loading && reportView !== 'statement' && reportView !== 'inr-statement' && reportView !== 'warehouse-pl' && reportView !== 'warehouse-metal' && reportView !== 'metal-pl' && !bundle ? (
           <ASICTableSkeleton framed={false} cols={7} rows={8} />
         ) : null}
-        {loading && reportView === 'warehouse-pl' && !warehousePl ? (
+        {loading && (reportView === 'warehouse-pl' || reportView === 'warehouse-metal') && !warehousePl ? (
           <ASICTableSkeleton framed={false} cols={9} rows={8} />
         ) : null}
-        {loading && (reportView === 'fund-trades' || reportView === 'metal-trades') && !settlementTradeReport ? (
+        {loading && reportView === 'metal-pl' && !metalPlStatement ? (
+          <ASICTableSkeleton framed={false} cols={4} rows={8} />
+        ) : null}
+        {loading &&
+        (reportView === 'fund-trades' ||
+          reportView === 'metal-trades' ||
+          reportView === 'metal-agent-trades') &&
+        !settlementTradeReport ? (
           <ASICTableSkeleton framed={false} cols={10} rows={10} />
         ) : null}
 
-        {reportView === 'statement' ? (
-          !accountId ? (
-            <p className={`${icfTd} py-8 text-center text-slate-500`}>Choose an account to load its statement.</p>
+        {(reportView === 'statement' || reportView === 'inr-statement') ? (
+          !(reportView === 'statement' ? accountId : inrAccountId) ? (
+            <p className={`${icfTd} py-8 text-center text-slate-500`}>
+              Choose an account above to load its statement of account (
+              {reportView === 'inr-statement' ? 'INR metal ledger' : 'AED IC Funds'}).
+            </p>
           ) : (
             <div className={icfTableWrap}>
               <table className="w-full min-w-[760px] text-left">
@@ -505,7 +929,7 @@ export default function BooksScreen({
                   {loading ? (
                     <ASICTableRowsSkeleton rows={8} cols={9} />
                   ) : (
-                    statement?.lines.map((line, i) => (
+                    activeStatement?.lines.map((line, i) => (
                       <tr
                         key={`${line.voucherNo}-${i}`}
                         className={`border-b border-slate-100 hover:bg-slate-50 ${line.status === 'pending' ? 'bg-amber-50/40' : ''}`}
@@ -521,9 +945,11 @@ export default function BooksScreen({
                         <td className={`${icfTd} font-medium`}>
                           <StatementParticularsCell slug={slug} line={line} accounts={accounts} />
                         </td>
-                        <AmountCell n={line.debit} />
-                        <AmountCell n={line.credit} danger />
-                        <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(line.balance)}</td>
+                        <AmountCell n={line.debit} currency={statementCurrency} />
+                        <AmountCell n={line.credit} danger currency={statementCurrency} />
+                        <td className={`${icfTd} text-right font-mono tabular-nums`}>
+                          <FmtLedgerAmount amount={line.balance} book={statementCurrency} />
+                        </td>
                         <td className={icfTd}>
                           <VoucherUserCell
                             voucher={{
@@ -537,13 +963,19 @@ export default function BooksScreen({
                     ))
                   )}
                 </tbody>
-                {statement ? (
+                {activeStatement ? (
                   <tfoot>
                     <tr className="border-t border-slate-200 bg-slate-50 font-medium">
                       <td className={icfTd} colSpan={4}>Totals</td>
-                      <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(totalDr)}</td>
-                      <td className={`${icfTd} text-right font-mono tabular-nums text-red-600`}>{fmtLedgerAed(totalCr)}</td>
-                      <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(statement.closing)}</td>
+                      <td className={`${icfTd} text-right font-mono tabular-nums`}>
+                        <FmtLedgerAmount amount={totalDr} book={statementCurrency} />
+                      </td>
+                      <td className={`${icfTd} text-right font-mono tabular-nums text-red-600`}>
+                        <FmtLedgerAmount amount={totalCr} book={statementCurrency} />
+                      </td>
+                      <td className={`${icfTd} text-right font-mono tabular-nums`}>
+                        <FmtLedgerAmount amount={activeStatement.closing} book={statementCurrency} />
+                      </td>
                       <td className={icfTd} />
                       <td className={icfTd} />
                     </tr>
@@ -556,7 +988,7 @@ export default function BooksScreen({
 
         {bundle && reportView === 'all-vouchers' ? (
           <DayBookReport
-            vouchers={bundle.allVouchers}
+            vouchers={filteredAllVouchers}
             slug={slug}
             accounts={accounts}
             periodLabel={periodLabel}
@@ -572,17 +1004,19 @@ export default function BooksScreen({
             periodLabel={periodLabel}
           />
         ) : null}
-        {bundle && reportView === 'd-expenses' ? voucherTable(bundle.dExpenses, 'No direct expenses in this period.') : null}
+        {bundle && reportView === 'd-expenses' ? (
+          voucherTable(filteredExpenseRegister, 'No expense vouchers match these filters.')
+        ) : null}
         {bundle && reportView === 'receivables' ? (
           <div className="grid sm:grid-cols-2">
             <p className="border-b border-slate-200 px-2.5 py-1 text-[11px] text-slate-500 sm:col-span-2">{asOfLabel}</p>
             <div className="border-b border-slate-200 sm:border-b-0 sm:border-r">
               <p className="border-b border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-slate-500">Receivables</p>
-              {accountTable(bundle.receivables, 'No receivable personal balances (posted or pending).')}
+              {accountTable(filteredReceivables, 'No receivable balances match these filters.')}
             </div>
             <div>
               <p className="border-b border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-slate-500">Payables</p>
-              {accountTable(bundle.payables, 'No payable personal balances (posted or pending).')}
+              {accountTable(filteredPayables, 'No payable balances match these filters.')}
             </div>
           </div>
         ) : null}
@@ -594,135 +1028,47 @@ export default function BooksScreen({
             accounts={accounts}
           />
         ) : null}
-        {warehousePl && reportView === 'warehouse-pl' ? (
-          <div>
-            <p className="border-b border-slate-200 px-2.5 py-1 text-[11px] text-slate-500">
-              IC (cash) gross profit uses weighted-average AED cost on remaining unit stock. Metal P&amp;L is sale
-              AED minus purchase AED on the matched lot (grams pro-rata).
-            </p>
-            <div className={icfTableWrap}>
-              <table className="w-full min-w-[720px] text-left text-sm">
-                <thead>
-                  <tr className={icfTheadRow}>
-                    <th className={icfTh}>Warehouse</th>
-                    <th className={icfThAlign('right')}>Stock u</th>
-                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.avgCost}</th>
-                    <th className={icfThAlign('right')}>Sold u</th>
-                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.revenue}</th>
-                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.cogs}</th>
-                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.grossProfit}</th>
-                    <th className={icfThAlign('right')}>Metal P&amp;L</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {warehousePl.warehouses.length === 0 ? (
-                    <tr>
-                      <td className={`${icfTd} py-6 text-center text-slate-500`} colSpan={8}>
-                        No completed warehouse sales in this period.
-                      </td>
-                    </tr>
-                  ) : (
-                    warehousePl.warehouses.map(row => (
-                      <tr key={row.warehouseId} className="border-b border-slate-100">
-                        <td className={`${icfTd} font-medium`}>{row.warehouseName}</td>
-                        <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                          {row.purchaseUnits.toLocaleString(undefined, { maximumFractionDigits: 4 })}
-                        </td>
-                        <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                          {row.weightedAvgRate > 0 ? `${fmtICAmount(row.weightedAvgRate)} AED` : '—'}
-                        </td>
-                        <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                          {row.saleUnits.toLocaleString(undefined, { maximumFractionDigits: 4 })}
-                        </td>
-                        <AmountCell n={row.revenue} />
-                        <AmountCell n={row.cogs} />
-                        <AmountCell n={row.grossProfit} danger={row.grossProfit < 0} />
-                        <AmountCell n={row.metalProfitAed} danger={row.metalProfitAed < 0} />
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-                {warehousePl.warehouses.length > 0 ? (
-                  <tfoot>
-                    <tr className="border-t border-slate-200 bg-slate-50 font-medium">
-                      <td className={icfTd}>Totals</td>
-                      <td className={icfTd} />
-                      <td className={icfTd} />
-                      <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                        {warehousePl.totals.saleUnits.toLocaleString(undefined, { maximumFractionDigits: 4 })}
-                      </td>
-                      <AmountCell n={warehousePl.totals.revenue} />
-                      <AmountCell n={warehousePl.totals.cogs} />
-                      <AmountCell n={warehousePl.totals.grossProfit} danger={warehousePl.totals.grossProfit < 0} />
-                      <AmountCell n={warehousePl.totals.metalProfitAed} danger={warehousePl.totals.metalProfitAed < 0} />
-                    </tr>
-                  </tfoot>
-                ) : null}
-              </table>
-            </div>
-            <p className="border-b border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-slate-500">
-              Sale detail
-            </p>
-            <div className={icfTableWrap}>
-              <table className="w-full min-w-[960px] text-left text-sm">
-                <thead>
-                  <tr className={icfTheadRow}>
-                    <th className={icfTh}>Date</th>
-                    <th className={icfTh}>Warehouse</th>
-                    <th className={icfTh}>Customer</th>
-                    <th className={icfTh}>Deal</th>
-                    <th className={icfThAlign('right')}>Units / g</th>
-                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.saleRate}</th>
-                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.avgCost}</th>
-                    <th className={icfThAlign('right')}>Revenue</th>
-                    <th className={icfThAlign('right')}>COGS</th>
-                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.profit}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {warehousePl.lines.length === 0 ? (
-                    <tr>
-                      <td className={`${icfTd} py-6 text-center text-slate-500`} colSpan={10}>
-                        No completed sales in this period.
-                      </td>
-                    </tr>
-                  ) : (
-                    warehousePl.lines.map(line => (
-                      <tr key={line.saleId} className="border-b border-slate-100">
-                        <td className={icfTd}>{fmtICDate(line.saleDate)}</td>
-                        <td className={icfTd}>{line.warehouseName}</td>
-                        <td className={`${icfTd} max-w-[10rem] truncate`}>{line.customerName}</td>
-                        <td className={icfTd}>
-                          {line.settlementMode === 'metal' ? 'Metal' : 'IC cash'}
-                        </td>
-                        <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                          {line.settlementMode === 'metal'
-                            ? `${(line.metalWeightG ?? line.units).toLocaleString(undefined, { maximumFractionDigits: 4 })} g`
-                            : line.units.toLocaleString(undefined, { maximumFractionDigits: 4 })}
-                        </td>
-                        <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                          {line.settlementMode === 'metal' || line.saleRate === 0
-                            ? '—'
-                            : `${fmtICAmount(line.saleRate)} AED`}
-                        </td>
-                        <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                          {line.avgPurchaseRate > 0 ? `${fmtICAmount(line.avgPurchaseRate)} AED` : '—'}
-                        </td>
-                        <AmountCell n={line.revenue} />
-                        <AmountCell n={line.cogs} />
-                        <td className={`${icfTd} text-right font-mono tabular-nums ${line.grossProfit < 0 ? 'text-red-600' : ''}`}>
-                          {fmtLedgerAed(line.grossProfit)}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
+        {metalPlStatement && reportView === 'metal-pl' ? (
+          <MetalProfitLossReport statement={metalPlStatement} periodLabel={periodLabel} />
         ) : null}
-        {settlementTradeReport && (reportView === 'fund-trades' || reportView === 'metal-trades') ? (
-          <SettlementTradeReport report={settlementTradeReport} periodLabel={periodLabel} />
+        {warehousePl && reportView === 'warehouse-pl' ? (
+          <WarehouseStatementReport
+            report={warehousePl}
+            warehouses={filteredWarehouseSummaries}
+            lines={filteredWarehouseLines}
+            periodLabel={periodLabel}
+            book="ic"
+          />
+        ) : null}
+        {warehousePl && reportView === 'warehouse-metal' ? (
+          <WarehouseStatementReport
+            report={warehousePl}
+            warehouses={filteredWarehouseSummaries}
+            lines={filteredWarehouseLines}
+            periodLabel={periodLabel}
+            book="metal"
+          />
+        ) : null}
+        {filteredSettlementReport && reportView === 'fund-trades' ? (
+          <SettlementTradeReport
+            report={filteredSettlementReport}
+            periodLabel={periodLabel}
+            variant="fund"
+          />
+        ) : null}
+        {filteredSettlementReport && reportView === 'metal-trades' ? (
+          <SettlementTradeReport
+            report={filteredSettlementReport}
+            periodLabel={periodLabel}
+            variant="metal-inr"
+          />
+        ) : null}
+        {filteredSettlementReport && reportView === 'metal-agent-trades' ? (
+          <SettlementTradeReport
+            report={filteredSettlementReport}
+            periodLabel={periodLabel}
+            variant="metal-agent"
+          />
         ) : null}
         {bundle && reportView === 'balance-sheet' && bundle.balanceSheetDetail ? (
           <BalanceSheetReport
@@ -736,7 +1082,7 @@ export default function BooksScreen({
         ) : null}
         {bundle && reportView === 'trial-balance' ? (
           <TrialBalanceReport
-            lines={bundle.trialBalance}
+            lines={filteredTrialBalance}
             slug={slug}
             accounts={accounts}
             asAtLabel={asOfLabel}

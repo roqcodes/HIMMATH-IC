@@ -5,12 +5,16 @@ import Modal from '@/components/ui/Modal';
 import AsicFormField from '@/components/asic/AsicFormField';
 import ModalFormSection from '@/components/ui/ModalFormSection';
 import ModalTwoColumnLayout from '@/components/ui/ModalTwoColumnLayout';
-import AsianUnifiedLocationSelect from '@/components/ui/AsianUnifiedLocationSelect';
-import { asicBtnOutline, asicBtnPrimary, asicInput, modalAddressTextarea } from '@/components/asic/ui';
-import { isAsianLocationFormValid } from '@/lib/geo/locationFormValidation';
+import { asicBtnOutline, asicBtnPrimary, asicInput } from '@/components/asic/ui';
 import { useApp } from '@/context/AppContext';
 import { saveCounterpartyAction } from '@/app/actions/counterpartyActions';
 import type { ICSupplier } from '@/types';
+import {
+  COUNTERPARTY_ROLES,
+  DEFAULT_COUNTERPARTY_ROLES,
+  normalizeCounterpartyRoles,
+  type CounterpartyRole,
+} from '@/lib/counterparties/roles';
 
 type Props = {
   open: boolean;
@@ -38,12 +42,22 @@ export default function CounterpartyModal({
   const [code, setCode] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const [address, setAddress] = useState('');
-  const [country, setCountry] = useState('');
-  const [subdivision, setSubdivision] = useState('');
-  const [locality, setLocality] = useState('');
+  const [street, setStreet] = useState('');
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('');
   const [status, setStatus] = useState<'active' | 'inactive'>('active');
+  const [roles, setRoles] = useState<CounterpartyRole[]>([...DEFAULT_COUNTERPARTY_ROLES]);
   const [isSaving, setIsSaving] = useState(false);
+
+  const toggleRole = (role: CounterpartyRole) => {
+    setRoles(prev => {
+      const next = new Set(prev);
+      if (next.has(role)) next.delete(role);
+      else next.add(role);
+      const ordered = COUNTERPARTY_ROLES.filter(r => next.has(r));
+      return ordered.length > 0 ? ordered : [...DEFAULT_COUNTERPARTY_ROLES];
+    });
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -52,33 +66,32 @@ export default function CounterpartyModal({
       setCode(counterparty.code || '');
       setPhone(counterparty.phone || '');
       setEmail(counterparty.email || '');
-      setAddress(counterparty.address || '');
-      setCountry(counterparty.country || '');
-      setSubdivision(counterparty.subdivision || '');
-      setLocality(counterparty.locality || '');
+      setStreet(counterparty.address || '');
+      setCity(counterparty.locality || '');
+      setState(counterparty.subdivision || '');
       setStatus(counterparty.status === 'inactive' ? 'inactive' : 'active');
+      setRoles(normalizeCounterpartyRoles(counterparty.roles));
     } else {
       setName('');
       setCode('');
       setPhone('');
       setEmail('');
-      setAddress('');
-      setCountry('');
-      setSubdivision('');
-      setLocality('');
+      setStreet('');
+      setCity('');
+      setState('');
       setStatus('active');
+      setRoles([...DEFAULT_COUNTERPARTY_ROLES]);
     }
   }, [open, counterparty]);
 
-  const locationValid = isAsianLocationFormValid(country, subdivision, locality, { requireCountry: true });
-  const canSubmit = name.trim().length > 0 && locationValid;
+  const canSubmit = name.trim().length > 0;
 
   const handleSave = async () => {
     if (!canSubmit) return;
     setIsSaving(true);
-    const countryTrim = country.trim();
-    const subdivisionTrim = subdivision.trim();
-    const localityTrim = locality.trim();
+    const streetTrim = street.trim();
+    const cityTrim = city.trim();
+    const stateTrim = state.trim();
     const regionId = counterparty?.regionId || '';
 
     let ok = false;
@@ -89,11 +102,11 @@ export default function CounterpartyModal({
         code: code.trim() || null,
         phone: phone.trim() || undefined,
         email: email.trim() || undefined,
-        address: address.trim() || undefined,
-        country: countryTrim,
-        subdivision: subdivisionTrim || undefined,
-        locality: localityTrim || undefined,
+        address: streetTrim || undefined,
+        subdivision: stateTrim || undefined,
+        locality: cityTrim || undefined,
         status,
+        roles,
       });
       ok = res.success;
       if (!ok && res.error) alert(res.error);
@@ -106,10 +119,11 @@ export default function CounterpartyModal({
         null,
         regionId,
         email.trim(),
-        address.trim(),
-        countryTrim,
-        subdivisionTrim,
-        localityTrim,
+        streetTrim,
+        '',
+        stateTrim,
+        cityTrim,
+        roles,
       );
     } else {
       ok = await addICSupplier(
@@ -119,11 +133,12 @@ export default function CounterpartyModal({
         null,
         regionId,
         email.trim(),
-        address.trim(),
-        countryTrim,
-        subdivisionTrim,
-        localityTrim,
+        streetTrim,
+        '',
+        stateTrim,
+        cityTrim,
         branchId,
+        roles,
       );
     }
     setIsSaving(false);
@@ -165,28 +180,38 @@ export default function CounterpartyModal({
                 <option value="inactive">Inactive</option>
               </select>
             </AsicFormField>
+            <AsicFormField label="Roles" className={fieldClass}>
+              <div className="flex flex-wrap gap-3 pt-1">
+                {COUNTERPARTY_ROLES.map(role => (
+                  <label key={role} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={roles.includes(role)}
+                      onChange={() => toggleRole(role)}
+                    />
+                    {role === 'party' ? 'Party (sales)' : role === 'supplier' ? 'Supplier (purchases)' : 'Agent (metal AED)'}
+                  </label>
+                ))}
+              </div>
+            </AsicFormField>
           </ModalFormSection>
         }
         right={
-          <ModalFormSection title="Contact & location">
+          <ModalFormSection title="Contact & address">
             <AsicFormField label="Phone" className={fieldClass}>
               <input className={asicInput} value={phone} onChange={e => setPhone(e.target.value)} />
             </AsicFormField>
             <AsicFormField label="Email" className={fieldClass}>
               <input className={asicInput} type="email" value={email} onChange={e => setEmail(e.target.value)} />
             </AsicFormField>
-            <AsianUnifiedLocationSelect
-              country={country}
-              province={subdivision}
-              locality={locality}
-              onChange={next => {
-                setCountry(next.country);
-                setSubdivision(next.province);
-                setLocality(next.locality);
-              }}
-            />
-            <AsicFormField label="Address" className={fieldClass}>
-              <textarea className={modalAddressTextarea} value={address} onChange={e => setAddress(e.target.value)} rows={3} />
+            <AsicFormField label="Street" className={fieldClass}>
+              <input className={asicInput} value={street} onChange={e => setStreet(e.target.value)} placeholder="Building, street, area" />
+            </AsicFormField>
+            <AsicFormField label="City" className={fieldClass}>
+              <input className={asicInput} value={city} onChange={e => setCity(e.target.value)} />
+            </AsicFormField>
+            <AsicFormField label="State" className={fieldClass}>
+              <input className={asicInput} value={state} onChange={e => setState(e.target.value)} />
             </AsicFormField>
           </ModalFormSection>
         }

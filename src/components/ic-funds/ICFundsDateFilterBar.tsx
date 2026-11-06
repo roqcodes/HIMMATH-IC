@@ -9,6 +9,7 @@ type Props = {
   setCustomStartDate: (val: string) => void;
   customEndDate: string;
   setCustomEndDate: (val: string) => void;
+  embedded?: boolean;
 };
 
 export default function ICFundsDateFilterBar({
@@ -18,9 +19,11 @@ export default function ICFundsDateFilterBar({
   setCustomStartDate,
   customEndDate,
   setCustomEndDate,
+  embedded = false,
 }: Props) {
   return (
     <DateFilterBar
+      embedded={embedded}
       dateFilter={dateFilter}
       setDateFilter={setDateFilter}
       customStartDate={customStartDate}

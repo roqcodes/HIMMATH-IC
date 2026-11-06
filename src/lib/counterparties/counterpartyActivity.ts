@@ -8,20 +8,25 @@ export function txnInCounterpartyRange(createdAt: string | undefined, range: Dat
 }
 
 export function saleMatchesCounterparty(
-  sale: Pick<ICSale, 'counterpartyId' | 'orderCustomerId'>,
+  sale: Pick<ICSale, 'counterpartyId' | 'orderCustomerId' | 'aedAgentCounterpartyId' | 'aedAgentId'>,
   counterpartyId: string,
 ): boolean {
   if (!counterpartyId) return false;
   if (sale.counterpartyId === counterpartyId) return true;
   if (sale.orderCustomerId === counterpartyId) return true;
+  if (sale.aedAgentCounterpartyId === counterpartyId) return true;
+  if (sale.aedAgentId === counterpartyId) return true;
   return false;
 }
 
 export function purchaseMatchesCounterparty(
-  purchase: Pick<ICPurchase, 'counterpartyId' | 'supplierId'>,
+  purchase: Pick<ICPurchase, 'counterpartyId' | 'supplierId' | 'aedAgentCounterpartyId' | 'aedAgentId'>,
   counterpartyId: string,
 ): boolean {
-  return effectivePurchaseCounterpartyId(purchase) === counterpartyId;
+  if (effectivePurchaseCounterpartyId(purchase) === counterpartyId) return true;
+  if (purchase.aedAgentCounterpartyId === counterpartyId) return true;
+  if (purchase.aedAgentId === counterpartyId) return true;
+  return false;
 }
 
 export function filterCounterpartyPurchases(

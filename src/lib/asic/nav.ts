@@ -60,7 +60,6 @@ export const ADMIN_SIDEBAR_NAV: AsicAdminSidebarEntry[] = [
   { type: 'link', id: 'warehouse', label: L('warehouse') },
   { type: 'link', id: 'purchases', label: L('purchases') },
   { type: 'link', id: 'sales', label: L('sales') },
-  { type: 'link', id: 'rates', label: L('rates') },
   {
     type: 'group',
     id: 'accounting',
@@ -80,6 +79,7 @@ export const ADMIN_SIDEBAR_NAV: AsicAdminSidebarEntry[] = [
     label: 'Settings',
     items: [
       { id: 'counterparties', label: L('counterparties') },
+      { id: 'rates', label: L('rates') },
       { id: 'users', label: L('users') },
       { id: 'backup', label: L('backup') },
     ],
@@ -128,7 +128,6 @@ export const BRANCH_NAV: readonly AsicNavItem[] = [];
 export const WAREHOUSE_NAV: readonly AsicNavItem[] = [
   { id: 'orders', label: L('orders'), group: 'operations' },
   { id: 'delivery-agents', label: L('delivery-agents'), group: 'operations' },
-  { id: 'account', label: L('account'), group: 'settings' },
 ];
 
 export const DELIVERY_NAV: readonly AsicNavItem[] = [

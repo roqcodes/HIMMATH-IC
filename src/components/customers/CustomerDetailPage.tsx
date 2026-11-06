@@ -13,6 +13,7 @@ import CustomerProfileCard from './customer-detail/CustomerProfileCard';
 import DetailSection from './customer-detail/DetailSection';
 import { useWriteAccess } from '@/context/RbacWriteContext';
 import { fmtLedgerAed } from '@/lib/icFunds/format';
+import { ledgerAedNode } from '@/lib/icFunds/formatDisplay';
 import { iconBtn } from '@/lib/ui';
 import { asicBtnPrimary } from '@/components/asic/ui';
 import AsicKpiStrip, { type AsicKpiMetric } from '@/components/asic/AsicKpiStrip';
@@ -70,7 +71,8 @@ export default function CustomerDetailPage() {
     if (icFundAccount) {
       metrics.push({
         label: 'IC Funds',
-        value: fmtLedgerAed(icFundAccount.balance),
+        value: ledgerAedNode(icFundAccount.balance),
+        valueTitle: fmtLedgerAed(icFundAccount.balance),
         hint: icFundAccount.pendingBalance
           ? `${fmtLedgerAed(icFundAccount.pendingBalance)} pending`
           : 'Fund account balance',
@@ -118,9 +120,9 @@ export default function CustomerDetailPage() {
             <h1 className="truncate text-base font-semibold tracking-tight text-slate-900 dark:text-[var(--theme-text)]">
               {customer.name}
             </h1>
-            <p className="mt-0.5 text-xs text-slate-500 dark:text-[var(--theme-text-secondary)]">
-              {contactLine || 'Customer profile & financial activity'}
-            </p>
+            {contactLine ? (
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-[var(--theme-text-secondary)]">{contactLine}</p>
+            ) : null}
           </div>
         </div>
         <button
@@ -142,11 +144,7 @@ export default function CustomerDetailPage() {
         </aside>
       </div>
 
-      <DetailSection
-        id="ic-funds"
-        title="IC Funds"
-        description="AED company ledger — sales receivable and settlements"
-      >
+      <DetailSection id="ic-funds" title="IC Funds">
         <CustomerICFundsTab
           slug="hq"
           branchId={branchId}

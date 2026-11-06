@@ -5,7 +5,6 @@ import AsicTabBar from '@/components/asic/AsicTabBar';
 import { useApp } from '@/context/AppContext';
 import { listCounterpartyDealVouchersAction } from '@/app/actions/icFundsActions';
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
-import { formatSettlementModeLabel } from '@/lib/icTransfer/metalSettlement';
 import {
   filterCounterpartyPurchases,
   filterCounterpartySales,
@@ -14,10 +13,16 @@ import {
 } from '@/lib/counterparties/counterpartyActivity';
 import type { DateFilterRange } from '@/lib/dateFilterRange';
 import { HQ_IC_FUNDS_BRANCH_SLUG } from '@/lib/icFunds/hqBranch';
-import { IC_FUND_VOUCHER_LABELS } from '@/lib/icFunds/constants';
-import { fmtICDate, fmtLedgerAed, icfLedgerColumnLabel } from '@/lib/icFunds/format';
+import { fmtICDate, fmtLedgerAmount, FmtLedgerAmount } from '@/lib/icFunds/format';
+import {
+  formatDealTableAed,
+  formatDealTableInr,
+  purchaseDealAed,
+  purchaseDealInr,
+  saleDealAed,
+  saleDealInr,
+} from '@/lib/icTransfer/dealTableDisplay';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
-import VoucherUserCell from '@/components/ic-funds/VoucherUserCell';
 import { ASICTableRowsSkeleton } from '@/components/asic/ASICTableSkeleton';
 import {
   icfTableWrap,
@@ -31,12 +36,15 @@ import ICTransferDataTableShell, {
   type ICTransferTableColumn,
 } from '@/components/ic-transfer/shared/ICTransferDataTableShell';
 import { ICTransferEditIconButton, ICTransferViewIconButton } from '@/components/ic-transfer/shared/ICTransferTableActions';
+import { DealInvoiceIconButtons } from '@/components/ic-transfer/invoice/DealInvoiceButtons';
 import AddPurchaseModal from '@/components/ic-transfer/purchase/AddPurchaseModal';
 import ViewPurchaseModal from '@/components/ic-transfer/purchase/ViewPurchaseModal';
 import AddSaleModal from '@/components/ic-transfer/sales/AddSaleModal';
 import ViewSaleModal from '@/components/ic-transfer/sales/ViewSaleModal';
+import JournalVoucherDetailModal from '@/components/ic-transfer/journal/JournalVoucherDetailModal';
 import WarehouseLink from '@/components/ic-transfer/warehouse/WarehouseLink';
 import {
+  sortDealJournals,
   warehouseJournalDealRef,
   warehouseJournalEntryLabel,
 } from '@/lib/icTransfer/warehouseJournalLabels';
@@ -51,9 +59,9 @@ const ACTIVITY_COLUMNS: ICTransferTableColumn[] = [
   { id: 'Type', label: 'Type', align: 'left' },
   { id: 'ID', label: 'ID', align: 'left' },
   { id: 'Warehouse', label: 'Warehouse', align: 'left' },
-  { id: 'Settlement', label: 'Settlement', align: 'left' },
-  { id: 'Units', label: 'Units', align: 'right' },
-  { id: 'Metal (g)', label: 'Metal (g)', align: 'right' },
+  { id: 'Book', label: 'Book', align: 'left' },
+  { id: 'Qty', label: 'Qty', align: 'right' },
+  { id: 'INR', label: 'INR', align: 'right' },
   { id: 'AED', label: 'AED', align: 'right' },
   { id: 'Actions', label: 'Actions', align: 'center', sortable: false },
 ];
@@ -92,6 +100,7 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
   const [editPurchase, setEditPurchase] = useState<ICPurchase | null>(null);
   const [viewSale, setViewSale] = useState<ICSale | null>(null);
   const [editSale, setEditSale] = useState<ICSale | null>(null);
+  const [viewJournal, setViewJournal] = useState<ICFundVoucher | null>(null);
 
   const icFundsSlug = branchSlug || HQ_IC_FUNDS_BRANCH_SLUG;
 
@@ -144,29 +153,45 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
       { id: 'all', label: 'All', count: activity.length },
       { id: 'purchases', label: 'Purchases', count: purchases.length },
       { id: 'sales', label: 'Sales', count: sales.length },
-      { id: 'journals', label: 'Journals', count: journalsLoaded ? journals.length : undefined },
+      {
+        id: 'journals',
+        label: 'Journals',
+        count: journalsLoaded ? journals.filter(v => v.status !== 'void').length : undefined,
+      },
     ],
-    [activity.length, purchases.length, sales.length, journals.length, journalsLoaded],
+    [activity.length, purchases.length, sales.length, journals, journalsLoaded],
   );
 
   const filteredJournals = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return journals;
-    return journals.filter(v => {
-      const entry = warehouseJournalEntryLabel(v, icPurchases, icSales).toLowerCase();
-      const deal = warehouseJournalDealRef(v, icPurchases, icSales).toLowerCase();
-      return (
-        entry.includes(q) ||
-        deal.includes(q) ||
-        v.notes.toLowerCase().includes(q) ||
-        String(v.voucherNo).includes(q) ||
-        v.debitAccountName.toLowerCase().includes(q) ||
-        v.creditAccountName.toLowerCase().includes(q)
-      );
-    });
+    const active = journals.filter(v => v.status !== 'void');
+    const rows = !q
+      ? active
+      : active.filter(v => {
+          const entry = warehouseJournalEntryLabel(v, icPurchases, icSales).toLowerCase();
+          const deal = warehouseJournalDealRef(v, icPurchases, icSales).toLowerCase();
+          return (
+            entry.includes(q) ||
+            deal.includes(q) ||
+            v.notes.toLowerCase().includes(q) ||
+            String(v.voucherNo).includes(q) ||
+            v.debitAccountName.toLowerCase().includes(q) ||
+            v.creditAccountName.toLowerCase().includes(q)
+          );
+        });
+    return sortDealJournals(rows);
   }, [journals, search, icPurchases, icSales]);
 
-  const renderPurchaseRow = (p: ICPurchase, showType?: boolean) => (
+  const renderPurchaseRow = (p: ICPurchase, showType?: boolean) => {
+    const metalPurchase = p.settlementMode === 'metal';
+    const pay = p.metalPaymentMethod === 'AED' ? 'AED' : 'CASH';
+    const bookLabel = metalPurchase ? (pay === 'AED' ? 'Metal · AED' : 'Metal · INR') : 'IC · AED';
+    const qty = metalPurchase
+      ? `${(p.metalWeightG ?? 0).toLocaleString('en-US', { maximumFractionDigits: 4 })} g`
+      : `${p.units.toLocaleString()} u`;
+    const amountAed = formatDealTableAed(purchaseDealAed(p));
+
+    return (
     <tr
       key={p.id}
       onClick={() => setViewPurchase(p)}
@@ -194,33 +219,38 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
         />
       </td>
       <td className={icTdClass('left')}>
-        <span className="text-xs font-medium text-slate-700">{formatSettlementModeLabel(p.settlementMode)}</span>
+        <span className="text-xs font-medium text-slate-700">{bookLabel}</span>
       </td>
       <td className={icTdClass('right')}>
-        <span className="font-mono tabular-nums">{p.settlementMode === 'metal' ? '—' : p.units.toLocaleString()}</span>
+        <span className="font-mono tabular-nums">{qty}</span>
       </td>
       <td className={icTdClass('right')}>
-        <span className="font-mono tabular-nums text-amber-800">
-          {p.settlementMode === 'metal'
-            ? (p.metalWeightG ?? 0).toLocaleString('en-US', { maximumFractionDigits: 4 })
-            : '—'}
-        </span>
+        <span className="font-mono tabular-nums text-indigo-900">{formatDealTableInr(purchaseDealInr(p))}</span>
       </td>
       <td className={icTdClass('right')}>
-        <span className="font-mono font-medium tabular-nums text-slate-900">
-          {(p.aedTotal || 0).toLocaleString()}
-        </span>
+        <span className="font-mono font-medium tabular-nums text-slate-900">{amountAed}</span>
       </td>
       <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-center gap-0.5">
           <ICTransferViewIconButton onClick={() => setViewPurchase(p)} />
+          <DealInvoiceIconButtons purchase={p} />
           <ICTransferEditIconButton onClick={() => setEditPurchase(p)} />
         </div>
       </td>
     </tr>
-  );
+    );
+  };
 
-  const renderSaleRow = (s: ICSale, showType?: boolean) => (
+  const renderSaleRow = (s: ICSale, showType?: boolean) => {
+    const metalSale = s.settlementMode === 'metal';
+  const pay = s.metalPaymentMethod === 'AED' ? 'AED' : 'CASH';
+  const bookLabel = metalSale ? (pay === 'AED' ? 'Metal · AED' : 'Metal · INR') : 'IC · AED';
+  const qty = metalSale
+    ? `${(s.metalWeightG ?? 0).toLocaleString('en-US', { maximumFractionDigits: 4 })} g`
+    : `${(s.units ?? 0).toLocaleString()} u`;
+  const amountAed = formatDealTableAed(saleDealAed(s));
+
+  return (
     <tr
       key={s.id}
       onClick={() => setViewSale(s)}
@@ -248,33 +278,27 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
         />
       </td>
       <td className={icTdClass('left')}>
-        <span className="text-xs font-medium text-slate-700">{formatSettlementModeLabel(s.settlementMode)}</span>
+        <span className="text-xs font-medium text-slate-700">{bookLabel}</span>
       </td>
       <td className={icTdClass('right')}>
-        <span className="font-mono tabular-nums">
-          {s.settlementMode === 'metal' ? '—' : (s.units ?? 0).toLocaleString()}
-        </span>
+        <span className="font-mono tabular-nums">{qty}</span>
       </td>
       <td className={icTdClass('right')}>
-        <span className="font-mono tabular-nums text-amber-800">
-          {s.settlementMode === 'metal'
-            ? (s.metalWeightG ?? 0).toLocaleString('en-US', { maximumFractionDigits: 4 })
-            : '—'}
-        </span>
+        <span className="font-mono tabular-nums text-indigo-900">{formatDealTableInr(saleDealInr(s))}</span>
       </td>
       <td className={icTdClass('right')}>
-        <span className="font-mono font-medium tabular-nums text-slate-900">
-          {((s.aedAmount || 0) + (s.serviceCharge || 0)).toLocaleString()}
-        </span>
+        <span className="font-mono font-medium tabular-nums text-slate-900">{amountAed}</span>
       </td>
       <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-center gap-0.5">
           <ICTransferViewIconButton onClick={() => setViewSale(s)} />
+          <DealInvoiceIconButtons sale={s} />
           <ICTransferEditIconButton onClick={() => setEditSale(s)} />
         </div>
       </td>
     </tr>
-  );
+    );
+  };
 
   const renderActivityRow = (row: CounterpartyActivityRow) =>
     row.kind === 'purchase' ? renderPurchaseRow(row.purchase, true) : renderSaleRow(row.sale, true);
@@ -285,38 +309,52 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
         <thead>
           <tr className={icfTheadRow}>
             <th className={icfTh}>Date</th>
+            <th className={icfTh}>Book</th>
             <th className={icfTh}>#</th>
             <th className={icfTh}>Entry</th>
             <th className={icfTh}>Deal</th>
-            <th className={icfTh}>Voucher</th>
             <th className={icfTh}>Debit</th>
             <th className={icfTh}>Credit</th>
-            <th className={icfThAlign('right')}>{icfLedgerColumnLabel.amount}</th>
-            <th className={icfTh}>User</th>
+            <th className={icfThAlign('right')}>Amount</th>
             <th className={icfTh}>Notes</th>
           </tr>
         </thead>
         <tbody>
           {journalsLoading ? (
-            <ASICTableRowsSkeleton rows={6} cols={10} />
+            <ASICTableRowsSkeleton rows={6} cols={9} />
           ) : filteredJournals.length === 0 ? (
             <tr>
-              <td colSpan={10} className={`${icfTd} py-8 text-center text-sm text-slate-500`}>
-                No journals for this counterparty’s purchases, sales, COGS, or profit in the selected period.
+              <td colSpan={9} className={`${icfTd} py-8 text-center text-sm text-slate-500`}>
+                No AED or INR journals for this counterparty in the selected period.
               </td>
             </tr>
           ) : (
             filteredJournals.map(row => (
               <tr
                 key={row.id}
-                className={`border-b border-slate-100 hover:bg-slate-50 ${row.status === 'void' ? 'text-slate-400' : row.status === 'pending' ? 'bg-amber-50/40' : ''}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => setViewJournal(row)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setViewJournal(row);
+                  }
+                }}
+                className={`cursor-pointer border-b border-slate-100 hover:bg-slate-50 ${row.status === 'pending' ? 'bg-amber-50/40' : ''}`}
               >
                 <td className={`${icfTd} tabular-nums`}>{fmtICDate(row.voucherDate)}</td>
+                <td className={icfTd}>
+                  <span
+                    className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                      row.book === 'INR' ? 'bg-indigo-50 text-indigo-800' : 'bg-slate-100 text-slate-700'
+                    }`}
+                  >
+                    {row.book === 'INR' ? 'INR' : 'AED'}
+                  </span>
+                </td>
                 <td className={`${icfTd} font-mono tabular-nums text-slate-500`}>
                   {row.voucherNo}
-                  {row.status === 'void' ? (
-                    <span className="ml-1 text-[10px] font-semibold uppercase text-red-500">VOID</span>
-                  ) : null}
                   {row.status === 'pending' ? (
                     <span className="ml-1 text-[10px] font-semibold uppercase text-amber-600">PENDING</span>
                   ) : null}
@@ -327,24 +365,30 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
                 <td className={`${icfTd} font-mono text-xs text-slate-600`}>
                   {warehouseJournalDealRef(row, icPurchases, icSales)}
                 </td>
-                <td className={icfTd}>{IC_FUND_VOUCHER_LABELS[row.voucherType]}</td>
-                <td className={icfTd}>
-                  <ICFundAccountLink
-                    slug={icFundsSlug}
-                    accountId={row.debitAccountId}
-                    name={row.debitAccountName}
-                  />
+                <td className={icfTd} onClick={e => e.stopPropagation()}>
+                  {row.book === 'INR' ? (
+                    <span>{row.debitAccountName}</span>
+                  ) : (
+                    <ICFundAccountLink
+                      slug={icFundsSlug}
+                      accountId={row.debitAccountId}
+                      name={row.debitAccountName}
+                    />
+                  )}
                 </td>
-                <td className={icfTd}>
-                  <ICFundAccountLink
-                    slug={icFundsSlug}
-                    accountId={row.creditAccountId}
-                    name={row.creditAccountName}
-                  />
+                <td className={icfTd} onClick={e => e.stopPropagation()}>
+                  {row.book === 'INR' ? (
+                    <span>{row.creditAccountName}</span>
+                  ) : (
+                    <ICFundAccountLink
+                      slug={icFundsSlug}
+                      accountId={row.creditAccountId}
+                      name={row.creditAccountName}
+                    />
+                  )}
                 </td>
-                <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(row.amount)}</td>
-                <td className={icfTd}>
-                  <VoucherUserCell voucher={row} />
+                <td className={`${icfTd} text-right font-mono tabular-nums`}>
+                  <FmtLedgerAmount amount={row.amount} book={row.book} />
                 </td>
                 <td className={`${icfTd} max-w-[14rem] truncate text-slate-500`}>{row.notes || '—'}</td>
               </tr>
@@ -415,10 +459,6 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
 
         {tab === 'journals' ? (
           <div className="p-3 sm:p-4">
-            <p className="mb-3 text-xs text-slate-500">
-              IC Funds journals for this counterparty: IC and metal purchases, sale receivables, COGS, and profit/loss
-              — matched to the same date range as purchases and sales.
-            </p>
             <div className="mb-3 max-w-md">
               <SearchInput
                 value={search}
@@ -432,6 +472,17 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
         ) : null}
       </div>
 
+      <JournalVoucherDetailModal
+        open={!!viewJournal}
+        voucher={viewJournal}
+        onClose={() => setViewJournal(null)}
+        icFundsSlug={icFundsSlug}
+        branchSlug={branchSlug}
+        purchases={icPurchases}
+        sales={icSales}
+        onViewPurchase={setViewPurchase}
+        onViewSale={setViewSale}
+      />
       <ViewPurchaseModal open={!!viewPurchase} purchase={viewPurchase} onClose={() => setViewPurchase(null)} />
       <AddPurchaseModal
         open={!!editPurchase}

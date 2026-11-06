@@ -1,13 +1,21 @@
 'use client';
 
 import React from 'react';
-import { fmtLedgerAed } from '@/lib/icFunds/format';
+import { fmtLedgerAed, FmtLedgerAed, FmtLedgerInr } from '@/lib/icFunds/format';
 import { icfTd } from '@/components/ic-funds/ui';
 
-export function ReportAmountCell({ n, danger }: { n: number; danger?: boolean }) {
+export function ReportAmountCell({
+  n,
+  danger,
+  currency = 'AED',
+}: {
+  n: number;
+  danger?: boolean;
+  currency?: 'AED' | 'INR';
+}) {
   return (
     <td className={`${icfTd} text-right font-mono tabular-nums ${danger || n < 0 ? 'text-red-600' : ''}`}>
-      {n === 0 ? '—' : fmtLedgerAed(n)}
+      {currency === 'INR' ? <FmtLedgerInr amount={n} /> : <FmtLedgerAed amount={n} />}
     </td>
   );
 }

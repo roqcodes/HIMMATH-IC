@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS public.ic_counterparties (
     locality VARCHAR(255),
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
     balance NUMERIC(15, 2) NOT NULL DEFAULT 0,
+    roles TEXT[] NOT NULL DEFAULT ARRAY['supplier', 'party']::TEXT[],
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_counterparties_scope_code
@@ -187,8 +188,6 @@ CREATE TABLE IF NOT EXISTS public.ic_sales (
     aed_amount NUMERIC(15, 4),
     bank TEXT,
     address TEXT,
-    location TEXT,
-    district TEXT,
     image_url TEXT,
     service_charge NUMERIC(15, 4) DEFAULT 0.00,
     collected_units NUMERIC(15, 4) DEFAULT 0.00,
@@ -386,7 +385,75 @@ CREATE TABLE IF NOT EXISTS public.asic_backups (
 );
 CREATE INDEX IF NOT EXISTS idx_asic_backups_created ON public.asic_backups (created_at DESC);
 
+CREATE TABLE IF NOT EXISTS public.ic_aed_agents (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    counterparty_id UUID REFERENCES public.ic_counterparties(id) ON DELETE SET NULL,
+    name VARCHAR(255) NOT NULL,
+    phone VARCHAR(50),
+    email VARCHAR(255),
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE public.ic_purchases
+  ADD COLUMN IF NOT EXISTS metal_payment_method VARCHAR(10),
+  ADD COLUMN IF NOT EXISTS aed_agent_id UUID REFERENCES public.ic_aed_agents(id) ON DELETE SET NULL;
+
+ALTER TABLE public.ic_sales
+  ADD COLUMN IF NOT EXISTS aed_agent_id UUID REFERENCES public.ic_aed_agents(id) ON DELETE SET NULL;
+
+ALTER TABLE public.ic_purchases
+  ADD COLUMN IF NOT EXISTS lab_weight_g NUMERIC(15, 4),
+  ADD COLUMN IF NOT EXISTS lab_charge_inr_per_g NUMERIC(15, 4),
+  ADD COLUMN IF NOT EXISTS lab_total_inr NUMERIC(15, 4);
+
+ALTER TABLE public.ic_sales
+  ADD COLUMN IF NOT EXISTS lab_weight_g NUMERIC(15, 4),
+  ADD COLUMN IF NOT EXISTS lab_charge_inr_per_g NUMERIC(15, 4),
+  ADD COLUMN IF NOT EXISTS lab_total_inr NUMERIC(15, 4);
+
+CREATE TABLE IF NOT EXISTS public.inr_fund_accounts (
+    id VARCHAR(50) PRIMARY KEY,
+    branch_id VARCHAR(50) NOT NULL REFERENCES public.branches(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    account_type VARCHAR(20) NOT NULL CHECK (account_type IN ('personal', 'income', 'profit', 'expense', 'inventory')),
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+    opening_balance DECIMAL(28, 14) NOT NULL DEFAULT 0,
+    notes TEXT NOT NULL DEFAULT '',
+    source_type VARCHAR(30),
+    source_id VARCHAR(50),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS public.inr_fund_voucher_counters (
+    branch_id VARCHAR(50) PRIMARY KEY REFERENCES public.branches(id) ON DELETE CASCADE,
+    last_no INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS public.inr_fund_vouchers (
+    id VARCHAR(50) PRIMARY KEY,
+    branch_id VARCHAR(50) NOT NULL REFERENCES public.branches(id) ON DELETE CASCADE,
+    voucher_no INTEGER NOT NULL,
+    voucher_type VARCHAR(20) NOT NULL CHECK (voucher_type IN ('journal')),
+    voucher_date DATE NOT NULL,
+    debit_account_id VARCHAR(50) NOT NULL REFERENCES public.inr_fund_accounts(id) ON DELETE RESTRICT,
+    credit_account_id VARCHAR(50) NOT NULL REFERENCES public.inr_fund_accounts(id) ON DELETE RESTRICT,
+    amount DECIMAL(28, 14) NOT NULL CHECK (amount > 0),
+    notes TEXT NOT NULL DEFAULT '',
+    created_by_name VARCHAR(255),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'void')),
+    voided_at TIMESTAMPTZ,
+    reference_type VARCHAR(30),
+    reference_id VARCHAR(50),
+    CONSTRAINT inr_fund_voucher_distinct_accounts CHECK (debit_account_id <> credit_account_id)
+);
+
 -- ── RLS (after tables exist) ─────────────────────────────────────────
+ALTER TABLE public.ic_aed_agents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.inr_fund_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.inr_fund_vouchers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.branches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_page_permissions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_regions ENABLE ROW LEVEL SECURITY;

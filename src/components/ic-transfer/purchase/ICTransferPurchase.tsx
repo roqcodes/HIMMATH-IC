@@ -2,35 +2,36 @@
 
 import React, { useMemo, useState } from 'react';
 import ICTransferDateFilterBar from '@/components/ic-transfer/shared/ICTransferDateFilterBar';
-import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
+import { resolveDateFilterRange, isDateInRange, getDateFilterLabel } from '@/lib/dateFilterRange';
+import { toBusinessDate } from '@/lib/businessTime';
+import ICTransferDealBookKpiStrips from '@/components/ic-transfer/shared/ICTransferDealBookKpiStrips';
+import { computePurchaseBookKpis, countPurchasesInRange } from '@/lib/icTransfer/dealBookKpis';
 import { useICTransferRegionFilter } from '@/components/ic-transfer/shared/ICTransferFilterProvider';
 import { matchesSelectedRegions } from '@/lib/icTransfer/regionFilter';
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
 import { useApp } from '@/context/AppContext';
 import {
   AddButton,
-  DataTableSection,
   PageHeader,
   PageShell,
   useICTransferFilters,
 } from '../ui';
 import {
   filterPurchasesForBranchPortal,
-  filterSuppliersForAdminPortal,
-  filterSuppliersForBranchPortal,
+  filterCounterpartiesForPurchase,
   filterWarehousesForBranchPortal,
   filterWarehousesForAdminPortal,
   type ICTransferPortalMode,
 } from '@/lib/icTransfer/branchPortalScope';
 import { portalMobileCardFooterClass } from '@/lib/icTransfer/layoutConstants';
 import { effectivePurchaseCounterpartyId } from '@/lib/counterparties/effectiveId';
+import { formatDealTableAed, formatDealTableInr, purchaseDealAed, purchaseDealInr } from '@/lib/icTransfer/dealTableDisplay';
 import { formatSettlementModeLabel } from '@/lib/icTransfer/metalSettlement';
-import { sumMetalWeightG } from '@/lib/icTransfer/warehouseMatrixMetrics';
+import { dealAgentDisplayName, dealAgentPartyId } from '@/lib/counterparties/dealAgent';
+import DealAgentHint from '@/components/ic-transfer/shared/DealAgentHint';
 import AddPurchaseModal from './AddPurchaseModal';
 import ViewPurchaseModal from './ViewPurchaseModal';
 import { ICPurchase } from '@/types';
-import { resolveDateFilterRange, isDateInRange } from '@/lib/dateFilterRange';
-import { toBusinessDate } from '@/lib/businessTime';
 import ICTransferDataTableShell, {
   ICTransferTableFilterSelect,
   type ICTransferTableColumn,
@@ -39,6 +40,7 @@ import ICTransferDataTableShell, {
 import CounterpartyLink from '@/components/counterparties/CounterpartyLink';
 import WarehouseLink from '@/components/ic-transfer/warehouse/WarehouseLink';
 import { ICTransferEditIconButton, ICTransferViewIconButton } from '@/components/ic-transfer/shared/ICTransferTableActions';
+import { DealInvoiceIconButtons, DealInvoiceTextButtons } from '@/components/ic-transfer/invoice/DealInvoiceButtons';
 
 const fmt = (n: number) => `AED ${n.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`;
 
@@ -50,6 +52,7 @@ const PURCHASE_TABLE_COLUMNS: ICTransferTableColumn[] = [
   { id: 'Settlement', label: 'Settlement', align: 'left' },
   { id: 'Units', label: 'Units', align: 'right' },
   { id: 'Metal (g)', label: 'Metal (g)', align: 'right' },
+  { id: 'Total INR', label: 'INR', align: 'right' },
   { id: 'Total AED', label: 'AED', align: 'right' },
   { id: 'Actions', label: 'Actions', align: 'center', sortable: false },
 ];
@@ -82,8 +85,8 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
   }, [icPurchases, icWarehouses, isBranchScoped, scopedBranchId]);
 
   const scopedSuppliers = useMemo(() => {
-    if (isBranchScoped) return filterSuppliersForBranchPortal(icSuppliers, scopedBranchId);
-    return filterSuppliersForAdminPortal(icSuppliers);
+    if (isBranchScoped) return filterCounterpartiesForPurchase(icSuppliers, scopedBranchId);
+    return filterCounterpartiesForPurchase(icSuppliers);
   }, [icSuppliers, isBranchScoped, scopedBranchId]);
   const { selectedRegionIds } = useICTransferRegionFilter();
   const [modalOpen, setModalOpen] = useState(false);
@@ -116,8 +119,27 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
     );
   };
 
+  const range = useMemo(
+    () => resolveDateFilterRange(dateFilter, customStartDate, customEndDate),
+    [dateFilter, customStartDate, customEndDate],
+  );
+
+  const rangeLabel = useMemo(
+    () => getDateFilterLabel(dateFilter, customStartDate, customEndDate),
+    [dateFilter, customStartDate, customEndDate],
+  );
+
+  const purchaseBookKpis = useMemo(
+    () => computePurchaseBookKpis(scopedPurchases, range),
+    [scopedPurchases, range],
+  );
+
+  const purchaseCountHint = useMemo(() => {
+    const { cash, metal } = countPurchasesInRange(scopedPurchases, range);
+    return `${cash} IC · ${metal} metal`;
+  }, [scopedPurchases, range]);
+
   const filteredPurchases = useMemo(() => {
-    const range = resolveDateFilterRange(dateFilter, customStartDate, customEndDate);
     return scopedPurchases.filter(p => {
       const formattedId = getFormattedTxnId(p.id, 'purchase', p);
       if (
@@ -125,6 +147,7 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
         !formattedId.toLowerCase().includes(search.toLowerCase()) &&
         !p.id.toLowerCase().includes(search.toLowerCase()) &&
         !getSupplierName(effectivePurchaseCounterpartyId(p) || '').toLowerCase().includes(search.toLowerCase()) &&
+        !dealAgentDisplayName(p, getSupplierName).toLowerCase().includes(search.toLowerCase()) &&
         !getWarehouseName(p.warehouseId).toLowerCase().includes(search.toLowerCase())
       ) {
         return false;
@@ -133,7 +156,14 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
       if (p.createdAt && range.startDate) {
         if (!isDateInRange(toBusinessDate(p.createdAt, 'Asia/Dubai'), range)) return false;
       }
-      if (filterSupplier !== 'All' && effectivePurchaseCounterpartyId(p) !== filterSupplier) return false;
+      if (
+        filterSupplier !== 'All' &&
+        effectivePurchaseCounterpartyId(p) !== filterSupplier &&
+        dealAgentPartyId(p) !== filterSupplier &&
+        p.aedAgentCounterpartyId !== filterSupplier
+      ) {
+        return false;
+      }
       if (filterSettlement !== 'All') {
         const mode = p.settlementMode === 'metal' ? 'metal' : 'cash';
         if (mode !== filterSettlement) return false;
@@ -201,8 +231,12 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
           valB = Number(b.units || 0);
           break;
         case 'Total AED':
-          valA = Number(a.aedTotal || 0);
-          valB = Number(b.aedTotal || 0);
+          valA = purchaseDealAed(a);
+          valB = purchaseDealAed(b);
+          break;
+        case 'Total INR':
+          valA = purchaseDealInr(a);
+          valB = purchaseDealInr(b);
           break;
         case 'Date':
         default:
@@ -218,14 +252,18 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
     return sorted;
   }, [filteredPurchases, sortField, sortOrder]);
 
-  const stats = React.useMemo(() => {
-    const total = filteredPurchases.reduce((acc, p) => acc + (p.aedTotal || 0), 0);
-    const totalUnits = filteredPurchases.reduce((acc, p) => acc + (p.settlementMode === 'metal' ? 0 : p.units || 0), 0);
-    const totalMetalG = sumMetalWeightG(filteredPurchases);
-    const metalCount = filteredPurchases.filter(p => p.settlementMode === 'metal').length;
-    const cashCount = filteredPurchases.length - metalCount;
-    return { total, totalUnits, totalMetalG, metalCount, cashCount };
-  }, [filteredPurchases]);
+  const extraAgentFilterOptions = useMemo(() => {
+    const known = new Set(scopedSuppliers.map(s => s.id));
+    const extras: { id: string; name: string }[] = [];
+    for (const p of scopedPurchases) {
+      const id = p.aedAgentCounterpartyId;
+      if (!id || known.has(id)) continue;
+      known.add(id);
+      extras.push({ id, name: p.aedAgentName || getSupplierName(id) });
+    }
+    extras.sort((a, b) => a.name.localeCompare(b.name));
+    return extras;
+  }, [scopedPurchases, scopedSuppliers, icSuppliers]);
 
   const handleEdit = (p: ICPurchase) => {
     setSelectedPurchase(p);
@@ -237,23 +275,6 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
     setViewModalOpen(true);
   };
 
-  const { purchaseColumns, matrixRows } = React.useMemo(() => {
-    const columns = ['Purchase Vol', 'Purchase Rate'];
-    const mRows = scopedSuppliers.map(s => {
-      const supplierPurchases = scopedPurchases.filter(p => effectivePurchaseCounterpartyId(p) === s.id);
-      const vol = supplierPurchases.reduce((acc, p) => acc + p.units, 0);
-      const rate = supplierPurchases.length > 0 ? supplierPurchases[0].unitRate : 0;
-      return {
-        label: s.name,
-        metrics: [
-          { label: 'Purchase Vol', value: vol },
-          { label: 'Purchase Rate', value: rate.toLocaleString() },
-        ],
-      };
-    });
-    return { purchaseColumns: columns, matrixRows: mRows };
-  }, [scopedSuppliers, scopedPurchases]);
-
   const tableFilters = (
     <>
       <ICTransferTableFilterSelect
@@ -264,6 +285,11 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
       >
         <option value="All">All suppliers</option>
         {scopedSuppliers.map(s => (
+          <option key={s.id} value={s.id}>
+            {s.name}
+          </option>
+        ))}
+        {extraAgentFilterOptions.map(s => (
           <option key={s.id} value={s.id}>
             {s.name}
           </option>
@@ -312,37 +338,12 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
         setCustomEndDate={setCustomEndDate}
       />
 
-      <AsicKpiStrip
-        metrics={[
-          {
-            label: 'Purchase volume',
-            value: fmt(stats.total),
-            hint: `${stats.cashCount} IC · ${stats.metalCount} metal`,
-          },
-          {
-            label: 'IC units purchased',
-            value: stats.totalUnits.toLocaleString(),
-            hint: 'Cash settlement',
-          },
-          {
-            label: 'Metal purchased',
-            value: `${stats.totalMetalG.toLocaleString('en-US', { maximumFractionDigits: 4 })} g`,
-            hint: 'In selected range',
-            tone: 'amber',
-          },
-        ]}
+      <ICTransferDealBookKpiStrips
+        books={purchaseBookKpis}
+        rangeLabel={rangeLabel}
+        flow="purchase"
+        countHint={purchaseCountHint}
       />
-
-      <div className="mb-3">
-        <DataTableSection
-          title="Purchase Matrix"
-          columns={['Supplier', ...purchaseColumns]}
-          data={matrixRows.map(r => [
-            r.label,
-            ...r.metrics.map(m => (typeof m.value === 'number' ? m.value.toLocaleString() : m.value)),
-          ])}
-        />
-      </div>
 
       <ICTransferDataTableShell
         title="All Purchases"
@@ -368,6 +369,7 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
               >
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-slate-900">{getSupplierName(effectivePurchaseCounterpartyId(p) || '')}</p>
+                  <DealAgentHint deal={p} nameOf={getSupplierName} branchSlug={branchSlugForLinks} />
                   <p className="mt-0.5 font-mono text-xs text-slate-500">
                     {getFormattedTxnId(p.id, 'purchase', p)}
                   </p>
@@ -384,16 +386,14 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
                     Units: <strong className="text-slate-700">{p.units.toLocaleString()}</strong>
                   </span>
                   <span>
-                    AED: <strong className="text-slate-700">{(p.aedTotal || 0).toLocaleString()}</strong>
+                    AED: <strong className="text-slate-700">{formatDealTableAed(purchaseDealAed(p))}</strong>
                   </span>
                 </div>
-                <div className={portalMobileCardFooterClass}>
+                <div className={portalMobileCardFooterClass} onClick={e => e.stopPropagation()}>
+                  <DealInvoiceTextButtons purchase={p} />
                   <button
                     type="button"
-                    onClick={e => {
-                      e.stopPropagation();
-                      handleView(p);
-                    }}
+                    onClick={() => handleView(p)}
                     className="ml-auto shrink-0 text-xs font-bold text-slate-500 hover:text-slate-700"
                   >
                     View Details
@@ -431,12 +431,15 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
               <span className="font-mono text-xs text-slate-500">{getFormattedTxnId(p.id, 'purchase', p)}</span>
             </td>
             <td className={icTdClass('left')}>
-              <CounterpartyLink
-                counterpartyId={effectivePurchaseCounterpartyId(p)}
-                name={getSupplierName(effectivePurchaseCounterpartyId(p) || '')}
-                branchSlug={branchSlugForLinks}
-                stopPropagation
-              />
+              <div className="min-w-[120px]">
+                <CounterpartyLink
+                  counterpartyId={effectivePurchaseCounterpartyId(p)}
+                  name={getSupplierName(effectivePurchaseCounterpartyId(p) || '')}
+                  branchSlug={branchSlugForLinks}
+                  stopPropagation
+                />
+                <DealAgentHint deal={p} nameOf={getSupplierName} branchSlug={branchSlugForLinks} />
+              </div>
             </td>
             <td className={icTdClass('left')}>
               <WarehouseLink
@@ -448,7 +451,7 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
             </td>
             <td className={icTdClass('left')}>
               <span className="text-xs font-medium text-slate-700">
-                {formatSettlementModeLabel(p.settlementMode)}
+                {formatSettlementModeLabel(p.settlementMode, p.metalPaymentMethod)}
               </span>
             </td>
             <td className={icTdClass('right')}>
@@ -464,13 +467,19 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
               </span>
             </td>
             <td className={icTdClass('right')}>
+              <span className="font-mono tabular-nums text-indigo-900 dark:text-indigo-300">
+                {formatDealTableInr(purchaseDealInr(p))}
+              </span>
+            </td>
+            <td className={icTdClass('right')}>
               <span className="font-mono font-medium tabular-nums text-slate-900">
-                {(p.aedTotal || 0).toLocaleString()}
+                {formatDealTableAed(purchaseDealAed(p))}
               </span>
             </td>
             <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-center gap-0.5">
                 <ICTransferViewIconButton onClick={() => handleView(p)} />
+                <DealInvoiceIconButtons purchase={p} />
                 <ICTransferEditIconButton onClick={() => handleEdit(p)} />
               </div>
             </td>

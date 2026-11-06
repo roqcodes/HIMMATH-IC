@@ -23,9 +23,12 @@ function movementWhereSql(
   return `${statusSql} ${dateFilter} ${branchFilter} ${accountFilter}`;
 }
 
+type VoucherLedgerTable = 'ic_fund_vouchers' | 'inr_fund_vouchers';
+
 function accountMovementJoinAlias(
   alias: string,
   statusSql: string,
+  voucherTable: VoucherLedgerTable,
   opts?: {
     asOfParam?: string | null;
     branchParam?: string | null;
@@ -37,11 +40,11 @@ function accountMovementJoinAlias(
     SELECT x.account_id, SUM(x.delta) AS movement
     FROM (
       SELECT v.debit_account_id AS account_id, v.amount AS delta
-      FROM ic_fund_vouchers v
+      FROM ${voucherTable} v
       WHERE ${where}
       UNION ALL
       SELECT v.credit_account_id AS account_id, -v.amount AS delta
-      FROM ic_fund_vouchers v
+      FROM ${voucherTable} v
       WHERE ${where}
     ) x
     GROUP BY x.account_id
@@ -53,7 +56,7 @@ export function accountMovementJoinSql(opts?: {
   branchParam?: string | null;
   accountParam?: string | null;
 }): string {
-  return accountMovementJoinAlias('m', `COALESCE(v.status, 'active') = 'active'`, opts);
+  return accountMovementJoinAlias('m', `COALESCE(v.status, 'active') = 'active'`, 'ic_fund_vouchers', opts);
 }
 
 export function accountPendingMovementJoinSql(opts?: {
@@ -61,7 +64,19 @@ export function accountPendingMovementJoinSql(opts?: {
   branchParam?: string | null;
   accountParam?: string | null;
 }): string {
-  return accountMovementJoinAlias('pm', `COALESCE(v.status, 'active') = 'pending'`, opts);
+  return accountMovementJoinAlias('pm', `COALESCE(v.status, 'active') = 'pending'`, 'ic_fund_vouchers', opts);
+}
+
+export function inrAccountMovementJoinSql(opts?: {
+  asOfParam?: string | null;
+  branchParam?: string | null;
+  accountParam?: string | null;
+}): string {
+  return accountMovementJoinAlias('m', `COALESCE(v.status, 'active') = 'active'`, 'inr_fund_vouchers', opts);
+}
+
+export function inrAccountBalanceSql(_asOfParam?: string | null): string {
+  return `(a.opening_balance + COALESCE(m.movement, 0))`;
 }
 
 export function accountBalanceSql(_asOfParam?: string | null): string {

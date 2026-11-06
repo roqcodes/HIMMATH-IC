@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import Modal from '@/components/ui/Modal';
 import { asicBtnOutline } from '@/components/asic/ui';
+import { DealInvoiceTextButtons } from '@/components/ic-transfer/invoice/DealInvoiceButtons';
 import { btnDangerOutline } from '@/lib/ui';
 import { ICSale } from '@/types';
 import { useApp } from '@/context/AppContext';
@@ -14,7 +15,7 @@ import ProofImageActions from '../shared/ProofImageActions';
 import CopyOrderDetailsButton from '../shared/CopyOrderDetailsButton';
 import { canBranchDeleteOrder, canCustomerSeeDeliveryProof } from '@/lib/icTransfer/orderStatus';
 import { canEditOrder, canDeleteOrder, canRequestOrderCancellation } from '@/lib/icTransfer/customerOrderReview';
-import { computeMetalSheetRateAed, resolveSaleInrDisplay } from '@/lib/icTransfer/metalSettlement';
+import { resolveSaleInrDisplay } from '@/lib/icTransfer/metalSettlement';
 import { formatAmount } from '@/lib/icTransfer/rateCalculations';
 import { isBranchScopedUser } from '@/lib/rbac';
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
@@ -26,12 +27,15 @@ import {
   getSaleOrderImageLabel,
 } from '@/lib/icTransfer/branchOrderOwnership';
 import { effectiveSaleCounterpartyId } from '@/lib/counterparties/effectiveId';
+import { SALE_COUNTERPARTY_FIELD_LABEL } from '@/lib/counterparties/labels';
 import CounterpartyLink from '@/components/counterparties/CounterpartyLink';
 import WarehouseLink from '@/components/ic-transfer/warehouse/WarehouseLink';
 import { isBranchHandledSale } from '@/lib/icTransfer/fulfillmentHandler';
 import { formatICSaleTransactionTypeLabel } from '@/lib/icTransfer/transactionTypes';
 import InrAmountInWords from '../shared/InrAmountInWords';
 import { ModalRecordedOnValue } from '../shared/modalDetailUi';
+import { hasLab } from '@/lib/icTransfer/labTest';
+import { fmtLedgerInr, FmtLedgerInr, FmtLedgerAed } from '@/lib/icFunds/format';
 
 type Props = {
   open: boolean;
@@ -44,7 +48,7 @@ type Props = {
 };
 
 export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVariant = 'auto', branchId }: Props) {
-  const { icWarehouses, deleteICSale, branchDeleteICSale, user, branches, icSales, refetchData, showToast, currentSlug } = useApp();
+  const { icWarehouses, icSuppliers, deleteICSale, branchDeleteICSale, user, branches, icSales, refetchData, showToast, currentSlug } = useApp();
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
@@ -94,12 +98,9 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
 
   const getWarehouseName = (id?: string) => icWarehouses.find((w: any) => w.id === id)?.name || id || 'None';
 
-  const formatAED = (val: any) => {
-    return Number(val || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' AED';
-  };
-
   const isMetalSale = liveSale.settlementMode === 'metal';
   const saleInr = resolveSaleInrDisplay(liveSale);
+  const metalPaidAed = isMetalSale && liveSale.metalPaymentMethod === 'AED';
   const isBranchPortalView = workflowVariant === 'branch'
     || (workflowVariant === 'auto' && isBranchScopedUser(user));
   const workflowUiVariant = isBranchPortalView ? 'branch' : 'admin';
@@ -139,6 +140,7 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
               </button>
             )}
             <div className="flex gap-2">
+              {liveSale ? <DealInvoiceTextButtons sale={liveSale} /> : null}
               <button 
                 type="button" 
                 className={asicBtnOutline} 
@@ -177,7 +179,7 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  Customer
+                  {SALE_COUNTERPARTY_FIELD_LABEL}
                 </p>
                 <p className="text-sm font-semibold text-slate-900 mt-0.5">
                   <CounterpartyLink
@@ -216,15 +218,27 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
                     </p>
                   </div>
                   <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Rate (AED)</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      {metalPaidAed ? 'Unit rate (AED)' : 'IC unit rate (AED)'}
+                    </p>
                     <p className="mt-0.5 text-sm font-bold text-slate-900">
-                      {formatAmount(computeMetalSheetRateAed(saleInr, liveSale.aedAmount ?? 0))}
+                      {formatAmount(liveSale.unitRate)}
                     </p>
                   </div>
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Receipt</p>
-                    <p className="mt-0.5 text-sm font-bold text-slate-900">AED from customer</p>
+                    <p className="mt-0.5 text-sm font-bold text-slate-900">
+                      {metalPaidAed ? 'AED via agent' : 'INR from party'}
+                    </p>
                   </div>
+                  {hasLab(liveSale) ? (
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Lab test (INR)</p>
+                      <p className="mt-0.5 text-sm font-bold text-slate-900">
+                        <FmtLedgerInr amount={liveSale.labTotalInr ?? 0} />
+                      </p>
+                    </div>
+                  ) : null}
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-4 rounded-lg border border-slate-100 bg-slate-50/55 p-4">
@@ -239,21 +253,47 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
                 </div>
               )}
 
-              <div className="grid gap-4 rounded-lg border border-slate-100 bg-slate-50/55 p-4 grid-cols-1 sm:grid-cols-3">
+              <div className="grid gap-4 rounded-lg border border-slate-100 bg-slate-50/55 p-4 grid-cols-1 sm:grid-cols-2">
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total (INR)</p>
-                  <p className="mt-0.5 text-sm font-bold tabular-nums text-slate-900">
-                    {saleInr.toLocaleString()} INR
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    {isMetalSale && hasLab(liveSale) ? 'Net (INR)' : 'Total (INR)'}
                   </p>
-                  <InrAmountInWords
-                    amount={saleInr}
-                    className="mt-0.5 text-sm font-medium leading-snug text-slate-500"
-                  />
+                  <p className="mt-0.5 text-sm font-bold tabular-nums text-slate-900">
+                    <FmtLedgerInr amount={saleInr} />
+                  </p>
+                  {isMetalSale && hasLab(liveSale) ? (
+                    <p className="mt-0.5 text-[11px] font-medium leading-snug text-slate-500">
+                      Gross <FmtLedgerInr amount={liveSale.inrTotal ?? 0} /> − Lab <FmtLedgerInr amount={liveSale.labTotalInr ?? 0} />
+                    </p>
+                  ) : (
+                    <InrAmountInWords
+                      amount={saleInr}
+                      className="mt-0.5 text-sm font-medium leading-snug text-slate-500"
+                    />
+                  )}
                 </div>
-                <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total (AED)</p>
-                    <p className="mt-0.5 text-sm font-bold text-accent">{formatAED(liveSale.aedAmount)}</p>
+                {metalPaidAed ? (
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Collected (AED)</p>
+                    <p className="mt-0.5 text-sm font-bold text-accent">
+                      <FmtLedgerAed amount={Number(liveSale.aedAmount) || 0} />
+                    </p>
                   </div>
+                ) : isMetalSale ? (
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">IC stock (memo)</p>
+                    <p className="mt-0.5 text-sm font-bold tabular-nums text-slate-900">
+                      {formatAmount(liveSale.units, 4)} units
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total (AED)</p>
+                    <p className="mt-0.5 text-sm font-bold text-accent">
+                      <FmtLedgerAed amount={Number(liveSale.aedAmount) || 0} />
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -295,22 +335,40 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
               </div>
             ) : null}
 
-            {liveSale.transactionType === 'by_hand' && (liveSale.location || liveSale.district) ? (
+            {liveSale.settlementMode === 'metal' ? (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {liveSale.location ? (
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Paid in</p>
+                  <p className="mt-0.5 text-sm font-semibold text-slate-700">
+                    {liveSale.metalPaymentMethod === 'AED' ? 'AED via agent' : 'Cash (INR)'}
+                  </p>
+                </div>
+                {liveSale.metalPaymentMethod === 'AED' ? (
                   <div>
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Location</p>
-                    <p className="text-sm font-semibold text-slate-700 mt-0.5">{liveSale.location}</p>
-                  </div>
-                ) : null}
-                {liveSale.district ? (
-                  <div>
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">District</p>
-                    <p className="text-sm font-semibold text-slate-700 mt-0.5">{liveSale.district}</p>
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">AED agent</p>
+                    <p className="mt-0.5 text-sm font-semibold text-slate-700">
+                      {liveSale.aedAgentCounterpartyId || liveSale.aedAgentId ? (
+                        <CounterpartyLink
+                          counterpartyId={liveSale.aedAgentCounterpartyId || liveSale.aedAgentId}
+                          name={
+                            liveSale.aedAgentName ||
+                            icSuppliers.find(
+                              s =>
+                                s.id === liveSale.aedAgentCounterpartyId ||
+                                s.id === liveSale.aedAgentId,
+                            )?.name ||
+                            'AED agent'
+                          }
+                        />
+                      ) : (
+                        '—'
+                      )}
+                    </p>
                   </div>
                 ) : null}
               </div>
             ) : null}
+
 
             {liveSale.transactionType !== 'by_hand' && liveSale.bank ? (
               <div>
@@ -337,7 +395,7 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
             {liveSale.serviceCharge !== undefined && liveSale.serviceCharge > 0 && (
               <div className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100">
                 <span className="text-xs font-semibold text-slate-500">Service Charge:</span>
-                <span className="text-sm font-bold text-slate-700">{formatAED(liveSale.serviceCharge)}</span>
+                <span className="text-sm font-bold text-slate-700"><FmtLedgerAed amount={Number(liveSale.serviceCharge) || 0} /></span>
               </div>
             )}
 

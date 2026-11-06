@@ -9,6 +9,7 @@ import {
   ICWarehouseTransaction,
 } from '@/types';
 import { resolvePurchaseInrDisplay } from '@/lib/icTransfer/metalSettlement';
+import { labFieldsFromRecord } from '@/lib/icTransfer/labTest';
 import { mapICCounterpartyRow } from '@/lib/counterparties/mapper';
 
 export function mapICRegionRow(row: any): ICRegion {
@@ -79,6 +80,11 @@ export function mapICPurchaseRow(row: any): ICPurchase {
   const units = parseFloat(row.units);
   const settlementMode = row.settlement_mode === 'metal' ? 'metal' : 'cash';
   const inrTotal = row.inr_total != null ? parseFloat(row.inr_total) : null;
+  const lab = labFieldsFromRecord({
+    labWeightG: row.lab_weight_g,
+    labChargeInrPerG: row.lab_charge_inr_per_g,
+    labTotalInr: row.lab_total_inr,
+  });
   return {
     id: row.id,
     counterpartyId: row.counterparty_id ? String(row.counterparty_id) : undefined,
@@ -92,12 +98,28 @@ export function mapICPurchaseRow(row: any): ICPurchase {
     metalRateInrPerG: row.metal_rate_inr_per_g != null ? parseFloat(row.metal_rate_inr_per_g) : null,
     metalRateAedPerG: row.metal_rate_aed_per_g != null ? parseFloat(row.metal_rate_aed_per_g) : null,
     inrTotal,
+    metalPaymentMethod: row.metal_payment_method
+      ? (String(row.metal_payment_method) === 'AED' ? 'AED' : 'CASH')
+      : null,
+    aedAgentId: row.aed_agent_id ? String(row.aed_agent_id) : null,
+    aedAgentCounterpartyId: row.aed_agent_counterparty_id
+      ? String(row.aed_agent_counterparty_id)
+      : null,
+    aedAgentName: row.aed_agent_name ? String(row.aed_agent_name) : null,
     paymentMethod: row.payment_method,
     notes: row.notes,
-    convertedTotal: resolvePurchaseInrDisplay({ settlementMode, inrTotal, units }),
+    convertedTotal: resolvePurchaseInrDisplay({
+      settlementMode,
+      inrTotal,
+      units,
+      labTotalInr: lab.labTotalInr,
+    }),
     aedTotal: row.aed_total ? parseFloat(row.aed_total) : undefined,
     paymentStatus: row.payment_status === 'pending' ? 'paid' : row.payment_status || 'paid',
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : undefined,
+    labWeightG: lab.labWeightG || null,
+    labChargeInrPerG: lab.labChargeInrPerG || null,
+    labTotalInr: lab.labTotalInr || null,
   };
 }
 
@@ -105,6 +127,11 @@ export function mapICSaleRow(row: any): ICSale {
   const units = parseFloat(row.units);
   const settlementMode = row.settlement_mode === 'metal' ? 'metal' : 'cash';
   const inrTotal = row.inr_total != null ? parseFloat(row.inr_total) : null;
+  const lab = labFieldsFromRecord({
+    labWeightG: row.lab_weight_g,
+    labChargeInrPerG: row.lab_charge_inr_per_g,
+    labTotalInr: row.lab_total_inr,
+  });
   return {
     id: row.id,
     customerName: row.customer_name,
@@ -124,9 +151,16 @@ export function mapICSaleRow(row: any): ICSale {
     inrTotal,
     metalPurchaseId: row.metal_purchase_id ? String(row.metal_purchase_id) : null,
     metalPaymentMethod:
-      row.metal_payment_method === 'INR' || row.metal_payment_method === 'AED'
-        ? row.metal_payment_method
-        : null,
+      row.metal_payment_method === 'AED'
+        ? 'AED'
+        : row.metal_payment_method === 'CASH' || row.metal_payment_method === 'INR'
+          ? 'CASH'
+          : null,
+    aedAgentId: row.aed_agent_id ? String(row.aed_agent_id) : null,
+    aedAgentCounterpartyId: row.aed_agent_counterparty_id
+      ? String(row.aed_agent_counterparty_id)
+      : null,
+    aedAgentName: row.aed_agent_name ? String(row.aed_agent_name) : null,
     aedAmount: row.aed_amount ? parseFloat(row.aed_amount) : undefined,
     enteredBy: row.entered_by,
     enteredByName: row.entered_by_name,
@@ -137,8 +171,6 @@ export function mapICSaleRow(row: any): ICSale {
     statusUpdatedAt: row.status_updated_at ? new Date(row.status_updated_at).toISOString() : undefined,
     statusUpdatedBy: row.status_updated_by || undefined,
     address: row.address || undefined,
-    location: row.location || undefined,
-    district: row.district || undefined,
     imageUrl: row.image_url || undefined,
     serviceCharge: row.service_charge ? parseFloat(row.service_charge) : undefined,
     bank: row.bank || undefined,
@@ -150,6 +182,9 @@ export function mapICSaleRow(row: any): ICSale {
     fulfillmentHandler: 'hq_admin',
     deliveryImageUrl: row.delivery_image_url || undefined,
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : undefined,
+    labWeightG: lab.labWeightG || null,
+    labChargeInrPerG: lab.labChargeInrPerG || null,
+    labTotalInr: lab.labTotalInr || null,
   };
 }
 

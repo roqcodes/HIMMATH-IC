@@ -5,9 +5,7 @@ import Modal from '@/components/ui/Modal';
 import AsicFormField from '@/components/asic/AsicFormField';
 import ModalFormSection from '@/components/ui/ModalFormSection';
 import ModalTwoColumnLayout from '@/components/ui/ModalTwoColumnLayout';
-import IndiaUnifiedLocationSelect from '@/components/ui/IndiaUnifiedLocationSelect';
-import { asicBtnOutline, asicBtnPrimary, asicInput, modalAddressTextarea } from '@/components/asic/ui';
-import { isIndiaWarehouseLocationValid } from '@/lib/geo/locationFormValidation';
+import { asicBtnOutline, asicBtnPrimary, asicInput } from '@/components/asic/ui';
 import { useApp } from '@/context/AppContext';
 import type { ICWarehouse } from '@/types';
 
@@ -29,9 +27,9 @@ export default function WarehouseModal({ open, warehouse, branchId, onClose, onS
   const [code, setCode] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const [address, setAddress] = useState('');
-  const [indiaState, setIndiaState] = useState('');
-  const [indiaCity, setIndiaCity] = useState('');
+  const [street, setStreet] = useState('');
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -41,29 +39,29 @@ export default function WarehouseModal({ open, warehouse, branchId, onClose, onS
       setCode(warehouse.code || '');
       setPhone(warehouse.phone || '');
       setEmail(warehouse.email || '');
-      setAddress(warehouse.address || '');
-      setIndiaState(warehouse.indiaState || '');
-      setIndiaCity(warehouse.indiaCity || '');
+      setStreet(warehouse.address || '');
+      setCity(warehouse.indiaCity || '');
+      setState(warehouse.indiaState || '');
     } else {
       setName('');
       setCode('');
       setPhone('');
       setEmail('');
-      setAddress('');
-      setIndiaState('');
-      setIndiaCity('');
+      setStreet('');
+      setCity('');
+      setState('');
     }
   }, [open, warehouse]);
 
-  const locationValid = isIndiaWarehouseLocationValid(indiaState, indiaCity);
-  const canSubmit = name.trim().length > 0 && indiaState.trim().length > 0 && locationValid;
+  const canSubmit = name.trim().length > 0;
 
   const handleSave = async () => {
     if (!canSubmit) return;
     setIsSaving(true);
 
-    const stateTrim = indiaState.trim();
-    const cityTrim = indiaCity.trim();
+    const streetTrim = street.trim();
+    const cityTrim = city.trim();
+    const stateTrim = state.trim();
     const sendDeliveryProofToCustomer = warehouse ? warehouse.sendDeliveryProofToCustomer !== false : true;
 
     let ok = false;
@@ -76,7 +74,7 @@ export default function WarehouseModal({ open, warehouse, branchId, onClose, onS
         null,
         '',
         email.trim(),
-        address.trim(),
+        streetTrim,
         stateTrim,
         cityTrim,
         sendDeliveryProofToCustomer,
@@ -89,7 +87,7 @@ export default function WarehouseModal({ open, warehouse, branchId, onClose, onS
         null,
         '',
         email.trim(),
-        address.trim(),
+        streetTrim,
         stateTrim,
         cityTrim,
         sendDeliveryProofToCustomer,
@@ -176,36 +174,31 @@ export default function WarehouseModal({ open, warehouse, branchId, onClose, onS
           </ModalFormSection>
         }
         right={
-          <ModalFormSection
-            title="Location & address *"
-            description="India only. Examples: Kerala · Kochi, Kerala · Mumbai, Maharashtra."
-            className="flex min-h-0 flex-1 flex-col lg:h-full"
-            contentClassName="min-h-0 flex-1"
-          >
-            <div className="shrink-0">
-              <IndiaUnifiedLocationSelect
-                state={indiaState}
-                city={indiaCity}
-                onChange={next => {
-                  setIndiaState(next.state);
-                  setIndiaCity(next.city);
-                }}
+          <ModalFormSection title="Address" description="Optional.">
+            <AsicFormField label="Street" htmlFor="warehouse-street" className={fieldClass}>
+              <input
+                id="warehouse-street"
+                className={asicInput}
+                placeholder="Building, street, area"
+                value={street}
+                onChange={e => setStreet(e.target.value)}
               />
-            </div>
-            <AsicFormField
-              label="Address"
-              htmlFor="warehouse-address"
-              className={`${fieldClass} flex min-h-0 flex-1 flex-col`}
-            >
-              <div className="flex min-h-[5rem] flex-1 flex-col">
-                <textarea
-                  id="warehouse-address"
-                  className={modalAddressTextarea}
-                  placeholder="Building, street, area"
-                  value={address}
-                  onChange={e => setAddress(e.target.value)}
-                />
-              </div>
+            </AsicFormField>
+            <AsicFormField label="City" htmlFor="warehouse-city" className={fieldClass}>
+              <input
+                id="warehouse-city"
+                className={asicInput}
+                value={city}
+                onChange={e => setCity(e.target.value)}
+              />
+            </AsicFormField>
+            <AsicFormField label="State" htmlFor="warehouse-state" className={fieldClass}>
+              <input
+                id="warehouse-state"
+                className={asicInput}
+                value={state}
+                onChange={e => setState(e.target.value)}
+              />
             </AsicFormField>
           </ModalFormSection>
         }

@@ -1,7 +1,7 @@
 'use client';
 
 import { IC_FUND_VOUCHER_LABELS } from '@/lib/icFunds/constants';
-import { fmtICDate, fmtLedgerAed } from '@/lib/icFunds/format';
+import { fmtICDate, fmtLedgerAed, FmtLedgerAed } from '@/lib/icFunds/format';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import VoucherUserCell from '@/components/ic-funds/VoucherUserCell';
 import { icfTableWrap, icfTd, icfTh, icfThAlign, icfTheadRow } from '@/components/ic-funds/ui';
@@ -84,7 +84,7 @@ export default function DayBookReport({
                       accounts={accounts}
                     />
                   </td>
-                  <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(row.amount)}</td>
+                  <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={row.amount} /></td>
                   <td className={icfTd}>
                     <VoucherUserCell voucher={row} />
                   </td>

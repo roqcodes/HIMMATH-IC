@@ -16,6 +16,10 @@ type ModalProps = {
   heightClass?: string;
   /** Extra classes on the scrollable body region (e.g. tighter padding, overflow-hidden). */
   bodyClassName?: string;
+  /** Centered slot in the header row (e.g. mode switcher). */
+  headerCenter?: React.ReactNode;
+  /** Trailing header content before the close button (e.g. timestamp). */
+  headerTrailing?: React.ReactNode;
   zIndexClass?: string;
 };
 
@@ -33,6 +37,8 @@ export default function Modal({
   maxHeight = 'sm:max-h-[min(88dvh,720px)]',
   heightClass,
   bodyClassName,
+  headerCenter,
+  headerTrailing,
   zIndexClass = 'z-[400]',
 }: ModalProps) {
   const [mounted, setMounted] = useState(false);
@@ -98,18 +104,35 @@ export default function Modal({
         style={{ transitionDuration: `${FADE_MS}ms` }}
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-3 py-2 sm:px-4 dark:border-[var(--theme-border)] dark:bg-[var(--theme-surface)]">
-          <div id="modal-title" className="mr-3 flex-1 text-sm font-semibold text-slate-900 dark:text-[var(--theme-text)]">
-            {title}
-          </div>
-          <button
-            type="button"
-            className={`${iconBtn} size-8 text-lg hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:hover:border-red-900/40 dark:hover:bg-red-950/40 dark:hover:text-red-400`}
-            onClick={onClose}
-            aria-label="Close"
+        <div className="flex shrink-0 flex-nowrap items-center gap-2 border-b border-slate-200 bg-white py-2 pl-3 pr-2 sm:gap-3 sm:px-4 dark:border-[var(--theme-border)] dark:bg-[var(--theme-surface)]">
+          <div
+            id="modal-title"
+            className={`flex min-w-0 flex-1 items-center gap-2 sm:gap-3 ${headerCenter ? '' : 'mr-1 text-sm font-semibold text-slate-900 dark:text-[var(--theme-text)]'}`}
           >
-            ×
-          </button>
+            {headerCenter ? (
+              <>
+                <span className="shrink-0 text-sm font-semibold text-slate-900 dark:text-[var(--theme-text)]">
+                  {title}
+                </span>
+                <div className="flex min-w-0 flex-1 flex-nowrap items-center justify-center gap-2">
+                  {headerCenter}
+                </div>
+              </>
+            ) : (
+              title
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {headerTrailing}
+            <button
+              type="button"
+              className={`${iconBtn} size-8 shrink-0 text-lg hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:hover:border-red-900/40 dark:hover:bg-red-950/40 dark:hover:text-red-400`}
+              onClick={onClose}
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
         </div>
 
         <div

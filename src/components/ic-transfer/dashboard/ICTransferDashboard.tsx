@@ -6,15 +6,29 @@ import AsicPageHeader from '@/components/asic/AsicPageHeader';
 import { ChartCard, PageShell } from '../ui';
 import { useApp } from '@/context/AppContext';
 import { getCustomersBySlug } from '@/app/actions/customerActions';
-import { resolveDateFilterRange, isDateInRange } from '@/lib/dateFilterRange';
+import { resolveDateFilterRange, isDateInRange, getDateFilterLabel } from '@/lib/dateFilterRange';
+import ICTransferDealBookKpiStrips from '@/components/ic-transfer/shared/ICTransferDealBookKpiStrips';
+import {
+  computeCombinedTradeBookKpis,
+  countPurchasesInRange,
+  countSalesInRange,
+  dealPurchaseAed,
+  dealSaleAed,
+} from '@/lib/icTransfer/dealBookKpis';
 import ICTransferDateFilterBar from '@/components/ic-transfer/shared/ICTransferDateFilterBar';
 import { useICTransferRegionFilter } from '@/components/ic-transfer/shared/ICTransferFilterProvider';
 import { matchesSaleRegionFilter, matchesSelectedRegions } from '@/lib/icTransfer/regionFilter';
 import { scopeSalesForBranchAdmin, saleMatchesDateFilter } from '@/lib/icTransfer/branchOrderOwnership';
 import { effectivePurchaseCounterpartyId } from '@/lib/counterparties/effectiveId';
-import { sumMetalSaleWeightG, sumMetalWeightG } from '@/lib/icTransfer/warehouseMatrixMetrics';
+import {
+  computeWarehouseMetalGramsOnHand,
+  sumMetalSaleWeightG,
+  sumMetalWeightG,
+} from '@/lib/icTransfer/warehouseMatrixMetrics';
 import { computeDealProfit } from '@/lib/icTransfer/dealProfit';
-import { formatAEDStr } from '@/lib/format';
+import { buildICTransferMetalOnHandPlMetrics } from '@/lib/icTransfer/inventoryKpiMetrics';
+import { fmtLedgerAedPlain } from '@/components/currency/CurrencyAmount';
+import CurrencyAmount from '@/components/currency/CurrencyAmount';
 import { useDateFilterState } from '@/hooks/useDateFilterState';
 
 function TrendChart({ data }: { data: { label: string; purchases: number; sales: number }[] }) {
@@ -39,12 +53,12 @@ function TrendChart({ data }: { data: { label: string; purchases: number; sales:
                <div 
                  className="w-1/2 max-w-[24px] bg-accent rounded-t-[3px] transition-all duration-300 group-hover:opacity-80 relative" 
                  style={{ height: `${Math.max((d.purchases / maxVal) * 100, 1)}%` }} 
-                 title={`Purchases: ${formatAEDStr(d.purchases)}`}
+                 title={`Purchases: ${fmtLedgerAedPlain(d.purchases)}`}
                />
                <div 
                  className="w-1/2 max-w-[24px] bg-emerald-400 rounded-t-[3px] transition-all duration-300 group-hover:opacity-80 relative" 
                  style={{ height: `${Math.max((d.sales / maxVal) * 100, 1)}%` }} 
-                 title={`Sales: ${formatAEDStr(d.sales)}`}
+                 title={`Sales: ${fmtLedgerAedPlain(d.sales)}`}
                />
              </div>
              <span className="text-[10px] font-medium text-slate-400 absolute -bottom-5 whitespace-nowrap overflow-hidden text-ellipsis max-w-[120%] text-center">
@@ -76,7 +90,9 @@ function RankingList({
             <div key={i} className="flex flex-col gap-1">
               <div className="flex items-end justify-between gap-2 text-xs font-medium text-slate-700">
                 <span className="truncate">{d.name}</span>
-                <span className="shrink-0 font-mono tabular-nums text-slate-900">{formatAEDStr(d.volume)}</span>
+                <span className="shrink-0 font-mono tabular-nums text-slate-900">
+                  <CurrencyAmount currency="AED" amount={d.volume} />
+                </span>
               </div>
               <div className="h-1 w-full overflow-hidden rounded-full bg-slate-100">
                 <div
@@ -143,6 +159,54 @@ export default function ICTransferDashboard() {
 
   const range = useMemo(() => resolveDateFilterRange(dateFilter, customStartDate, customEndDate), [dateFilter, customStartDate, customEndDate]);
 
+  const rangeLabel = useMemo(
+    () => getDateFilterLabel(dateFilter, customStartDate, customEndDate),
+    [dateFilter, customStartDate, customEndDate],
+  );
+
+  const scopedPurchasesForKpi = useMemo(() => {
+    const activeBranch = branches.find(b => b.slug === currentSlug)
+      || allBranches.find(b => b.slug === currentSlug);
+    const activeBranchId = activeBranch?.id;
+    const allowedWarehouseIds = new Set(
+      icWarehouses
+        .filter(w => !branchSlug ? !w.branchId : w.branchId === activeBranchId)
+        .map(w => w.id),
+    );
+    return icPurchases.filter(
+      p =>
+        matchesSelectedRegions(p.locationId, selectedRegionIds) &&
+        (!p.warehouseId || allowedWarehouseIds.has(p.warehouseId)),
+    );
+  }, [icPurchases, icWarehouses, selectedRegionIds, branchSlug, branches, allBranches, currentSlug]);
+
+  const scopedSalesForKpi = useMemo(() => {
+    const activeBranch = branches.find(b => b.slug === currentSlug)
+      || allBranches.find(b => b.slug === currentSlug);
+    const activeBranchId = activeBranch?.id;
+    const allowedWarehouseIds = new Set(
+      icWarehouses
+        .filter(w => !branchSlug ? !w.branchId : w.branchId === activeBranchId)
+        .map(w => w.id),
+    );
+    return scopedSales.filter(
+      s =>
+        matchesSaleRegionFilter(s, icWarehouses, selectedRegionIds) &&
+        (!s.warehouseId || allowedWarehouseIds.has(s.warehouseId)),
+    );
+  }, [scopedSales, icWarehouses, selectedRegionIds, branchSlug, branches, allBranches, currentSlug]);
+
+  const tradeBookKpis = useMemo(
+    () => computeCombinedTradeBookKpis(scopedPurchasesForKpi, scopedSalesForKpi, range),
+    [scopedPurchasesForKpi, scopedSalesForKpi, range],
+  );
+
+  const tradeCountHint = useMemo(() => {
+    const p = countPurchasesInRange(scopedPurchasesForKpi, range);
+    const s = countSalesInRange(scopedSalesForKpi, range);
+    return `${p.cash + p.metal} purchases · ${s.cash + s.metal} sales`;
+  }, [scopedPurchasesForKpi, scopedSalesForKpi, range]);
+
   const { filteredPurchases, filteredSales } = useMemo(() => {
     const isFiltered = (dateStr: string) => !range.startDate && !range.endDate ? true : isDateInRange(dateStr, range);
     
@@ -202,7 +266,7 @@ export default function ICTransferDashboard() {
     };
 
     filteredPurchases.forEach(p => {
-      const aed = p.aedTotal || 0;
+      const aed = dealPurchaseAed(p);
       totalPurchaseVol += aed;
       if (p.paymentStatus === 'pending') pendingPayables += aed;
       
@@ -223,7 +287,7 @@ export default function ICTransferDashboard() {
     });
 
     filteredSales.forEach(s => {
-      const aed = s.aedAmount || 0;
+      const aed = dealSaleAed(s);
       totalSalesVol += aed;
       if (s.paymentStatus === 'pending') pendingReceivables += aed;
 
@@ -267,7 +331,10 @@ export default function ICTransferDashboard() {
     );
     const metalOnHand = icWarehouses
       .filter(w => allowedWarehouseIds.has(w.id))
-      .reduce((sum, w) => sum + Number(w.currentMetalG ?? 0), 0);
+      .reduce(
+        (sum, w) => sum + computeWarehouseMetalGramsOnHand(icPurchases, scopedSales, w.id),
+        0,
+      );
     const metalPurchasedG = sumMetalWeightG(filteredPurchases);
     const metalSoldG = sumMetalSaleWeightG(filteredSales);
     const cashPurchases = filteredPurchases.filter(p => p.settlementMode !== 'metal').length;
@@ -319,38 +386,28 @@ export default function ICTransferDashboard() {
       />
 
       <AsicKpiStrip
-        columns={3}
+        columns={4}
         metrics={[
+          ...buildICTransferMetalOnHandPlMetrics({
+            currentMetalG: kpis.metalOnHand,
+            cashGrossProfitAed: kpis.cashGrossProfitAed,
+            metalProfitAed: kpis.metalProfitAed,
+            metalProfitInr: kpis.metalProfitInr,
+            rangeLabel,
+          }),
           {
-            label: 'Purchase volume',
-            value: formatAEDStr(kpis.totalPurchaseVol),
-            hint: `${kpis.cashPurchases} IC · ${kpis.metalPurchases} metal`,
-          },
-          {
-            label: 'Sales volume',
-            value: formatAEDStr(kpis.totalSalesVol),
-            hint: `${kpis.cashSales} IC · ${kpis.metalSales} metal`,
-            tone: 'emerald',
-          },
-          {
-            label: 'Metal on hand',
-            value: `${kpis.metalOnHand.toLocaleString('en-US', { maximumFractionDigits: 4 })} g`,
-            hint: 'Across scoped warehouses',
-            tone: 'amber',
-          },
-          {
-            label: 'IC gross profit',
-            value: formatAEDStr(kpis.cashGrossProfitAed),
-            hint: 'WAC on cash IC sales',
-            tone: kpis.cashGrossProfitAed >= 0 ? 'emerald' : 'red',
-          },
-          {
-            label: 'Metal P&L',
-            value: formatAEDStr(kpis.metalProfitAed),
-            hint: `${kpis.metalSoldG.toLocaleString('en-US', { maximumFractionDigits: 2 })} g · sale − purchase AED`,
-            tone: kpis.metalProfitAed >= 0 ? 'emerald' : 'red',
+            label: 'Deals in range',
+            value: kpis.txnCount.toLocaleString(),
+            hint: `${kpis.cashPurchases + kpis.metalPurchases} purchases · ${kpis.cashSales + kpis.metalSales} sales`,
           },
         ]}
+      />
+
+      <ICTransferDealBookKpiStrips
+        books={tradeBookKpis}
+        rangeLabel={rangeLabel}
+        flow="combined"
+        countHint={tradeCountHint}
       />
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">

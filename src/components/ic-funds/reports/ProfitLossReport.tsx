@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { fmtLedgerAed } from '@/lib/icFunds/format';
+import { FmtLedgerAed } from '@/lib/icFunds/format';
 import type { PlStatement } from '@/lib/icFunds/reportPresentation';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import { icfTd } from '@/components/ic-funds/ui';
@@ -45,7 +45,14 @@ export default function ProfitLossReport({
 }) {
   return (
     <div>
-      <ReportCaption>{periodLabel} · Active vouchers only</ReportCaption>
+      <ReportCaption>{periodLabel} · Active vouchers only · IC / AED ledger</ReportCaption>
+      <p className="mx-2.5 mb-2 rounded-md border border-emerald-200/80 bg-emerald-50/60 px-3 py-2 text-xs text-emerald-950 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-100">
+        Cash IC WAC gross profit and operating result in AED. Metal commodity profit is on the{' '}
+        <Link href="/admin/reports?view=metal-pl" className="font-medium underline">
+          metal P&amp;L (INR)
+        </Link>{' '}
+        report — not mixed on this page.
+      </p>
       <table className="w-full text-sm">
         <tbody>
           <tr className="border-b border-slate-200 bg-slate-50/80">
@@ -72,21 +79,20 @@ export default function ProfitLossReport({
           <SectionLines lines={statement.operatingLines} slug={slug} accounts={accounts} />
 
           <tr className="border-b border-slate-300 bg-slate-50 font-semibold">
-            <td className={icfTd}>Net profit / (loss) for the period</td>
+            <td className={icfTd}>Net profit / (loss) for the period (AED)</td>
             <ReportAmountCell n={statement.netForPeriod} danger={statement.netForPeriod < 0} />
           </tr>
         </tbody>
       </table>
       {statement.profitTransferred > 0.005 ? (
         <p className="px-2.5 py-2 text-[11px] text-slate-500">
-          Transferred to profit reserve in period: {fmtLedgerAed(statement.profitTransferred)} (included in sales
+          Transferred to profit reserve in period: <FmtLedgerAed amount={statement.profitTransferred} /> (included in sales
           above; not double-counted in net).
         </p>
       ) : null}
       <p className="px-2.5 py-2 text-[11px] text-slate-500">
-        Ledger P&amp;L is AED books: cash IC sales post WAC COGS and profit reserve; metal AED lots post supplier
-        cost and customer bill. Metal INR profit is operational (sale INR − purchase INR) and is shown on warehouse
-        gross profit and the metal trade register — it is not a second AED income line.
+        Ledger P&amp;L is AED only: cash IC sales post WAC COGS; metal AED agent flows post supplier cost and customer bill
+        in AED — not INR commodity profit.
       </p>
       <p className="px-2.5 pb-2 text-[11px] text-slate-500">
         Voucher detail:{' '}

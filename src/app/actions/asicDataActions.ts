@@ -31,10 +31,16 @@ const BRANCHES_SELECT = `
 
 import { IC_RATE_GROUPS_WITH_MEMBERS_SELECT } from '@/lib/icTransfer/rateGroupQueries';
 
+const IC_PURCHASE_SELECT = `
+  SELECT p.*, aa.counterparty_id AS aed_agent_counterparty_id, aa.name AS aed_agent_name
+  FROM ic_purchases p
+  LEFT JOIN ic_aed_agents aa ON aa.id = p.aed_agent_id`;
+
 const IC_SALES_SELECT = `
-  SELECT s.*, a.name AS delivery_agent_name
+  SELECT s.*, a.name AS delivery_agent_name, aa.counterparty_id AS aed_agent_counterparty_id, aa.name AS aed_agent_name
   FROM ic_sales s
-  LEFT JOIN ic_delivery_agents a ON s.delivery_agent_id = a.id`;
+  LEFT JOIN ic_delivery_agents a ON s.delivery_agent_id = a.id
+  LEFT JOIN ic_aed_agents aa ON aa.id = s.aed_agent_id`;
 
 type FetchContext = {
   currentUser: User | null;
@@ -113,12 +119,21 @@ async function loadWarehouses(branchId: string | null) {
   return query('SELECT * FROM ic_warehouses');
 }
 
-async function loadPurchases(_branchId: string | null) {
-  return query('SELECT * FROM ic_purchases ORDER BY created_at DESC LIMIT 500');
+async function loadPurchases(branchId: string | null) {
+  if (branchId) {
+    return query(
+      `${IC_PURCHASE_SELECT}
+       LEFT JOIN ic_warehouses w ON w.id = p.warehouse_id
+       WHERE w.branch_id = $1 OR w.branch_id IS NULL
+       ORDER BY p.created_at DESC LIMIT 200`,
+      [branchId],
+    );
+  }
+  return query(`${IC_PURCHASE_SELECT} ORDER BY p.created_at DESC LIMIT 200`);
 }
 
 async function loadSales(_ctx: FetchContext) {
-  return query(`${IC_SALES_SELECT} ORDER BY s.created_at DESC LIMIT 400`);
+  return query(`${IC_SALES_SELECT} ORDER BY s.created_at DESC LIMIT 200`);
 }
 
 async function loadWarehouseTransactions(_branchId: string | null) {

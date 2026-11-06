@@ -1,10 +1,12 @@
 import { isVoidIcSaleOrderStatus } from '../icFunds/icTransferReportFilters';
+import { type MetalSettlementInput, normalizeMetalSale } from './metalSettlement';
+import { normalizeMetalPaymentMethod } from '@/lib/domain/books';
 import {
-  type MetalSettlementInput,
-  validateMetalSettlementInput,
-} from './metalSettlement';
+  computeMetalLotProfit as computeMetalLotProfitCore,
+  splitMetalBookedPl,
+} from '@/lib/metal/profit';
 
-export const METAL_PAYMENT_METHODS = ['INR', 'AED'] as const;
+export const METAL_PAYMENT_METHODS = ['CASH', 'AED'] as const;
 export type MetalPaymentMethod = (typeof METAL_PAYMENT_METHODS)[number];
 
 const WEIGHT_EPS = 0.0001;
@@ -16,7 +18,7 @@ function round4(value: number): number {
 }
 
 export function isMetalPaymentMethod(value: string | null | undefined): value is MetalPaymentMethod {
-  return value === 'INR' || value === 'AED';
+  return value === 'CASH' || value === 'AED' || value === 'INR';
 }
 
 export type MetalLotSaleSlice = {
@@ -71,38 +73,45 @@ export type MetalLotProfit = {
   saleAed: number;
   profitInr: number;
   profitAed: number;
-  /** Booked P&L in the payment currency. */
+  /** Primary booked P&L amount for single-currency display. */
   bookedProfit: number;
-  bookedCurrency: 'AED';
+  bookedCurrency: 'AED' | 'INR';
+  bookedProfitAed: number;
+  bookedProfitInr: number;
 };
 
 export function computeMetalLotProfit(params: {
-  paymentMethod: MetalPaymentMethod;
+  paymentMethod?: string | null;
+  purchasePaymentMethod?: string | null;
   purchaseInr: number;
   purchaseAed: number;
   saleInr: number;
   saleAed: number;
   weightG: number;
 }): MetalLotProfit {
-  const purchaseInr = round4(params.purchaseInr);
-  const saleInr = round4(params.saleInr);
-  const purchaseAed = round4(params.purchaseAed);
-  const saleAed = round4(params.saleAed);
-  const profitInr = round4(saleInr - purchaseInr);
-  const profitAed = round4(saleAed - purchaseAed);
-  const paymentMethod = params.paymentMethod;
+  const fromModule = computeMetalLotProfitCore({
+    salePaymentMethod: params.paymentMethod,
+    purchasePaymentMethod: params.purchasePaymentMethod ?? params.paymentMethod,
+    purchaseInr: params.purchaseInr,
+    purchaseAed: params.purchaseAed,
+    saleInr: params.saleInr,
+    saleAed: params.saleAed,
+    weightG: params.weightG,
+  });
+  const booked = splitMetalBookedPl(fromModule);
   return {
-    paymentMethod,
-    weightG: round4(params.weightG),
-    purchaseInr,
-    saleInr,
-    purchaseAed,
-    saleAed,
-    profitInr,
-    profitAed,
-    /** Base currency (AED): sale AED − lot purchase AED. */
-    bookedProfit: profitAed,
-    bookedCurrency: 'AED',
+    paymentMethod: fromModule.paymentMethod,
+    weightG: fromModule.weightG,
+    purchaseInr: fromModule.purchaseInr,
+    saleInr: fromModule.saleInr,
+    purchaseAed: fromModule.purchaseAed,
+    saleAed: fromModule.saleAed,
+    profitInr: fromModule.profitInr,
+    profitAed: fromModule.profitAed,
+    bookedProfit: booked.inr,
+    bookedCurrency: 'INR',
+    bookedProfitAed: booked.aed,
+    bookedProfitInr: booked.inr,
   };
 }
 
@@ -110,6 +119,7 @@ export type NormalizedMetalLotSale = {
   settlementMode: 'metal';
   metalPurchaseId: string;
   metalPaymentMethod: MetalPaymentMethod;
+  aedAgentId?: string | null;
   metalWeightG: number;
   metalRateInrPerG: number;
   metalRateAedPerG: number;
@@ -121,30 +131,35 @@ export type NormalizedMetalLotSale = {
 };
 
 /**
- * Metal sale: customer pays AED; IC unit stock does not change.
+ * Metal sale: INR grams + IC unit AED rate. Cash payment puts those units into IC stock at that AED cost.
+ * AED payment collects AED via agent and does not add IC units.
  */
 export function normalizeMetalLotSale(params: {
   metalPurchaseId: string;
   input: MetalSettlementInput;
+  paymentMethod?: string | null;
+  aedAgentId?: string | null;
 }): NormalizedMetalLotSale {
   if (!params.metalPurchaseId.trim()) {
     throw new Error('Select the metal purchase to sell.');
   }
-  validateMetalSettlementInput(params.input);
-  const inrTotal = round4(params.input.totalInr);
-  const aedTotal = round4(params.input.totalAed);
+  const sale = normalizeMetalSale(params.input, 0, {
+    paymentMethod: params.paymentMethod,
+    aedAgentId: params.aedAgentId,
+  });
   return {
     settlementMode: 'metal',
     metalPurchaseId: params.metalPurchaseId,
-    metalPaymentMethod: 'AED',
-    metalWeightG: round4(params.input.metalWeightG),
-    metalRateInrPerG: round4(params.input.metalRateInrPerG),
-    metalRateAedPerG: round4(params.input.metalRateAedPerG),
-    inrTotal,
-    aedTotal,
-    aedAmount: aedTotal,
-    units: 0,
-    unitRate: 0,
+    metalPaymentMethod: sale.metalPaymentMethod,
+    aedAgentId: sale.aedAgentId,
+    metalWeightG: sale.metalWeightG,
+    metalRateInrPerG: sale.metalRateInrPerG,
+    metalRateAedPerG: sale.metalRateAedPerG,
+    inrTotal: sale.inrTotal,
+    aedTotal: sale.aedTotal ?? sale.aedAmount,
+    aedAmount: sale.aedAmount,
+    units: sale.units,
+    unitRate: sale.unitRate,
   };
 }
 

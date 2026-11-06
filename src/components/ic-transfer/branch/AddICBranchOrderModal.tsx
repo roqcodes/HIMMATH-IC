@@ -7,6 +7,7 @@ import { btnPrimary, btnSecondary, formInput } from '@/lib/ui';
 import { useApp } from '@/context/AppContext';
 import { getCustomersBySlug } from '@/app/actions/customerActions';
 import { ICSale } from '@/types';
+import { SALE_COUNTERPARTY_FIELD_LABEL } from '@/lib/counterparties/labels';
 import { canEditOrder } from '@/lib/icTransfer/customerOrderReview';
 import { hasICSaleEditableFieldsChanged, type ICSaleContentFields } from '@/lib/icTransfer/saleChanges';
 import { WorkflowNotice } from '../shared/orderWorkflow';
@@ -47,8 +48,6 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
   );
   const [bank, setBank] = useState(initialData?.bank || '');
   const [address, setAddress] = useState(initialData?.address || '');
-  const [location, setLocation] = useState(initialData?.location || '');
-  const [district, setDistrict] = useState(initialData?.district || '');
   const [imageUrl, setImageUrl] = useState(initialData?.imageUrl || '');
   const [deleteToken, setDeleteToken] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -58,7 +57,7 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [editBaseline, setEditBaseline] = useState<Pick<
     ICSaleContentFields,
-    'units' | 'transactionType' | 'address' | 'location' | 'district' | 'imageUrl' | 'bank'
+    'units' | 'transactionType' | 'address' | 'imageUrl' | 'bank'
   > | null>(null);
   const [handleAtBranch, setHandleAtBranch] = useState(false);
 
@@ -128,8 +127,6 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
         initialData?.transactionType === 'by_hand' ? '' : (initialData?.bank || ''),
       );
       setAddress(initialData?.address || '');
-      setLocation(initialData?.location || '');
-      setDistrict(initialData?.district || '');
       setImageUrl(initialData?.imageUrl || '');
       setDeleteToken('');
       setSelectedCustomerId(initialData?.counterpartyId || '');
@@ -140,8 +137,6 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
           units: initialData.units,
           transactionType: normalizeICSaleTransactionType(initialData.transactionType),
           address: initialData.address,
-          location: initialData.location,
-          district: initialData.district,
           imageUrl: initialData.imageUrl,
           bank: initialData.transactionType === 'by_hand' ? '' : (initialData.bank || ''),
         });
@@ -186,16 +181,12 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
 
   const isEditMode = !!initialData && canEditOrder(initialData, user?.role);
 
-  const isByHand = transactionType === 'by_hand';
   const showBankField = transactionTypeRequiresBank(transactionType);
 
   const handleTransactionTypeChange = (value: ICSaleTransactionType) => {
     setTransactionType(value);
     if (value === 'by_hand') {
       setBank('');
-    } else {
-      setLocation('');
-      setDistrict('');
     }
   };
 
@@ -212,8 +203,6 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
     aedAmount: amounts.aedNetTotal,
     bank: showBankField ? (bank || undefined) : undefined,
     address: address || undefined,
-    location: isByHand ? location.trim() || undefined : undefined,
-    district: isByHand ? district.trim() || undefined : undefined,
     imageUrl: imageUrl || undefined,
     serviceCharge: serviceChargeNum,
     fulfillmentHandler: 'hq_admin' as const,
@@ -225,8 +214,6 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
     aedAmount: amounts.aedNetTotal,
     bank: showBankField ? (bank || undefined) : undefined,
     address: address || undefined,
-    location: isByHand ? location.trim() || undefined : undefined,
-    district: isByHand ? district.trim() || undefined : undefined,
     imageUrl: imageUrl || undefined,
     serviceCharge: serviceChargeNum,
   };
@@ -235,8 +222,6 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
     units: unitNum,
     transactionType,
     address: address || undefined,
-    location: isByHand ? location.trim() || undefined : undefined,
-    district: isByHand ? district.trim() || undefined : undefined,
     imageUrl: imageUrl || undefined,
     serviceCharge: serviceChargeNum,
     bank: showBankField ? (bank || undefined) : undefined,
@@ -317,9 +302,9 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
           <div className="space-y-4 lg:col-span-5">
-            <h3 className="border-b border-slate-100 pb-2 text-sm font-bold text-slate-900">Customer</h3>
+            <h3 className="border-b border-slate-100 pb-2 text-sm font-bold text-slate-900">{SALE_COUNTERPARTY_FIELD_LABEL}</h3>
 
-            <InputField label="Customer">
+            <InputField label={SALE_COUNTERPARTY_FIELD_LABEL}>
               {isEditMode ? (
                 <input
                   className={`${formInput} bg-slate-50 text-slate-500 font-semibold cursor-not-allowed`}
@@ -346,7 +331,7 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
                 />
               )}
               <p className="mt-1 text-[11px] text-slate-400">
-                Order will be recorded under {branchName}. Select the end customer above.
+                Order will be recorded under {branchName}. Select the end party above.
               </p>
             </InputField>
 
@@ -372,28 +357,6 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
               />
             </InputField>
 
-            {isByHand ? (
-              <>
-                <InputField label="Location">
-                  <input
-                    type="text"
-                    className={formInput}
-                    value={location}
-                    onChange={e => setLocation(e.target.value)}
-                    placeholder="Enter location"
-                  />
-                </InputField>
-                <InputField label="District">
-                  <input
-                    type="text"
-                    className={formInput}
-                    value={district}
-                    onChange={e => setDistrict(e.target.value)}
-                    placeholder="Enter district"
-                  />
-                </InputField>
-              </>
-            ) : null}
 
             <InputField label="Captured Image">
               <div className="flex flex-col gap-3">

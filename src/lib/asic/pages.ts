@@ -67,7 +67,6 @@ function getEffectiveSectionAccessInner(
   if (section === 'account') {
     if (portal === 'admin' && isHqAdminStaff(user)) return 'write';
     if (portal === 'branch' && (user.role === 'staff' || user.role === 'branch_manager')) return 'write';
-    if (portal === 'warehouse' && user.role.startsWith('warehouse_')) return 'write';
     if (portal === 'delivery' && user.role.startsWith('delivery')) return 'write';
     return 'none';
   }

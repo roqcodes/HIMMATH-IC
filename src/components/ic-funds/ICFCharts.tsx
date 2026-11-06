@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { fmtLedgerAed } from '@/lib/icFunds/format';
+import { fmtLedgerAed, FmtLedgerAed } from '@/lib/icFunds/format';
 import { icfCard, icfLabel } from '@/components/ic-funds/ui';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 
@@ -164,7 +164,7 @@ export function ICFRankingList({
                     d.name
                   )}
                 </span>
-                <span className="shrink-0 font-mono tabular-nums">{fmtLedgerAed(d.amount)}</span>
+                <span className="shrink-0 font-mono tabular-nums"><FmtLedgerAed amount={d.amount} /></span>
               </div>
               <div className="h-1 w-full overflow-hidden rounded-full bg-slate-100">
                 <div className="h-full rounded-full bg-slate-800" style={{ width: `${Math.max(d.percentage, 2)}%` }} />

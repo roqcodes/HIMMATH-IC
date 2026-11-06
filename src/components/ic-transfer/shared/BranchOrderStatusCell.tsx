@@ -33,6 +33,7 @@ import {
   IconCheck,
   IconX,
 } from './orderWorkflow';
+import { DealInvoiceIconButtons } from '@/components/ic-transfer/invoice/DealInvoiceButtons';
 
 type Props = {
   sale: ICSale;
@@ -255,6 +256,7 @@ export function BranchOrderWorkflowActions({
     return (
       <div className="flex flex-row flex-wrap items-center justify-center gap-1.5">
         {viewButton}
+        <DealInvoiceIconButtons sale={sale} />
         {actionButtons}
       </div>
     );

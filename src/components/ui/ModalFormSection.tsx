@@ -24,11 +24,6 @@ export default function ModalFormSection({
         <h3 className="text-sm font-semibold tracking-tight text-slate-900 dark:text-[var(--theme-text)]">
           {title}
         </h3>
-        {description ? (
-          <p className="mt-0.5 text-xs leading-relaxed text-slate-500 dark:text-[var(--theme-text-secondary)]">
-            {description}
-          </p>
-        ) : null}
       </header>
       <div className={`flex flex-col gap-3 ${contentClassName}`}>{children}</div>
     </section>

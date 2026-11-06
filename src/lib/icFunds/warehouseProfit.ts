@@ -66,12 +66,20 @@ export type ICWarehousePLLine = {
   marginPct: number;
   settlementMode: 'cash' | 'metal';
   metalWeightG?: number;
-  bookedCurrency?: 'AED';
+  bookedCurrency?: 'AED' | 'INR';
 };
 
 export type ICWarehousePLWarehouseSummary = {
   warehouseId: string;
   warehouseName: string;
+  openingUnits: number;
+  unitsIn: number;
+  unitsOut: number;
+  closingUnits: number;
+  openingMetalG: number;
+  metalInG: number;
+  metalOutG: number;
+  closingMetalG: number;
   purchaseUnits: number;
   purchaseCost: number;
   weightedAvgRate: number;
@@ -205,4 +213,64 @@ export function resolveSaleMarginFromPool(
   pool: RemainingStockPool,
 ): SaleMarginResult {
   return computeSaleMargin(sale, { totalUnits: pool.units, totalCost: pool.cost });
+}
+
+export function icUnitStockAt(events: WarehouseInventoryEvent[], beforeMs: number | null): number {
+  if (beforeMs == null) return 0;
+  const filtered = events.filter(e => e.at < beforeMs);
+  if (filtered.length === 0) return 0;
+  return simulateWarehouseInventory(filtered).pool.units;
+}
+
+export function icUnitStockThrough(events: WarehouseInventoryEvent[], throughMs: number | null): number {
+  const filtered = throughMs == null ? events : events.filter(e => e.at <= throughMs);
+  if (filtered.length === 0) return 0;
+  return simulateWarehouseInventory(filtered).pool.units;
+}
+
+export function sumIcUnitsInPeriod(
+  events: WarehouseInventoryEvent[],
+  periodStartMs: number | null,
+  periodEndMs: number | null,
+): { unitsIn: number; unitsOut: number } {
+  let unitsIn = 0;
+  let unitsOut = 0;
+  for (const event of events) {
+    if (periodStartMs != null && event.at < periodStartMs) continue;
+    if (periodEndMs != null && event.at > periodEndMs) continue;
+    if (event.kind === 'purchase') {
+      unitsIn += event.units;
+    } else {
+      unitsOut += getDeliveredUnits(event.units, event.collectedUnits, 'completed');
+    }
+  }
+  return { unitsIn, unitsOut };
+}
+
+export type MetalWeightEvent = { at: number; grams: number };
+
+export function metalStockAt(events: MetalWeightEvent[], beforeMs: number | null): number {
+  if (beforeMs == null) return 0;
+  return events.filter(e => e.at < beforeMs).reduce((s, e) => s + e.grams, 0);
+}
+
+export function metalMovementInPeriod(
+  events: MetalWeightEvent[],
+  periodStartMs: number | null,
+  periodEndMs: number | null,
+): { metalInG: number; metalOutG: number } {
+  let metalInG = 0;
+  let metalOutG = 0;
+  for (const event of events) {
+    if (periodStartMs != null && event.at < periodStartMs) continue;
+    if (periodEndMs != null && event.at > periodEndMs) continue;
+    if (event.grams > 0) metalInG += event.grams;
+    else if (event.grams < 0) metalOutG += Math.abs(event.grams);
+  }
+  return { metalInG, metalOutG };
+}
+
+export function metalStockThrough(events: MetalWeightEvent[], throughMs: number | null): number {
+  const filtered = throughMs == null ? events : events.filter(e => e.at <= throughMs);
+  return filtered.reduce((s, e) => s + e.grams, 0);
 }

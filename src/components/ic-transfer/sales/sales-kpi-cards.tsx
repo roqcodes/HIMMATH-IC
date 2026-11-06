@@ -1,51 +1,22 @@
 'use client';
 
 import React from 'react';
-import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
+import ICTransferDealBookKpiStrips from '@/components/ic-transfer/shared/ICTransferDealBookKpiStrips';
+import type { DealBookPair } from '@/lib/icTransfer/dealBookKpis';
 
-const fmt = (n: number) =>
-  `AED ${n.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-export type SalesKpiStats = {
-  totalOrders: number;
-  totalValue: number;
-  totalUnits: number;
-  totalMetalG: number;
-  metalCount: number;
-  cashCount: number;
-  avgRate: number;
-  pendingCount: number;
-  partialCount: number;
-  pendingVerificationCount: number;
+type Props = {
+  books: DealBookPair;
+  rangeLabel: string;
+  countHint?: string;
 };
 
-export default function SalesKpiCards({ stats }: { stats: SalesKpiStats }) {
+export default function SalesKpiCards({ books, rangeLabel, countHint }: Props) {
   return (
-    <AsicKpiStrip
-      metrics={[
-        {
-          label: 'Sales volume',
-          value: fmt(stats.totalValue),
-          hint: `${stats.cashCount} IC · ${stats.metalCount} metal`,
-        },
-        {
-          label: 'IC units sold',
-          value: stats.totalUnits.toLocaleString(),
-          hint: `Avg ${fmt(stats.avgRate)}`,
-        },
-        {
-          label: 'Metal sold',
-          value: `${stats.totalMetalG.toLocaleString('en-US', { maximumFractionDigits: 4 })} g`,
-          hint: 'In selected range',
-          tone: 'amber',
-        },
-        {
-          label: 'Orders',
-          value: stats.totalOrders.toLocaleString(),
-          hint: `${stats.pendingCount} pending`,
-          tone: 'emerald',
-        },
-      ]}
+    <ICTransferDealBookKpiStrips
+      books={books}
+      rangeLabel={rangeLabel}
+      flow="sale"
+      countHint={countHint}
     />
   );
 }

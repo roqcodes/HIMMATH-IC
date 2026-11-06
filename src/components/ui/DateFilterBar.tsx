@@ -18,6 +18,8 @@ interface DateFilterBarProps {
   customEndDate: string;
   setCustomEndDate: (val: string) => void;
   children?: React.ReactNode;
+  /** Flat layout inside a parent toolbar (no outer card). */
+  embedded?: boolean;
 }
 
 const PRESETS = [
@@ -33,18 +35,26 @@ const STEP_UNITS: { id: DateStepUnit; title: string }[] = [
   { id: 'D', title: 'Day' },
 ];
 
-const presetClass = (active: boolean) =>
-  `inline-flex h-8 min-w-0 items-center justify-center rounded-lg font-semibold tracking-wide shadow-surface-xs transition-colors max-md:flex-1 max-md:px-2 max-md:text-[10px] md:shrink-0 md:px-3.5 md:text-xs ${
+const presetClass = (active: boolean, embedded: boolean) =>
+  `inline-flex h-8 min-w-0 items-center justify-center rounded-md font-medium transition-colors max-md:flex-1 max-md:px-2 max-md:text-[10px] md:shrink-0 md:px-3 md:text-xs ${
     active
-      ? 'bg-red-600 text-white shadow-sm shadow-red-600/25 dark:bg-[var(--theme-accent)] dark:shadow-none'
-      : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-red-50 hover:text-red-700 hover:ring-red-200 dark:bg-[var(--theme-surface-raised)] dark:text-[var(--theme-text-secondary)] dark:ring-[var(--theme-border)] dark:hover:bg-[var(--theme-surface-hover)] dark:hover:text-[var(--theme-accent)] dark:hover:ring-[var(--theme-border-strong)]'
+      ? embedded
+        ? 'bg-slate-900 text-white shadow-sm dark:bg-[var(--theme-text-primary)]'
+        : 'bg-red-600 text-white shadow-sm shadow-red-600/25 dark:bg-[var(--theme-accent)] dark:shadow-none'
+      : embedded
+        ? 'bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 dark:bg-[var(--theme-surface-raised)] dark:text-[var(--theme-text-secondary)] dark:ring-[var(--theme-border)]'
+        : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-red-50 hover:text-red-700 hover:ring-red-200 dark:bg-[var(--theme-surface-raised)] dark:text-[var(--theme-text-secondary)] dark:ring-[var(--theme-border)] dark:hover:bg-[var(--theme-surface-hover)] dark:hover:text-[var(--theme-accent)] dark:hover:ring-[var(--theme-border-strong)]'
   }`;
 
-const stepUnitClass = (active: boolean) =>
-  `flex size-7 shrink-0 items-center justify-center rounded-md text-[10px] font-bold transition-colors md:size-8 md:text-[11px] ${
+const stepUnitClass = (active: boolean, embedded: boolean) =>
+  `flex size-7 shrink-0 items-center justify-center rounded-md text-[10px] font-semibold transition-colors md:size-8 md:text-[11px] ${
     active
-      ? 'bg-red-600 text-white shadow-sm dark:bg-[var(--theme-accent)]'
-      : 'text-slate-500 hover:bg-red-50 hover:text-red-700 dark:text-[var(--theme-text-muted)] dark:hover:bg-[var(--theme-surface-hover)] dark:hover:text-[var(--theme-accent)]'
+      ? embedded
+        ? 'bg-slate-900 text-white dark:bg-[var(--theme-text-primary)]'
+        : 'bg-red-600 text-white shadow-sm dark:bg-[var(--theme-accent)]'
+      : embedded
+        ? 'text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-[var(--theme-text-muted)] dark:hover:bg-[var(--theme-surface-hover)]'
+        : 'text-slate-500 hover:bg-red-50 hover:text-red-700 dark:text-[var(--theme-text-muted)] dark:hover:bg-[var(--theme-surface-hover)] dark:hover:text-[var(--theme-accent)]'
   }`;
 
 export default function DateFilterBar({
@@ -55,6 +65,7 @@ export default function DateFilterBar({
   customEndDate,
   setCustomEndDate,
   children,
+  embedded = false,
 }: DateFilterBarProps) {
   const today = useMemo(() => todayISO(), []);
   const [stepUnit, setStepUnit] = useState<DateStepUnit>('D');
@@ -96,11 +107,17 @@ export default function DateFilterBar({
   };
 
   return (
-    <div className="mb-3 rounded-lg border border-[var(--theme-border-subtle)] bg-[var(--theme-surface)] p-3 shadow-surface-xs">
-      <div className="flex flex-col gap-2.5 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex min-w-0 flex-col gap-2.5 max-md:w-full md:flex-row md:flex-wrap md:items-center">
+    <div
+      className={
+        embedded
+          ? 'min-w-0'
+          : 'mb-3 rounded-lg border border-[var(--theme-border-subtle)] bg-[var(--theme-surface)] p-3 shadow-surface-xs'
+      }
+    >
+      <div className={`flex flex-col gap-2.5 ${embedded ? '' : 'lg:flex-row lg:items-center lg:justify-between'}`}>
+        <div className="flex min-w-0 flex-1 flex-col gap-2.5 max-md:w-full lg:flex-row lg:flex-wrap lg:items-center lg:justify-between">
           <div
-            className="flex min-w-0 items-center gap-1 max-md:w-full md:gap-1.5"
+            className="flex min-w-0 flex-1 items-center justify-start gap-1 max-md:w-full md:gap-1.5"
             role="group"
             aria-label="Date range presets"
           >
@@ -109,7 +126,7 @@ export default function DateFilterBar({
                 key={preset.id}
                 type="button"
                 onClick={() => applyPreset(preset.id)}
-                className={presetClass(dateFilter === preset.id)}
+                className={presetClass(dateFilter === preset.id, embedded)}
                 aria-pressed={dateFilter === preset.id}
               >
                 {preset.label}
@@ -117,7 +134,11 @@ export default function DateFilterBar({
             ))}
 
             <div
-              className="ml-1 flex shrink-0 items-center gap-0.5 rounded-lg border border-red-100 bg-white p-0.5 dark:border-[var(--theme-border)] dark:bg-[var(--theme-surface-raised)]"
+              className={`ml-1 flex shrink-0 items-center gap-0.5 rounded-md border p-0.5 ${
+                embedded
+                  ? 'border-slate-200 bg-slate-50/80 dark:border-[var(--theme-border)] dark:bg-[var(--theme-surface-muted)]'
+                  : 'border-red-100 bg-white dark:border-[var(--theme-border)] dark:bg-[var(--theme-surface-raised)]'
+              }`}
               role="group"
               aria-label="Date step unit"
             >
@@ -126,7 +147,7 @@ export default function DateFilterBar({
                   key={unit.id}
                   type="button"
                   onClick={() => setStepUnit(unit.id)}
-                  className={stepUnitClass(stepUnit === unit.id)}
+                  className={stepUnitClass(stepUnit === unit.id, embedded)}
                   aria-pressed={stepUnit === unit.id}
                   title={unit.title}
                 >
@@ -136,14 +157,14 @@ export default function DateFilterBar({
             </div>
           </div>
 
-          <div className="grid min-w-0 grid-cols-2 gap-2 max-md:w-full md:flex md:flex-row md:items-center md:gap-3">
+          <div className="grid min-w-0 flex-1 grid-cols-2 gap-2 max-md:w-full sm:max-w-md lg:ml-auto lg:justify-items-stretch">
             <DateRangeField label="From" value={from} stepUnit={stepUnit} onChange={handleFromChange} />
             <DateRangeField label="To" value={to} stepUnit={stepUnit} onChange={handleToChange} />
           </div>
         </div>
 
         {children ? (
-          <div className="flex w-full min-w-0 shrink-0 items-center lg:ml-auto lg:w-auto lg:min-w-[240px] lg:max-w-none">
+          <div className="flex w-full min-w-0 shrink-0 items-center justify-end lg:w-auto lg:min-w-[240px]">
             {children}
           </div>
         ) : null}

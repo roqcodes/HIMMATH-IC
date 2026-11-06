@@ -9,6 +9,8 @@ import { syncICCounterpartyFundAccount } from '@/lib/icFunds/icTransferFundSync'
 import { entityCodeSchema, entityCodeConflictMessage } from '@/lib/validations/entityCode';
 import { COUNTERPARTY_SELECT } from '@/lib/counterparties/mapper';
 import { mapICCounterpartyRow } from '@/lib/counterparties/mapper';
+import { normalizeCounterpartyRoles, type CounterpartyRole } from '@/lib/counterparties/roles';
+import { syncCounterpartyAedAgent } from '@/lib/counterparties/aedAgentSync';
 
 function revalidateCounterpartyPaths(slug: string) {
   revalidatePath(`/${slug}/counterparties`);
@@ -54,6 +56,7 @@ export async function saveCounterpartyAction(
     subdivision?: string;
     locality?: string;
     code?: string | null;
+    roles?: CounterpartyRole[];
   },
 ) {
   try {
@@ -62,8 +65,7 @@ export async function saveCounterpartyAction(
       return { success: false, error: access.error };
     }
     const branchId = access.branchId!;
-    const country = data.country?.trim() || '';
-    if (!country) return { success: false, error: 'Country is required.' };
+    const country = data.country?.trim() || null;
 
     const codeResult = entityCodeSchema.safeParse(data.code);
     if (!codeResult.success) {
@@ -71,13 +73,14 @@ export async function saveCounterpartyAction(
     }
     const parsedCode = codeResult.data;
     const status = data.status === 'inactive' ? 'inactive' : 'active';
+    const roles = normalizeCounterpartyRoles(data.roles);
 
     if (data.id) {
       const res = await query(
         `UPDATE ic_counterparties
          SET name = $1, code = $2, phone = $3, email = $4, address = $5, country = $6,
-             subdivision = $7, locality = $8, status = $9
-         WHERE id = $10 AND branch_id = $11
+             subdivision = $7, locality = $8, status = $9, roles = $10
+         WHERE id = $11 AND branch_id = $12
          RETURNING *`,
         [
           data.name.trim(),
@@ -89,11 +92,17 @@ export async function saveCounterpartyAction(
           data.subdivision?.trim() || null,
           data.locality?.trim() || null,
           status,
+          roles,
           data.id,
           branchId,
         ],
       );
       if (res.rowCount === 0) return { success: false, error: 'Counterparty not found' };
+      await syncCounterpartyAedAgent({ query }, {
+        counterpartyId: data.id,
+        name: data.name.trim(),
+        hasAgentRole: roles.includes('agent'),
+      });
       await syncICCounterpartyFundAccount(data.id);
       revalidateCounterpartyPaths(slug);
       return { success: true, id: data.id };
@@ -102,8 +111,8 @@ export async function saveCounterpartyAction(
     const id = crypto.randomUUID();
     await query(
       `INSERT INTO ic_counterparties (
-         id, branch_id, name, code, phone, email, address, country, subdivision, locality, status
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+         id, branch_id, name, code, phone, email, address, country, subdivision, locality, status, roles
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [
         id,
         branchId,
@@ -116,8 +125,14 @@ export async function saveCounterpartyAction(
         data.subdivision?.trim() || null,
         data.locality?.trim() || null,
         status,
+        roles,
       ],
     );
+    await syncCounterpartyAedAgent({ query }, {
+      counterpartyId: id,
+      name: data.name.trim(),
+      hasAgentRole: roles.includes('agent'),
+    });
     await syncICCounterpartyFundAccount(id);
     revalidateCounterpartyPaths(slug);
     return { success: true, id };

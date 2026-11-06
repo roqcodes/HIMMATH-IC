@@ -71,7 +71,6 @@ function SectionCard({
     <section className={`rounded-lg border border-slate-200/90 bg-white ${className}`}>
       <div className="border-b border-slate-100 px-4 py-3 sm:px-5">
         <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">{title}</p>
-        {description ? <p className="mt-1 text-xs leading-relaxed text-slate-500">{description}</p> : null}
       </div>
       <div className="px-4 py-4 sm:px-5">{children}</div>
     </section>
@@ -344,9 +343,6 @@ export default function OrderDetailsModal({
 
               <div className="rounded-lg border border-slate-200/90 bg-white p-4 sm:p-5">
                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Delivered units</p>
-                <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                  Enter how many units you delivered for this stop.
-                </p>
                 <div className="mt-3">
                   <label htmlFor="delivered-units" className="sr-only">
                     Delivered units
@@ -391,7 +387,6 @@ export default function OrderDetailsModal({
             <div className="flex min-w-0 flex-col gap-5 lg:border-l lg:border-slate-100 lg:pl-8">
               <div className="flex h-full min-h-0 flex-col rounded-lg border border-slate-200/90 bg-white p-4 sm:p-5">
                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Payment proof</p>
-                <p className="mt-1 text-xs leading-relaxed text-slate-500">Attach proof of payment if available.</p>
                 <div className="mt-3 flex flex-1 flex-col justify-center">
                   <ImageDropZone
                     imageUrl={deliveryImageUrl}

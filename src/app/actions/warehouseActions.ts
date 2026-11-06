@@ -565,14 +565,14 @@ export async function completeDeliveryWithUnits(
             sub_customer_id, sub_customer_name,
             entered_by, entered_by_name, entered_by_user_id,
             warehouse_id, transaction_type, units, unit_rate, aed_amount,
-            address, location, district, image_url, service_charge, priority,
+            address, image_url, service_charge, priority,
             delivery_agent_id, order_status, payment_status, derived_from_sale_id, collected_units,
             bank, fulfillment_handler,
             status_updated_at, status_updated_by
           ) VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
             $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
-            $25, $26, CURRENT_TIMESTAMP, $27
+            CURRENT_TIMESTAMP, $25
           )
           RETURNING id`,
           [
@@ -590,8 +590,6 @@ export async function completeDeliveryWithUnits(
             unitRate,
             remainderFinancials.aedAmount,
             order.address,
-            order.location || null,
-            order.district || null,
             order.image_url,
             remainderFinancials.serviceCharge,
             order.priority || 'Normal',

@@ -1,7 +1,7 @@
 'use client';
 
 import { accountTypeLabel } from '@/lib/icFunds/constants';
-import { fmtLedgerAed, icfLedgerColumnLabel } from '@/lib/icFunds/format';
+import { fmtLedgerAed, icfLedgerColumnLabel, FmtLedgerAed } from '@/lib/icFunds/format';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import { icfTableWrap, icfTd, icfTh, icfThAlign, icfTheadRow } from '@/components/ic-funds/ui';
 import type { ICFundAccount, ICFundTrialBalanceLine } from '@/types';
@@ -81,17 +81,17 @@ export default function TrialBalanceReport({
                 <td className={icfTd} colSpan={2}>
                   Totals (posted)
                 </td>
-                <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(sum(l => l.openingDebit ?? 0))}</td>
-                <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(sum(l => l.openingCredit ?? 0))}</td>
-                <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(sum(l => l.periodDebit ?? 0))}</td>
-                <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(sum(l => l.periodCredit ?? 0))}</td>
-                <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(sum(l => l.closingDebit ?? l.debit))}</td>
-                <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(sum(l => l.closingCredit ?? l.credit))}</td>
+                <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={sum(l => l.openingDebit ?? 0)} /></td>
+                <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={sum(l => l.openingCredit ?? 0)} /></td>
+                <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={sum(l => l.periodDebit ?? 0)} /></td>
+                <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={sum(l => l.periodCredit ?? 0)} /></td>
+                <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={sum(l => l.closingDebit ?? l.debit)} /></td>
+                <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={sum(l => l.closingCredit ?? l.credit)} /></td>
                 <td className={`${icfTd} text-right font-mono tabular-nums text-amber-700`}>
-                  {fmtLedgerAed(sum(l => l.pendingDebit ?? 0))}
+                  <FmtLedgerAed amount={sum(l => l.pendingDebit ?? 0)} />
                 </td>
                 <td className={`${icfTd} text-right font-mono tabular-nums text-amber-700`}>
-                  {fmtLedgerAed(sum(l => l.pendingCredit ?? 0))}
+                  <FmtLedgerAed amount={sum(l => l.pendingCredit ?? 0)} />
                 </td>
               </tr>
             </tfoot>

@@ -1,4 +1,5 @@
 import React from 'react';
+import CurrencyAmount from '@/components/currency/CurrencyAmount';
 import type { CurrencyCode } from '@/lib/currency';
 
 export type Currency = CurrencyCode;
@@ -20,12 +21,7 @@ function formatNumber(amount: number, fractionDigits: Intl.NumberFormatOptions, 
 }
 
 export function formatAED(amount: number, showPlus = false): React.ReactNode {
-  const numStr = formatNumber(
-    amount,
-    { maximumFractionDigits: 4, minimumFractionDigits: 0 },
-    showPlus,
-  );
-  return React.createElement(React.Fragment, null, numStr);
+  return React.createElement(CurrencyAmount, { currency: 'AED', amount, showPlus });
 }
 
 export function formatAEDStr(amount: number, showPlus = false): string {

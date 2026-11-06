@@ -43,11 +43,6 @@ function ModalSection({
     <section className={`${asicCard} p-4`}>
       <header className="mb-3 border-b border-slate-100 pb-2.5 dark:border-[var(--theme-border-subtle)]">
         <h3 className="text-sm font-semibold text-slate-900 dark:text-[var(--theme-text)]">{title}</h3>
-        {description ? (
-          <p className="mt-0.5 text-xs leading-relaxed text-slate-500 dark:text-[var(--theme-text-secondary)]">
-            {description}
-          </p>
-        ) : null}
       </header>
       <div className={asicFormGrid}>{children}</div>
     </section>

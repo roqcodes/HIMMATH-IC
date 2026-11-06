@@ -8,7 +8,7 @@ import {
   IC_FUND_VOUCHER_LABELS,
   isPLAccountType,
 } from '@/lib/icFunds/constants';
-import { fmtICAmount, fmtICDate, fmtLedgerAed, icfLedgerColumnLabel } from '@/lib/icFunds/format';
+import { fmtICAmount, fmtICDate, fmtLedgerAed, icfLedgerColumnLabel, FmtLedgerAed } from '@/lib/icFunds/format';
 import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
 import { computePlKpis } from '@/lib/icFunds/kpiMetrics';
 import { icfCard, icfInput, icfLabel, icfTableWrap, icfTd, icfTh, icfThAlign, icfTheadRow, icfAccountLink } from '@/components/ic-funds/ui';
@@ -21,6 +21,8 @@ import { BalanceWithPendingCell } from '@/components/ic-funds/BalanceWithPending
 import { plDisplayBalance, plPeriodMovement } from '@/lib/icFunds/accountBalance';
 import { resolveAccountDetailHref } from '@/lib/icFunds/accountNavigation';
 import { computeDealProfit } from '@/lib/icTransfer/dealProfit';
+import { formatMetalPlKpi } from '@/lib/icTransfer/inventoryKpiMetrics';
+import { ledgerAedNode } from '@/lib/icFunds/formatDisplay';
 import { useApp } from '@/context/AppContext';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { logClientActionError } from '@/lib/errors/actionError';
@@ -36,7 +38,7 @@ const PL_TYPE_ORDER: ICFundAccountType[] = ['income', 'profit', 'expense', 'd_ex
 function AmountCell({ n, danger }: { n: number; danger?: boolean }) {
   return (
     <td className={`${icfTd} text-right font-mono tabular-nums ${danger || n < 0 ? 'text-red-600' : ''}`}>
-      {n === 0 ? '—' : fmtLedgerAed(n)}
+      <FmtLedgerAed amount={n} />
     </td>
   );
 }
@@ -150,15 +152,18 @@ export default function PLScreen({
     () => [
       {
         label: 'IC gross profit',
-        value: fmtLedgerAed(dealPl.cashGrossProfitAed),
+        value: ledgerAedNode(dealPl.cashGrossProfitAed),
+        valueTitle: fmtLedgerAed(dealPl.cashGrossProfitAed),
         hint: 'Operational WAC on cash IC sales',
         tone: dealPl.cashGrossProfitAed >= 0 ? ('emerald' as const) : ('red' as const),
       },
       {
         label: 'Metal P&L',
-        value: fmtLedgerAed(dealPl.metalProfitAed),
-        hint: `${dealPl.metalSoldG.toLocaleString(undefined, { maximumFractionDigits: 2 })} g · ${dealPl.metalSaleCount} sales`,
-        tone: dealPl.metalProfitAed >= 0 ? ('emerald' as const) : ('red' as const),
+        ...formatMetalPlKpi({
+          metalProfitAed: dealPl.metalProfitAed,
+          metalProfitInr: dealPl.metalProfitInr,
+          rangeLabel: `${dealPl.metalSoldG.toLocaleString(undefined, { maximumFractionDigits: 2 })} g · ${dealPl.metalSaleCount} sales`,
+        }),
       },
     ],
     [dealPl],
@@ -324,7 +329,7 @@ export default function PLScreen({
                             accounts={bundle.accounts}
                           />
                         </td>
-                        <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(row.amount)}</td>
+                        <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={row.amount} /></td>
                         <td className={icfTd}>
                           <VoucherUserCell voucher={row} />
                         </td>

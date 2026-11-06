@@ -39,11 +39,7 @@ export default function ICFundsReportsChrome({
   if (onHub) {
     return (
       <>
-        <AsicPageHeader
-          title="Financial reports"
-          subtitle="HQ ledger (AED). Pick a report, then set the period on the next screen."
-          meta={meta}
-        />
+        <AsicPageHeader title="Financial reports" meta={meta} />
         {children}
       </>
     );

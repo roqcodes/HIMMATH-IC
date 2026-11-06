@@ -18,6 +18,10 @@ type Props = {
   inputClassName?: string;
   className?: string;
   onFocusRefresh?: () => void;
+  /** When false, hides the detail line under the input (e.g. stock shown in the field label instead). */
+  showDetailLine?: boolean;
+  /** Inside the input, before the search icon. */
+  inputTrailing?: React.ReactNode;
 };
 
 /** Searchable picker that commits a stable entity id (supplier, warehouse, etc.). */
@@ -30,6 +34,8 @@ export default function EntitySearchSelect({
   inputClassName = asicInput,
   className = 'w-full',
   onFocusRefresh,
+  showDetailLine = true,
+  inputTrailing,
 }: Props) {
   const selected = useMemo(
     () => options.find(o => o.value === selectedId) ?? null,
@@ -66,13 +72,16 @@ export default function EntitySearchSelect({
         className="w-full"
         disabled={disabled}
         onFocus={onFocusRefresh}
+        trailing={inputTrailing}
       />
-      <p
-        className={`mt-1 min-h-[1.125rem] text-xs text-slate-500 dark:text-[var(--theme-text-secondary)] ${selected?.detail ? '' : 'invisible'}`}
-        aria-hidden={!selected?.detail}
-      >
-        {selected?.detail ?? '\u00a0'}
-      </p>
+      {showDetailLine ? (
+        <p
+          className={`mt-1 min-h-[1.125rem] text-xs text-slate-500 dark:text-[var(--theme-text-secondary)] ${selected?.detail ? '' : 'invisible'}`}
+          aria-hidden={!selected?.detail}
+        >
+          {selected?.detail ?? '\u00a0'}
+        </p>
+      ) : null}
     </div>
   );
 }

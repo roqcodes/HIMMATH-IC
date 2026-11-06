@@ -1,6 +1,7 @@
-import type { Branch, ICPurchase, ICSale, ICRateGroup, ICWarehouse, User } from '@/types';
+import type { Branch, ICPurchase, ICSale, ICRateGroup, ICWarehouse, User, ICSupplier } from '@/types';
 import { HQ_IC_FUNDS_BRANCH_ID } from '@/lib/icFunds/hqBranch';
 import { warehouseShortSlug } from '@/lib/icTransfer/warehouseSlug';
+import { filterCounterpartiesByRole } from '@/lib/counterparties/roles';
 
 export type ICTransferPortalMode = 'admin' | 'branch';
 
@@ -49,6 +50,34 @@ export function filterSuppliersForBranchPortal<T extends { branchId?: string | n
   _branchId?: string,
 ): T[] {
   return filterSuppliersForAdminPortal(suppliers);
+}
+
+function scopeCounterparties<T extends ICSupplier>(
+  list: T[],
+  branchId?: string,
+): T[] {
+  return branchId ? filterSuppliersForBranchPortal(list, branchId) : filterSuppliersForAdminPortal(list);
+}
+
+export function filterCounterpartiesForPurchase<T extends ICSupplier>(
+  list: T[],
+  branchId?: string,
+): T[] {
+  return filterCounterpartiesByRole(scopeCounterparties(list, branchId), 'supplier');
+}
+
+export function filterCounterpartiesForSales<T extends ICSupplier>(
+  list: T[],
+  branchId?: string,
+): T[] {
+  return filterCounterpartiesByRole(scopeCounterparties(list, branchId), 'party');
+}
+
+export function filterCounterpartiesForAgent<T extends ICSupplier>(
+  list: T[],
+  branchId?: string,
+): T[] {
+  return filterCounterpartiesByRole(scopeCounterparties(list, branchId), 'agent');
 }
 
 export function filterPurchasesForBranchPortal(

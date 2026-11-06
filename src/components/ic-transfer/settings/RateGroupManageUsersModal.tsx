@@ -631,7 +631,6 @@ function MemberPanel({
         <div className="flex items-center justify-between gap-2">
           <div>
             <h4 className="text-sm font-bold text-slate-900">{title}</h4>
-            <p className="text-[11px] text-slate-500">{subtitle}</p>
           </div>
           <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500">
             {items.length}

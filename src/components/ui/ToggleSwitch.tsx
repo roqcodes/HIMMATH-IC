@@ -30,7 +30,6 @@ export default function ToggleSwitch({
     >
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold text-slate-800">{label}</p>
-        {hint ? <p className="mt-0.5 line-clamp-3 break-words text-xs leading-snug text-slate-500">{hint}</p> : null}
       </div>
       <button
         type="button"

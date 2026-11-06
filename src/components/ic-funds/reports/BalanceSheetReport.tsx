@@ -1,6 +1,6 @@
 'use client';
 
-import { fmtLedgerAed } from '@/lib/icFunds/format';
+import { fmtLedgerAed, FmtLedgerAed } from '@/lib/icFunds/format';
 import type { BalanceSheetPresentation } from '@/lib/icFunds/reportPresentation';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import { icfTd } from '@/components/ic-funds/ui';
@@ -48,13 +48,13 @@ function Column({
                     line.label
                   )}
                 </td>
-                <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(line.amount)}</td>
+                <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={line.amount} /></td>
               </tr>
             ))
           )}
           <tr className="bg-slate-50 font-medium">
             <td className={icfTd}>{totalLabel}</td>
-            <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(total)}</td>
+            <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={total} /></td>
           </tr>
         </tbody>
       </table>
@@ -111,7 +111,7 @@ export default function BalanceSheetReport({
               <tr className="bg-slate-50 font-semibold">
                 <td className={icfTd}>Total liabilities &amp; equity</td>
                 <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                  {fmtLedgerAed(detail.totalLiabilitiesEquity)}
+                  <FmtLedgerAed amount={detail.totalLiabilitiesEquity} />
                 </td>
               </tr>
             </tbody>
@@ -124,7 +124,7 @@ export default function BalanceSheetReport({
           : `Out of balance by ${fmtLedgerAed(outOfBalance)} — review opening balances or post a journal adjustment.`}
       </p>
       <p className="px-2.5 pb-2 text-[11px] text-slate-500">
-        IC Inventory (personal ledger) holds unsold purchase value at cost until COGS is posted on sale completion.
+        IC Stock holds unsold purchase value at cost until Cost of IC Sold is posted on sale completion.
       </p>
     </div>
   );

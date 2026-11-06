@@ -18,6 +18,7 @@ export const IC_TRANSFER_NAV: ICTransferNavItem[] = [
     path: '/settings',
     children: [
       { id: 'suppliers', label: 'Counterparties', path: '/counterparties' },
+      { id: 'agents', label: 'AED agents', path: '/settings/agents' },
       { id: 'rates', label: 'Rates', path: '/settings/rates' },
     ],
   },

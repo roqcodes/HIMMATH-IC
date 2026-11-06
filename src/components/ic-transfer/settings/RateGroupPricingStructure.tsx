@@ -90,18 +90,13 @@ function FlatRatePanel({
 }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white px-4 py-4">
-      {caption ? (
-        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{caption}</p>
-      ) : null}
-      <div className={caption ? 'mt-2' : undefined}>
-        <RateValue
-          saleRate={saleRate}
-          conversionRate={conversionRate}
-          currency={currency}
-          convertedRateOnly={convertedRateOnly}
-          size="lg"
-        />
-      </div>
+      <RateValue
+        saleRate={saleRate}
+        conversionRate={conversionRate}
+        currency={currency}
+        convertedRateOnly={convertedRateOnly}
+        size="lg"
+      />
     </div>
   );
 }
@@ -273,13 +268,9 @@ export default function RateGroupPricingStructure({
           conversionRate={fallback.conversionRate}
           currency={DISPLAY_CURRENCY}
           convertedRateOnly={convertedRateOnly}
-          caption={`Same rate for Transfer, CDM, By Hand, and NRE`}
         />
       ) : config.scope === 'all_types' && config.kind === 'slab' && config.common ? (
         <div className="space-y-2">
-          <p className="text-xs text-slate-500">
-            Shared volume tiers for every transaction type.
-          </p>
           <SlabLadder
             pricing={config.common}
             currency={DISPLAY_CURRENCY}
@@ -289,13 +280,6 @@ export default function RateGroupPricingStructure({
         </div>
       ) : config.scope === 'per_type' ? (
         <div className="space-y-2">
-          <p className="text-xs text-slate-500">
-            {hasMixedPerTypePricing(config)
-              ? 'Flat and slab rates differ by transaction type.'
-              : config.kind === 'slab'
-                ? 'Separate volume tiers for each transaction type.'
-                : 'A different flat rate for each transaction type.'}
-          </p>
           <PerTypeGrid
             config={config}
             currency={DISPLAY_CURRENCY}

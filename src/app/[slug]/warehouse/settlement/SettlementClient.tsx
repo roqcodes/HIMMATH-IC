@@ -31,7 +31,7 @@ import { isWarehouseRejected, isWarehouseDirectDeliverOrder } from '@/lib/icTran
 import { comparePriority, highPriorityRowClass, highPriorityCardClass } from '@/lib/icTransfer/orderPriority';
 import { formatUnits, getDeliveredUnits, getRemainingUnits, isSaleCompleted } from '@/lib/icTransfer/saleUnits';
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
-import WarehouseKpiGrid from '@/components/warehouse/WarehouseKpiGrid';
+import WarehouseOrderKpiGrid from '@/components/warehouse/WarehouseOrderKpiGrid';
 import { computeWarehouseSettlementKpis } from '@/lib/warehouse/kpiMetrics';
 import { warehouseOrderMatchesSearch } from '@/lib/warehouse/orderSearch';
 import { resolveDateRange } from '@/lib/warehouseDateUtils';
@@ -321,7 +321,7 @@ export default function SettlementClient({ branchSlug }: { branchSlug: string })
         setCustomEndDate={setCustomEndDate}
       />
 
-      <WarehouseKpiGrid metrics={kpiMetrics} />
+      <WarehouseOrderKpiGrid metrics={kpiMetrics} />
 
       <div className="flex flex-col gap-3">
         <SalesTableShell

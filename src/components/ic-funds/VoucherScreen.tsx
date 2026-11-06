@@ -13,7 +13,7 @@ import { VOUCHER_LIST_PAGE_SIZE } from '@/lib/icFunds/voucherQueries';
 import { ActionError, logClientActionError } from '@/lib/errors/actionError';
 import { trackLoading } from '@/lib/loadingBar';
 import { allowedAccountTypesForVoucher, voucherFieldLabels } from '@/lib/icFunds/voucherRules';
-import { fmtICDate, fmtLedgerAed, icfLedgerColumnLabel } from '@/lib/icFunds/format';
+import { fmtICDate, fmtLedgerAed, icfLedgerColumnLabel, FmtLedgerAed } from '@/lib/icFunds/format';
 import { parseFormAmount } from '@/lib/parseFormAmount';
 import { validateVoucherCurrencyPolicy } from '@/lib/icFunds/currencyPolicy';
 import { icfBtnGhost, icfBtnPrimary, icfCard, icfInput, icfLabel, icfTable, icfTableWrap, icfTd, icfTh, icfThAlign, icfTheadRow } from '@/components/ic-funds/ui';
@@ -457,7 +457,7 @@ export default function VoucherScreen({
                         </td>
                       </>
                     )}
-                    <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtLedgerAed(row.amount)}</td>
+                    <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={row.amount} /></td>
                     <td className={icfTd}><VoucherUserCell voucher={row} /></td>
                     <td className={`${icfTd} max-w-[14rem] truncate text-slate-500`}>{row.notes || '—'}</td>
                     <td className={`${icfTd} text-right`}>

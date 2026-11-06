@@ -296,9 +296,7 @@ export default function Topbar({ variant = 'default' }: { variant?: 'default' | 
       ? '/admin/account'
       : parsedPath.portal === 'branch' && parsedPath.branchSlug
         ? `/branch/${parsedPath.branchSlug}/account`
-        : parsedPath.portal === 'warehouse' && parsedPath.branchSlug
-          ? `/warehouse/${parsedPath.branchSlug}/account`
-          : parsedPath.portal === 'delivery' && parsedPath.branchSlug
+        : parsedPath.portal === 'delivery' && parsedPath.branchSlug
             ? `/delivery/${parsedPath.branchSlug}/account`
             : null;
 

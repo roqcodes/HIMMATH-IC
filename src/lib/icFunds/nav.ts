@@ -11,14 +11,18 @@ export type ICFundsReportId =
   | 'all-vouchers'
   | 'cash-bank'
   | 'statement'
+  | 'inr-statement'
   | 'd-expenses'
   | 'profit-loss'
+  | 'metal-pl'
   | 'warehouse-pl'
+  | 'warehouse-metal'
   | 'balance-sheet'
   | 'receivables'
   | 'trial-balance'
   | 'fund-trades'
-  | 'metal-trades';
+  | 'metal-trades'
+  | 'metal-agent-trades';
 
 export type ICFundsNavItem = {
   id: ICFundsSectionId;
@@ -37,15 +41,19 @@ export const IC_FUNDS_NAV: readonly ICFundsNavItem[] = [
 export const IC_FUNDS_REPORTS: ReadonlyArray<{ id: ICFundsReportId; label: string }> = [
   { id: 'all-vouchers', label: 'Day book' },
   { id: 'cash-bank', label: 'Cash & bank book' },
-  { id: 'statement', label: 'Account ledger' },
-  { id: 'd-expenses', label: 'Direct costs register' },
+  { id: 'statement', label: 'Statement (AED)' },
+  { id: 'inr-statement', label: 'Statement (INR)' },
+  { id: 'd-expenses', label: 'Expense register' },
   { id: 'receivables', label: 'Receivables & payables' },
-  { id: 'profit-loss', label: 'Profit & loss' },
-  { id: 'warehouse-pl', label: 'Warehouse gross profit' },
+  { id: 'profit-loss', label: 'Profit & loss (AED)' },
+  { id: 'metal-pl', label: 'Metal P&L (INR)' },
+  { id: 'warehouse-pl', label: 'Warehouse IC' },
+  { id: 'warehouse-metal', label: 'Warehouse metal' },
   { id: 'balance-sheet', label: 'Balance sheet' },
   { id: 'trial-balance', label: 'Trial balance' },
-  { id: 'fund-trades', label: 'Fund purchase & sales' },
-  { id: 'metal-trades', label: 'Metal purchase & sales' },
+  { id: 'fund-trades', label: 'Fund register' },
+  { id: 'metal-trades', label: 'Metal register (INR)' },
+  { id: 'metal-agent-trades', label: 'Metal via AED agent' },
 ];
 
 const SECTION_IDS = new Set(IC_FUNDS_NAV.map(item => item.id));

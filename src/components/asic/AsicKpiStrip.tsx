@@ -5,7 +5,9 @@ import { icfCard } from '@/components/ic-funds/ui';
 
 export type AsicKpiMetric = {
   label: string;
-  value: string;
+  value: React.ReactNode;
+  /** Plain-text tooltip for value (defaults to string values only). */
+  valueTitle?: string;
   hint?: string;
   tone?: 'default' | 'amber' | 'emerald' | 'indigo' | 'slate' | 'red';
 };
@@ -19,7 +21,8 @@ const toneClass: Record<NonNullable<AsicKpiMetric['tone']>, string> = {
   red: 'text-red-700 dark:text-red-400',
 };
 
-function MetricCell({ label, value, hint, tone = 'default' }: AsicKpiMetric) {
+function MetricCell({ label, value, valueTitle, hint, tone = 'default' }: AsicKpiMetric) {
+  const valueTooltip = valueTitle ?? (typeof value === 'string' ? value : undefined);
   return (
     <div className="min-w-0 overflow-hidden px-3 py-2.5">
       <p
@@ -30,18 +33,10 @@ function MetricCell({ label, value, hint, tone = 'default' }: AsicKpiMetric) {
       </p>
       <p
         className={`mt-0.5 truncate text-lg font-bold tabular-nums leading-none sm:text-xl ${toneClass[tone]}`}
-        title={value}
+        title={valueTooltip}
       >
         {value}
       </p>
-      {hint ? (
-        <p
-          className="mt-0.5 line-clamp-2 break-words text-[11px] leading-snug text-slate-400 dark:text-[var(--theme-text-muted)]"
-          title={hint}
-        >
-          {hint}
-        </p>
-      ) : null}
     </div>
   );
 }

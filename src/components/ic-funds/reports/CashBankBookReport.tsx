@@ -1,6 +1,6 @@
 'use client';
 
-import { fmtLedgerAed, icfLedgerColumnLabel } from '@/lib/icFunds/format';
+import { fmtLedgerAed, FmtLedgerAed, icfLedgerColumnLabel } from '@/lib/icFunds/format';
 import type { AccountPeriodLedger } from '@/lib/icFunds/accountPeriodBalance';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import { BalanceWithPending } from '@/components/ic-funds/BalanceWithPending';
@@ -67,7 +67,7 @@ export default function CashBankBookReport({
                       <BalanceWithPending balance={row.closing} pendingBalance={row.pendingBalance} />
                     </td>
                     <td className={`${icfTd} text-right font-mono tabular-nums text-amber-700`}>
-                      {Math.abs(row.pendingBalance) > 0.005 ? fmtLedgerAed(row.pendingBalance) : '—'}
+                      {Math.abs(row.pendingBalance) > 0.005 ? <FmtLedgerAed amount={row.pendingBalance} /> : '—'}
                     </td>
                   </tr>
                 );

@@ -1,7 +1,15 @@
 import { isDateInRange, type DateFilterRange } from '@/lib/dateFilterRange';
 import { isVoidIcSaleOrderStatus } from '@/lib/icFunds/icTransferReportFilters';
-import { allocateLotAmount, computeMetalLotProfit } from '@/lib/icTransfer/metalInventory';
+import { computeMetalLotProfit } from '@/lib/icTransfer/metalInventory';
 import {
+  allocateMetalLotCostAed,
+  allocateMetalLotCostInr,
+} from '@/lib/icTransfer/metalLotCost';
+import { resolveSaleInrDisplay } from '@/lib/icTransfer/metalSettlement';
+import { isMetalAedPayment } from '@/lib/domain/books';
+import {
+  purchaseAedTotal,
+  remainingStockWac,
   simulateWarehouseInventory,
   type WarehouseInventoryEvent,
 } from '@/lib/icFunds/warehouseProfit';
@@ -146,6 +154,23 @@ function computeOneWarehouse(
     });
   }
 
+  for (const s of whSales) {
+    if (!isMetal(s.settlementMode)) continue;
+    if (String(s.orderStatus || '') !== 'completed') continue;
+    if (isMetalAedPayment(s.metalPaymentMethod)) continue;
+    if (!throughEnd(s.statusUpdatedAt || s.createdAt, range)) continue;
+    const units = Number(s.units) || 0;
+    const cost = purchaseAedTotal(units, Number(s.unitRate) || 0, s.aedAmount);
+    if (units <= 0 || cost <= 0) continue;
+    events.push({
+      kind: 'purchase',
+      at: saleMs(s),
+      sortKey: `metal-inr:${s.id}`,
+      units,
+      cost,
+    });
+  }
+
   const cashSalesInPeriod = whSales.filter(
     s => !isMetal(s.settlementMode) && inRange(s.createdAt, range),
   );
@@ -188,20 +213,22 @@ function computeOneWarehouse(
   let metalSaleCount = 0;
   for (const s of whSales) {
     if (!isMetal(s.settlementMode)) continue;
-    if (!inRange(s.createdAt, range)) continue;
+    if (String(s.orderStatus || '') !== 'completed') continue;
+    const saleIso = s.statusUpdatedAt || s.createdAt;
+    if (!inRange(saleIso, range)) continue;
     const lot = s.metalPurchaseId ? lots.get(s.metalPurchaseId) : undefined;
     const saleG = Number(s.metalWeightG) || 0;
-    const lotG = Number(lot?.metalWeightG) || saleG;
     const pl = computeMetalLotProfit({
-      paymentMethod: 'AED',
+      paymentMethod: s.metalPaymentMethod,
+      purchasePaymentMethod: lot?.metalPaymentMethod ?? s.metalPaymentMethod,
       weightG: saleG,
-      purchaseInr: allocateLotAmount(Number(lot?.inrTotal) || 0, saleG, lotG),
-      purchaseAed: allocateLotAmount(Number(lot?.aedTotal) || 0, saleG, lotG),
-      saleInr: Number(s.inrTotal) || 0,
+      purchaseInr: allocateMetalLotCostInr(lot, saleG),
+      purchaseAed: allocateMetalLotCostAed(lot, saleG),
+      saleInr: resolveSaleInrDisplay(s),
       saleAed: Number(s.aedAmount) || 0,
     });
-    metalProfitAed += pl.profitAed;
-    metalProfitInr += pl.profitInr;
+    metalProfitAed += Number(pl.bookedProfitAed) || 0;
+    metalProfitInr += Number(pl.bookedProfitInr) || 0;
     metalSoldG += saleG;
     metalSaleCount += 1;
   }
@@ -216,4 +243,59 @@ function computeOneWarehouse(
     metalSoldG: round4(metalSoldG),
     metalSaleCount,
   };
+}
+
+/** Remaining IC WAC after all IC buys, metal-INR conversions, and IC sales. */
+export function remainingIcStockWac(
+  purchases: ICPurchase[],
+  sales: ICSale[],
+  warehouseId: string,
+): { units: number; rate: number } {
+  const whPurchases = purchases.filter(p => p.warehouseId === warehouseId);
+  const whSales = sales.filter(s => s.warehouseId === warehouseId && isDealSaleActive(s));
+  const events: WarehouseInventoryEvent[] = [];
+  for (const p of whPurchases) {
+    if (isMetal(p.settlementMode)) continue;
+    const units = Number(p.units) || 0;
+    if (units <= 0) continue;
+    events.push({
+      kind: 'purchase',
+      at: purchaseMs(p),
+      sortKey: p.id,
+      units,
+      cost: Number(p.aedTotal) || units * (Number(p.unitRate) || 0),
+    });
+  }
+  for (const s of whSales) {
+    if (isMetal(s.settlementMode)) {
+      if (String(s.orderStatus || '') !== 'completed') continue;
+      if (isMetalAedPayment(s.metalPaymentMethod)) continue;
+      const units = Number(s.units) || 0;
+      const cost = purchaseAedTotal(units, Number(s.unitRate) || 0, s.aedAmount);
+      if (units <= 0 || cost <= 0) continue;
+      events.push({
+        kind: 'purchase',
+        at: saleMs(s),
+        sortKey: `metal-inr:${s.id}`,
+        units,
+        cost,
+      });
+      continue;
+    }
+    const units = Number(s.units) || 0;
+    if (units <= 0) continue;
+    events.push({
+      kind: 'sale',
+      at: saleMs(s),
+      sortKey: s.id,
+      saleId: s.id,
+      units,
+      collectedUnits: s.collectedUnits,
+      unitRate: Number(s.unitRate) || 0,
+      aedAmount: Number(s.aedAmount) || 0,
+      serviceCharge: Number(s.serviceCharge) || 0,
+    });
+  }
+  const { pool } = simulateWarehouseInventory(events);
+  return { units: pool.units, rate: remainingStockWac(pool) };
 }

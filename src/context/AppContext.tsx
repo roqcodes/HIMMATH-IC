@@ -24,6 +24,7 @@ import {
   ICSale,
   ICWarehouseTransaction,
 } from '@/types';
+import type { CounterpartyRole } from '@/lib/counterparties/roles';
 import { getCurrentUserAction, logoutAction } from '@/app/actions/auth';
 import { fetchAsicInitialDataAction, fetchAsicTransactionalDataAction } from '@/app/actions/asicDataActions';
 import { parseAsicPath } from '@/lib/asic/routing';
@@ -124,6 +125,7 @@ interface AppContextType extends AppState {
     subdivision: string,
     locality: string,
     branchId?: string | null,
+    roles?: CounterpartyRole[],
   ) => Promise<boolean>;
   updateICSupplier: (
     id: string,
@@ -137,6 +139,7 @@ interface AppContextType extends AppState {
     country: string,
     subdivision: string,
     locality: string,
+    roles?: CounterpartyRole[],
   ) => Promise<boolean>;
   deleteICSupplier: (id: string) => Promise<boolean>;
   addICWarehouse: (
@@ -506,6 +509,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     subdivision: string,
     locality: string,
     branchId?: string | null,
+    roles?: CounterpartyRole[],
   ) => {
     try {
       const res = await dbAddICSupplierAction(
@@ -521,6 +525,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         locality,
         branchId,
         branchId ? currentSlug ?? undefined : undefined,
+        roles,
       );
       if (res.success && res.data) {
         setState(s => ({ ...s, icSuppliers: [...s.icSuppliers, res.data!] }));
@@ -547,6 +552,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     country: string,
     subdivision: string,
     locality: string,
+    roles?: CounterpartyRole[],
   ) => {
     try {
       const res = await dbUpdateICSupplierAction(
@@ -562,6 +568,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         subdivision,
         locality,
         currentSlug ?? undefined,
+        roles,
       );
       if (res.success && res.data) {
         setState(s => ({ ...s, icSuppliers: s.icSuppliers.map(sup => sup.id === id ? res.data! : sup) }));
@@ -962,9 +969,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 if (w.id !== res.data!.warehouseId) return w;
                 if (res.data!.settlementMode === 'metal') {
                   const grams = res.data!.metalWeightG || 0;
+                  const addUnits = Number(res.data!.units) || 0;
                   return {
                     ...w,
                     currentMetalG: (w.currentMetalG ?? 0) - grams,
+                    currentStock: (w.currentStock ?? 0) + addUnits,
                   };
                 }
                 return w;

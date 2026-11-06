@@ -1,19 +1,24 @@
 'use client';
 
-import { fmtICAmount, fmtICDate, fmtLedgerAed } from '@/lib/icFunds/format';
-import { computeMetalSheetRateAed } from '@/lib/icTransfer/metalSettlement';
+import React from 'react';
+import Link from 'next/link';
+import { fmtICDate, FmtLedgerAed, FmtLedgerAmount, FmtLedgerInr } from '@/lib/icFunds/format';
 import {
   settlementTradeReportSubtitle,
   settlementTradeReportTitle,
+  tradeLineBookAed,
+  tradeLineBookInr,
   type ICSettlementTradeLine,
   type ICSettlementTradeReport,
 } from '@/lib/icFunds/settlementTradeReport';
 import { icfTableWrap, icfTd, icfTh, icfThAlign, icfTheadRow } from '@/components/ic-funds/ui';
 import { ReportAmountCell, ReportCaption } from './reportShared';
 
-function fmtInr(n: number | undefined): string {
+export type SettlementTradeReportVariant = 'fund' | 'metal-inr' | 'metal-agent';
+
+function fmtInr(n: number | undefined): React.ReactNode {
   if (n == null || !Number.isFinite(n) || n === 0) return '—';
-  return `${fmtICAmount(n)} INR`;
+  return <FmtLedgerInr amount={n} />;
 }
 
 function fmtWeightG(n: number | undefined): string {
@@ -37,14 +42,20 @@ function warehouseCell(line: ICSettlementTradeLine) {
 function TradeTable({
   title,
   rows,
-  isMetal,
+  variant,
   emptyMessage,
 }: {
   title: string;
   rows: ICSettlementTradeLine[];
-  isMetal: boolean;
+  variant: SettlementTradeReportVariant;
   emptyMessage: string;
 }) {
+  const isFund = variant === 'fund';
+  const isMetalInr = variant === 'metal-inr';
+  const isAgent = variant === 'metal-agent';
+
+  const colCount = isFund ? 9 : isMetalInr ? 10 : 9;
+
   return (
     <div className="border-b border-slate-200 last:border-b-0 dark:border-[var(--theme-border)]">
       <p className="border-b border-slate-200 bg-slate-50/80 px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:bg-[var(--theme-surface-elevated)] dark:text-[var(--theme-text-secondary)]">
@@ -60,27 +71,31 @@ function TradeTable({
               <th className={icfTh}>Date</th>
               <th className={icfTh}>Ref #</th>
               <th className={icfTh}>Counterparty</th>
+              {isAgent ? <th className={icfTh}>AED agent</th> : null}
               <th className={icfTh}>Warehouse</th>
-              {isMetal ? (
+              {isFund ? null : <th className={icfThAlign('right')}>Fine wt (g)</th>}
+              {isMetalInr ? (
                 <>
-                  <th className={icfThAlign('right')}>Fine wt (g)</th>
                   <th className={icfThAlign('right')}>INR / g</th>
-                  <th className={icfThAlign('right')}>Rate (AED)</th>
                   <th className={icfThAlign('right')}>INR value</th>
+                  <th className={icfThAlign('right')}>P&amp;L (INR)</th>
                 </>
               ) : null}
-              <th className={icfThAlign('right')}>Units</th>
-              <th className={icfThAlign('right')}>Rate (AED)</th>
-              <th className={icfThAlign('right')}>Amount (AED)</th>
-              {isMetal ? <th className={icfThAlign('right')}>P&L</th> : null}
-              <th className={icfTh}>Settlement</th>
+              {isFund ? (
+                <>
+                  <th className={icfThAlign('right')}>Units</th>
+                  <th className={icfThAlign('right')}>Rate (AED)</th>
+                  <th className={icfThAlign('right')}>Amount (AED)</th>
+                </>
+              ) : null}
+              {isAgent ? <th className={icfThAlign('right')}>Amount (AED)</th> : null}
               <th className={icfTh}>Status</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={isMetal ? 13 : 9} className={`${icfTd} py-6 text-center text-slate-500`}>
+                <td colSpan={colCount} className={`${icfTd} py-6 text-center text-slate-500`}>
                   {emptyMessage}
                 </td>
               </tr>
@@ -90,43 +105,50 @@ function TradeTable({
                   row.txnKind === 'purchase'
                     ? row.paymentStatus || row.paymentMethod || '—'
                     : row.orderStatus || row.paymentStatus || '—';
+                const aedAmount = tradeLineBookAed(row);
                 return (
                   <tr key={row.id} className="border-b border-slate-100 hover:bg-slate-50/80">
                     <td className={`${icfTd} tabular-nums`}>{fmtICDate(row.date)}</td>
                     <td className={`${icfTd} font-mono text-xs text-slate-600`}>{row.reference}</td>
                     <td className={`${icfTd} max-w-[11rem] truncate font-medium`}>{partyCell(row)}</td>
+                    {isAgent ? (
+                      <td className={`${icfTd} max-w-[10rem] truncate text-slate-600`}>
+                        {row.aedAgentName ?? '—'}
+                      </td>
+                    ) : null}
                     <td className={`${icfTd} max-w-[10rem] truncate text-slate-600`}>{warehouseCell(row)}</td>
-                    {isMetal ? (
+                    {isFund ? null : (
+                      <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtWeightG(row.metalWeightG)}</td>
+                    )}
+                    {isMetalInr ? (
                       <>
-                        <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtWeightG(row.metalWeightG)}</td>
                         <td className={`${icfTd} text-right font-mono tabular-nums text-slate-600`}>
                           {row.metalRateInrPerG ? fmtInr(row.metalRateInrPerG) : '—'}
                         </td>
-                        <td className={`${icfTd} text-right font-mono tabular-nums text-slate-600`}>
-                          {row.inrTotal && row.aedTotal
-                            ? fmtLedgerAed(computeMetalSheetRateAed(row.inrTotal, row.aedTotal))
-                            : row.metalRateAedPerG
-                              ? fmtLedgerAed(row.metalRateAedPerG)
-                              : '—'}
-                        </td>
                         <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtInr(row.inrTotal)}</td>
+                        <td className={`${icfTd} text-right font-mono tabular-nums`}>
+                          {row.bookedProfitInr != null ? (
+                            <FmtLedgerInr amount={row.bookedProfitInr} />
+                          ) : row.bookedCurrency === 'INR' && row.bookedProfit != null ? (
+                            <FmtLedgerInr amount={row.bookedProfit} />
+                          ) : (
+                            '—'
+                          )}
+                        </td>
                       </>
                     ) : null}
-                    <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                      {row.units.toLocaleString(undefined, { maximumFractionDigits: 4 })}
-                    </td>
-                    <td className={`${icfTd} text-right font-mono tabular-nums text-slate-600`}>
-                      {row.unitRateAed > 0 ? fmtLedgerAed(row.unitRateAed) : '—'}
-                    </td>
-                    <ReportAmountCell n={row.aedTotal} />
-                    {isMetal ? (
-                      <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                        {row.bookedProfit != null
-                          ? fmtLedgerAed(row.bookedProfit)
-                          : '—'}
-                      </td>
+                    {isFund ? (
+                      <>
+                        <td className={`${icfTd} text-right font-mono tabular-nums`}>
+                          {row.units.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                        </td>
+                        <td className={`${icfTd} text-right font-mono tabular-nums text-slate-600`}>
+                          {aedAmount > 0 && row.unitRateAed > 0 ? <FmtLedgerAed amount={row.unitRateAed} /> : '—'}
+                        </td>
+                        <ReportAmountCell n={aedAmount} />
+                      </>
                     ) : null}
-                    <td className={`${icfTd} text-slate-600`}>{row.settlementLabel}</td>
+                    {isAgent ? <ReportAmountCell n={aedAmount} /> : null}
                     <td className={`${icfTd} max-w-[8rem] truncate text-slate-500`}>{status}</td>
                   </tr>
                 );
@@ -136,29 +158,48 @@ function TradeTable({
           {rows.length > 0 ? (
             <tfoot>
               <tr className="border-t border-slate-200 bg-slate-50 font-medium dark:bg-[var(--theme-surface-elevated)]">
-                <td className={icfTd} colSpan={4}>
+                <td className={icfTd} colSpan={isAgent ? 4 : 3}>
                   Subtotal
                 </td>
-                {isMetal ? (
+                {isFund ? null : (
+                  <td className={`${icfTd} text-right font-mono tabular-nums`}>
+                    {fmtWeightG(rows.reduce((s, r) => s + (r.metalWeightG ?? 0), 0))}
+                  </td>
+                )}
+                {isMetalInr ? (
                   <>
+                    <td className={icfTd} />
                     <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                      {fmtWeightG(
-                        rows.reduce((s, r) => s + (r.metalWeightG ?? 0), 0),
-                      )}
+                      {fmtInr(rows.reduce((s, r) => s + tradeLineBookInr(r), 0))}
                     </td>
-                    <td className={icfTd} colSpan={2} />
                     <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                      {fmtInr(rows.reduce((s, r) => s + (r.inrTotal ?? 0), 0))}
+                      <FmtLedgerInr
+                        amount={rows.reduce(
+                          (s, r) =>
+                            s +
+                            (r.bookedProfitInr ??
+                              (r.bookedCurrency === 'INR' ? r.bookedProfit ?? 0 : 0)),
+                          0,
+                        )}
+                      />
                     </td>
                   </>
                 ) : null}
-                <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                  {rows.reduce((s, r) => s + r.units, 0).toLocaleString(undefined, { maximumFractionDigits: 4 })}
-                </td>
+                {isFund ? (
+                  <>
+                    <td className={`${icfTd} text-right font-mono tabular-nums`}>
+                      {rows.reduce((s, r) => s + r.units, 0).toLocaleString(undefined, {
+                        maximumFractionDigits: 4,
+                      })}
+                    </td>
+                    <td className={icfTd} />
+                    <ReportAmountCell n={rows.reduce((s, r) => s + tradeLineBookAed(r), 0)} />
+                  </>
+                ) : null}
+                {isAgent ? (
+                  <ReportAmountCell n={rows.reduce((s, r) => s + tradeLineBookAed(r), 0)} />
+                ) : null}
                 <td className={icfTd} />
-                <ReportAmountCell n={rows.reduce((s, r) => s + r.aedTotal, 0)} />
-                {isMetal ? <td className={icfTd} /> : null}
-                <td className={icfTd} colSpan={2} />
               </tr>
             </tfoot>
           ) : null}
@@ -168,82 +209,134 @@ function TradeTable({
   );
 }
 
+function variantCaption(variant: SettlementTradeReportVariant): string {
+  if (variant === 'fund') {
+    return settlementTradeReportSubtitle('cash');
+  }
+  if (variant === 'metal-inr') {
+    return 'Cash metal only — grams and INR. No AED agent settlement on this register.';
+  }
+  return 'Agent AED settlement for metal deals — not commodity P&L. View agent balance on AED statement of account.';
+}
+
+function variantTitle(variant: SettlementTradeReportVariant): string {
+  if (variant === 'fund') return settlementTradeReportTitle('cash');
+  if (variant === 'metal-inr') return 'Metal register (cash INR)';
+  return 'Metal via AED agent';
+}
+
 export default function SettlementTradeReport({
   report,
   periodLabel,
+  variant,
 }: {
   report: ICSettlementTradeReport;
   periodLabel: string;
+  variant: SettlementTradeReportVariant;
 }) {
-  const isMetal = report.settlementMode === 'metal';
   const { summary } = report;
+  const isFund = variant === 'fund';
+  const isMetalInr = variant === 'metal-inr';
 
   return (
     <div>
       <ReportCaption>
-        {periodLabel} · {settlementTradeReportTitle(report.settlementMode)} ·{' '}
-        {settlementTradeReportSubtitle(report.settlementMode)}
+        {periodLabel} · {variantTitle(variant)} · {variantCaption(variant)}
       </ReportCaption>
 
       <div className="grid gap-0 border-b border-slate-200 sm:grid-cols-2 lg:grid-cols-4 dark:border-[var(--theme-border)]">
-        <div className="border-b border-slate-100 px-2.5 py-2 sm:border-b-0 sm:border-r dark:border-[var(--theme-border)]">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Purchases</p>
-          <p className="mt-0.5 text-sm font-semibold text-slate-900 dark:text-[var(--theme-text)]">
-            {summary.purchaseCount} · {summary.purchaseUnits.toLocaleString(undefined, { maximumFractionDigits: 2 })} u
-          </p>
-          <p className="text-xs text-slate-500">{fmtLedgerAed(summary.purchaseAed)}</p>
-        </div>
-        <div className="border-b border-slate-100 px-2.5 py-2 sm:border-b-0 lg:border-r dark:border-[var(--theme-border)]">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Sales</p>
-          <p className="mt-0.5 text-sm font-semibold text-slate-900 dark:text-[var(--theme-text)]">
-            {summary.saleCount} · {summary.saleUnits.toLocaleString(undefined, { maximumFractionDigits: 2 })} u
-          </p>
-          <p className="text-xs text-slate-500">{fmtLedgerAed(summary.saleAed)}</p>
-        </div>
-        {isMetal ? (
+        {isFund ? (
+          <>
+            <div className="border-b border-slate-100 px-2.5 py-2 sm:border-b-0 sm:border-r dark:border-[var(--theme-border)]">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Purchases</p>
+              <p className="mt-0.5 text-sm font-semibold text-slate-900 dark:text-[var(--theme-text)]">
+                {summary.purchaseCount} · {summary.purchaseUnits.toLocaleString(undefined, { maximumFractionDigits: 2 })}{' '}
+                u
+              </p>
+              <p className="text-xs text-slate-500">
+                <FmtLedgerAed amount={summary.purchaseAed} />
+              </p>
+            </div>
+            <div className="border-b border-slate-100 px-2.5 py-2 sm:border-b-0 lg:border-r dark:border-[var(--theme-border)]">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Sales</p>
+              <p className="mt-0.5 text-sm font-semibold text-slate-900 dark:text-[var(--theme-text)]">
+                {summary.saleCount} · {summary.saleUnits.toLocaleString(undefined, { maximumFractionDigits: 2 })} u
+              </p>
+              <p className="text-xs text-slate-500">
+                <FmtLedgerAed amount={summary.saleAed} />
+              </p>
+            </div>
+            <div className="col-span-2 px-2.5 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Net fund movement (AED)</p>
+              <p className="mt-0.5 text-sm font-semibold tabular-nums">
+                <FmtLedgerAed amount={summary.saleAed - summary.purchaseAed} />
+              </p>
+              <p className="text-xs text-slate-500">Cash settlement in period — not gross profit</p>
+            </div>
+          </>
+        ) : isMetalInr ? (
           <>
             <div className="border-b border-slate-100 px-2.5 py-2 sm:border-b-0 sm:border-r dark:border-[var(--theme-border)]">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Metal purchased</p>
               <p className="mt-0.5 text-sm font-semibold tabular-nums">{fmtWeightG(summary.metalWeightPurchasedG)}</p>
               <p className="text-xs text-slate-500">{fmtInr(summary.purchaseInr)}</p>
             </div>
-            <div className="px-2.5 py-2">
+            <div className="border-b border-slate-100 px-2.5 py-2 sm:border-b-0 sm:border-r dark:border-[var(--theme-border)]">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Metal sold</p>
               <p className="mt-0.5 text-sm font-semibold tabular-nums">{fmtWeightG(summary.metalWeightSoldG)}</p>
               <p className="text-xs text-slate-500">{fmtInr(summary.saleInr)}</p>
             </div>
-            <div className="border-t border-slate-100 px-2.5 py-2 sm:col-span-2 lg:col-span-4 dark:border-[var(--theme-border)]">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Booked P&amp;L</p>
-              <p className="mt-0.5 text-sm font-semibold tabular-nums text-slate-900 dark:text-[var(--theme-text)]">
-                {fmtLedgerAed(summary.bookedAedProfit)}
+            <div className="px-2.5 py-2 sm:col-span-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Booked P&amp;L (INR)</p>
+              <p className="mt-0.5 text-sm font-semibold tabular-nums">
+                <FmtLedgerInr amount={summary.bookedInrProfit} />
               </p>
-              <p className="text-xs text-slate-500">Sale AED total − purchase AED total on matched lots</p>
+              <p className="text-xs text-slate-500">
+                Commodity profit on cash metal ·{' '}
+                <Link href="/admin/reports?view=metal-pl" className="underline">
+                  metal P&amp;L
+                </Link>
+              </p>
             </div>
           </>
         ) : (
-          <div className="col-span-2 px-2.5 py-2">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Net fund movement (AED)</p>
-            <p className="mt-0.5 text-sm font-semibold tabular-nums">
-              {fmtLedgerAed(summary.saleAed - summary.purchaseAed)}
-            </p>
-            <p className="text-xs text-slate-500">
-              Cash settlement only — AED in minus out in period, not gross profit
-            </p>
-          </div>
+          <>
+            <div className="border-b border-slate-100 px-2.5 py-2 sm:border-b-0 sm:border-r dark:border-[var(--theme-border)]">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Purchases (AED)</p>
+              <p className="mt-0.5 text-sm font-semibold tabular-nums">
+                <FmtLedgerAed amount={summary.purchaseAed} />
+              </p>
+              <p className="text-xs text-slate-500">{summary.purchaseCount} entries</p>
+            </div>
+            <div className="border-b border-slate-100 px-2.5 py-2 sm:border-b-0 sm:border-r dark:border-[var(--theme-border)]">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Sales (AED)</p>
+              <p className="mt-0.5 text-sm font-semibold tabular-nums">
+                <FmtLedgerAed amount={summary.saleAed} />
+              </p>
+              <p className="text-xs text-slate-500">{summary.saleCount} entries</p>
+            </div>
+            <div className="px-2.5 py-2 sm:col-span-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Net agent settlement</p>
+              <p className="mt-0.5 text-sm font-semibold tabular-nums">
+                <FmtLedgerAed amount={summary.saleAed - summary.purchaseAed} />
+              </p>
+              <p className="text-xs text-slate-500">Settlement with AED agents — not INR metal profit</p>
+            </div>
+          </>
         )}
       </div>
 
       <TradeTable
         title="Purchases (buy register)"
         rows={report.purchases}
-        isMetal={isMetal}
-        emptyMessage="No purchases in this period for the selected settlement mode."
+        variant={variant}
+        emptyMessage="No purchases in this period."
       />
       <TradeTable
         title="Sales (sell register)"
         rows={report.sales}
-        isMetal={isMetal}
-        emptyMessage="No sales in this period for the selected settlement mode."
+        variant={variant}
+        emptyMessage="No sales in this period."
       />
     </div>
   );

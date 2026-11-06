@@ -4,6 +4,15 @@ import { isHqIcFundsBranchId } from '@/lib/icFunds/hqBranch';
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** SQL expression matching {@link warehouseShortSlug} for ic_warehouses.id (Postgres). */
+export const WAREHOUSE_ROUTE_SLUG_SQL = `lower(substring(replace(id::text, '-', ''), 1, 8))`;
+
+const SHORT_SLUG_RE = /^[0-9a-f]{8}$/;
+
+export function isWarehouseRouteShortSlug(value: string): boolean {
+  return SHORT_SLUG_RE.test(value.toLowerCase());
+}
+
 /** First 8 hex chars of the warehouse UUID (no dashes) — used in URLs and Cognito roles. */
 export function warehouseShortSlug(warehouseId: string): string {
   return warehouseId.replace(/-/g, '').slice(0, 8).toLowerCase();

@@ -1,13 +1,25 @@
+import { fmtLedgerAedPlain, fmtLedgerInrPlain } from '@/components/currency/CurrencyAmount';
 import { IC_FUNDS_BASE_CURRENCY } from '@/lib/icFunds/currencyPolicy';
 import { formatAmount } from '@/lib/icTransfer/rateCalculations';
+
+export { fmtLedgerAedPlain, fmtLedgerInrPlain, fmtLedgerAmountPlain } from '@/components/currency/CurrencyAmount';
+export { FmtLedgerAed, FmtLedgerInr, FmtLedgerAmount } from '@/components/currency/CurrencyAmount';
 
 export function fmtICAmount(n: number): string {
   return formatAmount(n);
 }
 
-/** Ledger / report amounts in HQ base currency (always suffixed for clarity). */
+/** Plain-text ledger AED (tooltips, hints, CSV). */
 export function fmtLedgerAed(n: number): string {
-  return `${fmtICAmount(n)} AED`;
+  return fmtLedgerAedPlain(n);
+}
+
+export function fmtLedgerInr(n: number): string {
+  return fmtLedgerInrPlain(n);
+}
+
+export function fmtLedgerAmount(n: number, book: 'AED' | 'INR' | undefined): string {
+  return book === 'INR' ? fmtLedgerInr(n) : fmtLedgerAed(n);
 }
 
 export const icfLedgerColumnLabel = {
@@ -30,6 +42,8 @@ export const icfLedgerColumnLabel = {
 /** Foreign amount with ISO currency code (wallet / FX layer). */
 export function fmtForeignAmount(n: number, currency: string): string {
   const code = String(currency || IC_FUNDS_BASE_CURRENCY).trim().toUpperCase();
+  if (code === 'AED') return fmtLedgerAed(n);
+  if (code === 'INR') return fmtLedgerInr(n);
   return `${formatAmount(n)} ${code}`;
 }
 

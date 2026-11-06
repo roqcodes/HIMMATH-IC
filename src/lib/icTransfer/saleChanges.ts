@@ -3,7 +3,7 @@ import { DEFAULT_IC_SALE_TRANSACTION_TYPE, transactionTypeRequiresBank } from '@
 
 export type ICSaleContentFields = Pick<
   ICSale,
-  'units' | 'transactionType' | 'address' | 'location' | 'district' | 'imageUrl' | 'serviceCharge' | 'aedAmount' | 'bank'
+  'units' | 'transactionType' | 'address' | 'imageUrl' | 'serviceCharge' | 'aedAmount' | 'bank'
 >;
 
 function normStr(v?: string | null): string {
@@ -16,7 +16,7 @@ function normNum(v?: number | null): number {
 
 type ICSaleEditableFields = Pick<
   ICSaleContentFields,
-  'units' | 'transactionType' | 'address' | 'location' | 'district' | 'imageUrl' | 'serviceCharge' | 'bank'
+  'units' | 'transactionType' | 'address' | 'imageUrl' | 'serviceCharge' | 'bank'
 >;
 
 function normTransactionType(v?: string | null): string {
@@ -32,8 +32,6 @@ export function hasICSaleEditableFieldsChanged(
   if (Math.abs(normNum(updates.units) - normNum(original.units)) > 0.0001) return true;
   if (normTransactionType(updates.transactionType) !== normTransactionType(original.transactionType)) return true;
   if (normStr(updates.address) !== normStr(original.address)) return true;
-  if (normStr(updates.location) !== normStr(original.location)) return true;
-  if (normStr(updates.district) !== normStr(original.district)) return true;
   if (normStr(updates.imageUrl) !== normStr(original.imageUrl)) return true;
   if (Math.abs(normNum(updates.serviceCharge) - normNum(original.serviceCharge)) > 0.0001) return true;
   if (

@@ -257,12 +257,6 @@ export default function RatePricingTypeSplitPanel({
             </p>
           ) : (
             <>
-              <p className="mb-3 text-xs text-slate-500">
-                {mixed
-                  ? `Selected types have different ${rateTab} rates — enter a value to apply to ${selectedLabels.join(', ')}.`
-                  : `Applying ${rateTab === 'flat' ? 'flat value' : 'slab rate'} to ${selectedLabels.join(', ')}.`}
-              </p>
-
               {rateTab === 'flat' ? (
                 <FlatRateFields
                   pricing={editorPricing}

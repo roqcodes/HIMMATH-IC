@@ -1,7 +1,11 @@
 import { query } from '@/lib/db';
 import { mapICWarehouseRow } from '@/lib/icTransferMappers';
 import type { ICWarehouse } from '@/types';
-import { isFullWarehouseUuid, warehouseShortSlug } from '@/lib/icTransfer/warehouseSlug';
+import {
+  isFullWarehouseUuid,
+  isWarehouseRouteShortSlug,
+  WAREHOUSE_ROUTE_SLUG_SQL,
+} from '@/lib/icTransfer/warehouseSlug';
 
 export async function fetchWarehouseByRouteParam(param: string): Promise<ICWarehouse | null> {
   if (!param) return null;
@@ -12,11 +16,15 @@ export async function fetchWarehouseByRouteParam(param: string): Promise<ICWareh
   }
 
   const slug = param.toLowerCase();
-  const res = await query(`SELECT * FROM ic_warehouses`);
-  const matches = res.rows
-    .map(row => mapICWarehouseRow(row))
-    .filter(w => warehouseShortSlug(w.id) === slug);
+  if (!isWarehouseRouteShortSlug(slug)) return null;
 
-  if (matches.length !== 1) return null;
-  return matches[0];
+  const res = await query(
+    `SELECT * FROM ic_warehouses
+     WHERE ${WAREHOUSE_ROUTE_SLUG_SQL} = $1
+     LIMIT 2`,
+    [slug],
+  );
+
+  if (res.rows.length !== 1) return null;
+  return mapICWarehouseRow(res.rows[0]);
 }

@@ -235,11 +235,6 @@ export default function UserPermissionsPanel({
             ))}
           </WriteGate>
         )}
-
-        <p className="text-[11px] leading-relaxed text-slate-500">
-          Dashboard stays visible at read level. Account settings remain available for password changes regardless of
-          permissions above.
-        </p>
       </div>
     </Modal>
   );

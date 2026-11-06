@@ -1,11 +1,5 @@
-import ICTransferSettingsUsersPage from '@/components/ic-transfer/settings/ICTransferSettingsUsersPage';
+import IcAedAgentsSettingsPage from '@/components/ic-transfer/settings/IcAedAgentsSettingsPage';
 
 export default function AgentManagementPage() {
-  return (
-    <ICTransferSettingsUsersPage
-      title="Sales Agents"
-      modalTitle="Add User"
-      showRate
-    />
-  );
+  return <IcAedAgentsSettingsPage />;
 }

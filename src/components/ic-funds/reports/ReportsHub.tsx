@@ -23,9 +23,20 @@ function ReportGroupBlock({
   return (
     <section className={icfCard}>
       <div className="border-b border-slate-200 px-3 py-2 dark:border-[var(--theme-border)]">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-[var(--theme-text-muted)]">
-          {group.title}
-        </h3>
+        <div className="flex flex-wrap items-baseline gap-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-[var(--theme-text-muted)]">
+            {group.title}
+          </h3>
+          <span
+            className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+              group.book === 'ic-aed'
+                ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
+                : 'bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-100'
+            }`}
+          >
+            {group.book === 'ic-aed' ? 'AED' : 'INR'}
+          </span>
+        </div>
         <p className="mt-0.5 text-[11px] leading-snug text-slate-500 dark:text-[var(--theme-text-secondary)]">
           {group.description}
         </p>

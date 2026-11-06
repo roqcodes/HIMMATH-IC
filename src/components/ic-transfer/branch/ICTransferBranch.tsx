@@ -15,30 +15,34 @@ import {
   AddButton,
   icTdClass,
 } from '../ui';
-import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
+import ICTransferDealBookKpiStrips from '@/components/ic-transfer/shared/ICTransferDealBookKpiStrips';
+import { computeSaleBookKpis, countSalesInRange } from '@/lib/icTransfer/dealBookKpis';
+import { resolveDateFilterRange, getDateFilterLabel } from '@/lib/dateFilterRange';
 import AddICBranchOrderModal from './AddICBranchOrderModal';
 import ViewSaleModal from '../sales/ViewSaleModal';
 import { ICSale } from '@/types';
 import { portalMobileCardFooterClass } from '@/lib/icTransfer/layoutConstants';
 import { BranchOrderStatusCell, BranchOrderWorkflowActions } from '../shared/BranchOrderStatusCell';
-import { sumMetalSaleWeightG } from '@/lib/icTransfer/warehouseMatrixMetrics';
 import { ConfirmModal } from '@/components/warehouse/shared';
-import { getBranchPortalOrderCustomerName, saleBelongsToBranchPortal, saleMatchesDateFilter } from '@/lib/icTransfer/branchOrderOwnership';
-import { resolveDateFilterRange } from '@/lib/dateFilterRange';
-import { canEditOrder } from '@/lib/icTransfer/customerOrderReview';
+import {
+  getBranchPortalOrderCustomerName,
+  saleBelongsToBranchPortal,
+  saleMatchesDateFilter,
+} from '@/lib/icTransfer/branchOrderOwnership';
+import { SALE_PARTY_COLUMN_LABEL, SALE_FILTER_ALL_PARTIES_LABEL, SALE_FILTER_BY_PARTY_ARIA } from '@/lib/counterparties/labels';
 import { getBranchPortalDisplayName } from '@/lib/icTransfer/branchPortalScope';
-
-const fmt = (n: number) => `AED ${n.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`;
+import { formatDealTableAed, formatDealTableInr, saleDealAed, saleDealInr } from '@/lib/icTransfer/dealTableDisplay';
 
 const ORDER_COLUMNS = [
-  'Date', 'ID', 'Customer', 'Settlement', 'Units', 'Metal (g)', 'Total AED', 'Status', 'Actions',
+  'Date', 'ID', SALE_PARTY_COLUMN_LABEL, 'Settlement', 'Units', 'Metal (g)', 'Total INR', 'Total AED', 'Status', 'Actions',
 ] as const;
 
-type SortField = 'date' | 'customer' | 'units' | 'totalaed' | 'metal' | 'settlement';
+type SortField = 'date' | 'party' | 'units' | 'totalinr' | 'totalaed' | 'metal' | 'settlement';
 const SORTABLE_COLUMNS: Record<string, SortField> = {
   date: 'date',
-  customer: 'customer',
+  party: 'party',
   units: 'units',
+  totalinr: 'totalinr',
   totalaed: 'totalaed',
   'metal (g)': 'metal',
   'metal(g)': 'metal',
@@ -112,6 +116,26 @@ export default function ICTransferBranch() {
     return icSales.filter(s => saleBelongsToBranchPortal(s, branchName, branchCustomerIds, branchCustomerNames));
   }, [icSales, branchName, branchCustomerIds, branchCustomerNames]);
 
+  const range = useMemo(
+    () => resolveDateFilterRange(dateFilter, customStartDate, customEndDate),
+    [dateFilter, customStartDate, customEndDate],
+  );
+
+  const rangeLabel = useMemo(
+    () => getDateFilterLabel(dateFilter, customStartDate, customEndDate),
+    [dateFilter, customStartDate, customEndDate],
+  );
+
+  const saleBookKpis = useMemo(
+    () => computeSaleBookKpis(branchSales, range),
+    [branchSales, range],
+  );
+
+  const saleCountHint = useMemo(() => {
+    const { cash, metal } = countSalesInRange(branchSales, range);
+    return `${cash} IC · ${metal} metal`;
+  }, [branchSales, range]);
+
   const customerOptions = useMemo(() => {
     const names = new Set<string>();
     branchCustomers.forEach(c => names.add(c.name));
@@ -123,10 +147,9 @@ export default function ICTransferBranch() {
   }, [branchCustomers, branchSales, branchName]);
 
   const filteredSales = useMemo(() => {
-    const dateRange = resolveDateFilterRange(dateFilter, customStartDate, customEndDate);
     const q = search.trim().toLowerCase();
     const rows = branchSales.filter(s => {
-      if (!saleMatchesDateFilter(s, dateRange)) return false;
+      if (!saleMatchesDateFilter(s, range)) return false;
       const orderCustomer = getOrderCustomer(s);
       const formattedId = getFormattedTxnId(s.id, 'sale', s, branches, branchName);
       if (q &&
@@ -143,12 +166,14 @@ export default function ICTransferBranch() {
     const dir = sortOrder === 'asc' ? 1 : -1;
     return rows.slice().sort((a, b) => {
       switch (sortField) {
-        case 'customer':
+        case 'party':
           return getOrderCustomer(a).localeCompare(getOrderCustomer(b)) * dir;
         case 'units':
           return (a.units - b.units) * dir;
+        case 'totalinr':
+          return (saleDealInr(a) - saleDealInr(b)) * dir;
         case 'totalaed':
-          return ((a.aedAmount || 0) - (b.aedAmount || 0)) * dir;
+          return (saleDealAed(a) - saleDealAed(b)) * dir;
         case 'metal':
           return ((a.metalWeightG ?? 0) - (b.metalWeightG ?? 0)) * dir;
         case 'settlement': {
@@ -161,7 +186,7 @@ export default function ICTransferBranch() {
           return (new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()) * dir;
       }
     });
-  }, [branchSales, branches, search, customerFilter, selectedRegionIds, icWarehouses, sortField, sortOrder, branchName, dateFilter, customStartDate, customEndDate]);
+  }, [branchSales, branches, search, customerFilter, selectedRegionIds, icWarehouses, sortField, sortOrder, branchName, range]);
 
   const handleHeaderClick = (column: string) => {
     const key = column.toLowerCase().replace(/\s/g, '');
@@ -215,28 +240,6 @@ export default function ICTransferBranch() {
     setViewModalOpen(true);
   };
 
-  const stats = React.useMemo(() => {
-    const totalOrders = branchSales.length;
-    const totalUnits = branchSales.reduce((acc, s) => acc + s.units, 0);
-    const totalValue = branchSales.reduce((acc, s) => acc + (s.aedAmount || 0), 0);
-    const avgRate = totalUnits > 0 ? totalValue / totalUnits : 0;
-    const totalMetalG = sumMetalSaleWeightG(branchSales);
-    const metalCount = branchSales.filter(s => s.settlementMode === 'metal').length;
-    const cashCount = branchSales.filter(s => s.settlementMode !== 'metal').length;
-    const pendingPayment = branchSales.filter(s => s.paymentStatus === 'pending').length;
-
-    return {
-      totalOrders,
-      totalUnits,
-      totalValue,
-      avgRate,
-      totalMetalG,
-      metalCount,
-      cashCount,
-      pendingPayment,
-    };
-  }, [branchSales]);
-
   return (
     <PageShell>
       <PageHeader
@@ -264,31 +267,11 @@ export default function ICTransferBranch() {
         setCustomEndDate={setCustomEndDate}
       />
 
-      <AsicKpiStrip
-        metrics={[
-          {
-            label: 'Sales volume',
-            value: fmt(stats.totalValue),
-            hint: `${stats.cashCount} IC · ${stats.metalCount} metal`,
-          },
-          {
-            label: 'IC units',
-            value: stats.totalUnits.toLocaleString(),
-            hint: `Avg ${fmt(stats.avgRate)}`,
-          },
-          {
-            label: 'Metal sold',
-            value: `${stats.totalMetalG.toLocaleString('en-US', { maximumFractionDigits: 4 })} g`,
-            hint: 'In selected range',
-            tone: 'amber',
-          },
-          {
-            label: 'Sales',
-            value: stats.totalOrders.toLocaleString(),
-            hint: `${stats.pendingPayment} pending payment`,
-            tone: 'emerald',
-          },
-        ]}
+      <ICTransferDealBookKpiStrips
+        books={saleBookKpis}
+        rangeLabel={rangeLabel}
+        flow="sale"
+        countHint={saleCountHint}
       />
 
       <DataTableSection
@@ -306,9 +289,9 @@ export default function ICTransferBranch() {
               value={customerFilter}
               onChange={e => setCustomerFilter(e.target.value)}
               className="h-10 w-full appearance-none rounded-lg border border-slate-200 bg-white pl-3 pr-9 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:border-slate-300 focus:border-accent focus:outline-none sm:w-56"
-              aria-label="Filter by customer"
+              aria-label={SALE_FILTER_BY_PARTY_ARIA}
             >
-              <option value="">All Customers</option>
+              <option value="">{SALE_FILTER_ALL_PARTIES_LABEL}</option>
               {customerOptions.map(name => (
                 <option key={name} value={name}>{name}</option>
               ))}
@@ -344,7 +327,8 @@ export default function ICTransferBranch() {
                 </div>
                 <div className="flex justify-between items-center rounded-xl bg-slate-50/70 p-2.5 text-xs text-slate-500">
                   <span>{s.settlementMode === 'metal' ? 'Metal' : 'IC'} · Units: <strong className="text-slate-700">{s.units.toLocaleString()}</strong></span>
-                  <span>Total: <strong className="text-slate-700">{(s.aedAmount || 0).toLocaleString()} AED</strong></span>
+                  <span>Total: <strong className="text-slate-700">{formatDealTableAed(saleDealAed(s))}</strong></span>
+                  <span>{formatDealTableInr(saleDealInr(s))}</span>
                 </div>
                 {s.settlementMode === 'metal' ? (
                   <div className="text-xs text-slate-500">
@@ -385,7 +369,10 @@ export default function ICTransferBranch() {
                 ? (s.metalWeightG ?? 0).toLocaleString('en-US', { maximumFractionDigits: 4 })
                 : '—'}
             </td>
-            <td className={icTdClass('right')}><span className="font-bold text-slate-900">{(s.aedAmount || 0).toLocaleString()}</span></td>
+            <td className={icTdClass('right')}>
+              <span className="font-mono tabular-nums text-indigo-900">{formatDealTableInr(saleDealInr(s))}</span>
+            </td>
+            <td className={icTdClass('right')}><span className="font-bold text-slate-900">{formatDealTableAed(saleDealAed(s))}</span></td>
             <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
               <BranchOrderStatusCell sale={s} />
             </td>

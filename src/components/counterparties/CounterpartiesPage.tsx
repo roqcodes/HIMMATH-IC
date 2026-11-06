@@ -18,9 +18,11 @@ import {
   filterSuppliersForAdminPortal,
   filterSuppliersForBranchPortal,
 } from '@/lib/icTransfer/branchPortalScope';
-import { COUNTERPARTIES_PAGE_SUBTITLE, COUNTERPARTIES_PAGE_TITLE } from '@/lib/counterparties/labels';
+import { formatCounterpartyRolesLabel } from '@/lib/counterparties/roles';
+import { COUNTERPARTIES_PAGE_TITLE } from '@/lib/counterparties/labels';
 import { counterpartiesFromRegistry } from '@/lib/counterparties/list';
 import { counterpartyDetailPath } from '@/lib/counterparties/navigation';
+import { formatStreetCityState } from '@/lib/geo/simpleAddress';
 import type { ICSupplier } from '@/types';
 
 const DELETE_BLOCKED =
@@ -112,7 +114,6 @@ export default function CounterpartiesPage() {
       <div className="animate-[fade-in-up_0.55s_cubic-bezier(0.16,1,0.3,1)_both]">
         <AsicPageHeader
           title={COUNTERPARTIES_PAGE_TITLE}
-          subtitle={COUNTERPARTIES_PAGE_SUBTITLE}
           actions={
             <button
               type="button"
@@ -156,6 +157,7 @@ export default function CounterpartiesPage() {
                 <tr className={asicTheadRow}>
                   <th className={asicTh}>Name</th>
                   <th className={asicTh}>Code</th>
+                  <th className={asicTh}>Roles</th>
                   <th className={asicTh}>Phone</th>
                   <th className={asicTh}>Location</th>
                   <th className={asicTh}>Status</th>
@@ -186,9 +188,12 @@ export default function CounterpartiesPage() {
                       )}
                     </td>
                     <td className={`${asicTd} font-mono text-xs text-slate-600`}>{row.code || '—'}</td>
+                    <td className={`${asicTd} text-slate-600`}>
+                      {formatCounterpartyRolesLabel(row.supplier?.roles)}
+                    </td>
                     <td className={`${asicTd} text-slate-600`}>{row.phone || '—'}</td>
                     <td className={`${asicTd} text-slate-600`}>
-                      {[row.locality, row.subdivision, row.country].filter(Boolean).join(', ') || '—'}
+                      {formatStreetCityState(row.address, row.locality, row.subdivision)}
                     </td>
                     <td className={`${asicTd} capitalize text-slate-600`}>{row.status || 'active'}</td>
                     <td className={`${asicTd} text-right`}>

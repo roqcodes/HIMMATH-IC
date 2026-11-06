@@ -184,9 +184,11 @@ export default function ImageDropZone({
     </div>
   );
 
-  const rootLayoutClass = fillHeight ? 'flex h-full min-h-0 flex-1 flex-col' : '';
+  const rootLayoutClass = fillHeight ? 'flex h-full min-h-0 flex-col' : '';
   const previewSizeClass = fillHeight
-    ? 'min-h-[4rem] flex-1'
+    ? compact
+      ? 'min-h-0 flex-1'
+      : 'min-h-[4rem] flex-1'
     : compact
       ? 'h-[4rem]'
       : 'aspect-[4/3]';
@@ -223,7 +225,7 @@ export default function ImageDropZone({
   }
 
   return (
-    <div className={`${rootLayoutClass} ${className}`}>
+    <div className={`${rootLayoutClass} gap-1.5 ${className}`}>
       <div
         ref={zoneRef}
         tabIndex={disabled ? -1 : 0}
@@ -244,7 +246,9 @@ export default function ImageDropZone({
             if (!inactive) galleryRef.current?.click();
           }
         }}
-        className={`flex ${previewSizeClass} cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border-2 border-dashed px-3 text-center transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
+        className={`flex ${previewSizeClass} cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed text-center transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
+          compact && fillHeight ? 'gap-0.5 px-1 py-0.5' : 'gap-1.5 px-3'
+        } ${
           dragOver
             ? 'border-accent bg-accent/5 text-accent'
             : 'border-slate-200 bg-slate-50/80 text-slate-400 hover:border-slate-300 hover:bg-slate-100/50'
@@ -264,14 +268,22 @@ export default function ImageDropZone({
           <polyline points="17 8 12 3 7 8" />
           <line x1="12" y1="3" x2="12" y2="15" />
         </svg>
-        <p className={`max-w-[16rem] font-medium text-slate-500 ${compact ? 'text-[10px] leading-snug' : 'text-xs'}`}>
+        <p
+          className={`max-w-full font-medium text-slate-500 ${
+            compact && fillHeight
+              ? 'line-clamp-2 text-[9px] leading-tight'
+              : compact
+                ? 'max-w-[16rem] text-[10px] leading-snug'
+                : 'max-w-[16rem] text-xs'
+          }`}
+        >
           {busy ? 'Uploading…' : emptyLabel}
         </p>
         {!compact ? (
           <p className="text-[10px] text-slate-400">Drag & drop · Click · Ctrl+V · Paste button</p>
         ) : null}
       </div>
-      {!disabled ? <div className={`shrink-0 ${compact ? 'mt-1.5' : 'mt-2'}`}>{actionButtons}</div> : null}
+      {!disabled ? <div className="shrink-0">{actionButtons}</div> : null}
       {fileInputs}
     </div>
   );

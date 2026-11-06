@@ -24,6 +24,7 @@ type Props = {
   children: React.ReactNode;
   colSpan?: ColSpan;
   className?: string;
+  labelClassName?: string;
 };
 
 export default function AsicFormField({
@@ -33,18 +34,16 @@ export default function AsicFormField({
   children,
   colSpan = 6,
   className = '',
+  labelClassName,
 }: Props) {
   return (
     <div className={`min-w-0 ${spanClass[colSpan]} ${className}`}>
       {label ? (
-        <label className={asicLabel} htmlFor={htmlFor}>
+        <label className={labelClassName ?? asicLabel} htmlFor={htmlFor}>
           {label}
         </label>
       ) : null}
       {children}
-      {hint ? (
-        <p className="mt-0.5 line-clamp-3 break-words text-[11px] leading-snug text-slate-400">{hint}</p>
-      ) : null}
     </div>
   );
 }

@@ -37,7 +37,7 @@ import {
 import { resolveAccountDetailHref } from '@/lib/icFunds/accountNavigation';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import { BalanceWithPending } from '@/components/ic-funds/BalanceWithPending';
-import { fmtLedgerAed } from '@/lib/icFunds/format';
+import { fmtLedgerAed, FmtLedgerAed } from '@/lib/icFunds/format';
 import { HQ_IC_FUNDS_BRANCH_ID } from '@/lib/icFunds/hqBranch';
 import { useWriteAccess } from '@/context/RbacWriteContext';
 import { useApp } from '@/context/AppContext';
@@ -329,7 +329,7 @@ export default function AccountsScreen({
                     <td className={`${icfTd} text-slate-500`}>{account.phone || '—'}</td>
                     <td className={`${icfTd} max-w-[12rem] truncate text-slate-500`}>{account.email || '—'}</td>
                     <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                      {fmtLedgerAed(account.openingBalance)}
+                      <FmtLedgerAed amount={account.openingBalance} />
                     </td>
                     <td className={`${icfTd} text-right`}>
                       <BalanceWithPending balance={account.balance} pendingBalance={account.pendingBalance} />

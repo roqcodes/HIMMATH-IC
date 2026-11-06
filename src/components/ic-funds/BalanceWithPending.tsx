@@ -1,4 +1,4 @@
-import { fmtLedgerAed } from '@/lib/icFunds/format';
+import { fmtLedgerAed, FmtLedgerAed } from '@/lib/icFunds/format';
 import { icfTd } from '@/components/ic-funds/ui';
 
 export function BalanceWithPending({
@@ -11,9 +11,9 @@ export function BalanceWithPending({
   const pending = pendingBalance ?? 0;
   return (
     <div className="text-right font-mono tabular-nums">
-      <span className={balance < 0 ? 'text-red-600' : ''}>{fmtLedgerAed(balance)}</span>
+      <span className={balance < 0 ? 'text-red-600' : ''}><FmtLedgerAed amount={balance} /></span>
       {pending !== 0 ? (
-        <span className="block text-[10px] font-medium text-amber-600">{fmtLedgerAed(pending)} pending</span>
+        <span className="block text-[10px] font-medium text-amber-600"><FmtLedgerAed amount={pending} /> pending</span>
       ) : null}
     </div>
   );

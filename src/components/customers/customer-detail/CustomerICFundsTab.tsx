@@ -16,7 +16,7 @@ import {
   statementCsvFilename,
 } from '@/lib/icFunds/customerStatementView';
 import { IC_FUNDS_BASE_CURRENCY } from '@/lib/icFunds/currencyPolicy';
-import { fmtICDate, fmtLedgerAed, icfLedgerColumnLabel } from '@/lib/icFunds/format';
+import { fmtICDate, fmtLedgerAed, icfLedgerColumnLabel, FmtLedgerAed } from '@/lib/icFunds/format';
 import { icFundsReportPath } from '@/lib/icFunds/nav';
 import StatementParticularsCell from '@/components/ic-funds/StatementParticularsCell';
 import { asicBtnPrimary, asicCard, asicTable, asicTd, asicTh, asicThAlign, asicTheadRow, asicTr, asicTableWrap } from '@/components/asic/ui';
@@ -38,7 +38,7 @@ function AmountCell({ n, danger }: { n: number; danger?: boolean }) {
     <td
       className={`${asicTd} text-right font-mono tabular-nums ${danger || n < 0 ? 'text-red-600 dark:text-red-400' : ''}`}
     >
-      {n === 0 ? '—' : fmtLedgerAed(n)}
+      <FmtLedgerAed amount={n} />
     </td>
   );
 }
@@ -49,7 +49,7 @@ function SummaryMetric({
   hint,
 }: {
   label: string;
-  value: string;
+  value: React.ReactNode;
   hint?: string;
 }) {
   return (
@@ -190,8 +190,8 @@ export default function CustomerICFundsTab({
     account.pendingBalance && account.pendingBalance !== 0
       ? `${fmtLedgerAed(account.pendingBalance)} pending`
       : ledgerHint;
-  const statementClosing =
-    statementView != null ? fmtLedgerAed(statementView.closing) : '—';
+  const statementClosingNode =
+    statementView != null ? <FmtLedgerAed amount={statementView.closing} /> : '—';
 
   return (
     <div className="space-y-3">
@@ -199,13 +199,13 @@ export default function CustomerICFundsTab({
         <div className="grid grid-cols-2 divide-x divide-y divide-[var(--theme-border-subtle)] sm:grid-cols-4">
           <SummaryMetric
             label="Ledger balance"
-            value={fmtLedgerAed(account.balance)}
+            value={<FmtLedgerAed amount={account.balance} />}
             hint={pendingHint}
           />
-          <SummaryMetric label="Opening" value={fmtLedgerAed(account.openingBalance)} />
+          <SummaryMetric label="Opening" value={<FmtLedgerAed amount={account.openingBalance} />} />
           <SummaryMetric
             label="Statement"
-            value={statementClosing}
+            value={statementClosingNode}
             hint="Company ledger"
           />
           <SummaryMetric
@@ -297,7 +297,7 @@ export default function CustomerICFundsTab({
                   <AmountCell n={line.debit} />
                   <AmountCell n={line.credit} danger />
                   <td className={`${asicTd} text-right font-mono tabular-nums`}>
-                    {fmtLedgerAed(line.balance)}
+                    <FmtLedgerAed amount={line.balance} />
                   </td>
                   <td className={asicTd}>
                     <VoucherUserCell
@@ -317,13 +317,13 @@ export default function CustomerICFundsTab({
               <tr className="border-t border-[var(--theme-border)] bg-slate-50/80 font-medium dark:bg-[var(--theme-surface-muted)]">
                 <td className={asicTd} colSpan={4}>Totals</td>
                 <td className={`${asicTd} text-right font-mono tabular-nums`}>
-                  {fmtLedgerAed(totalDr)}
+                  <FmtLedgerAed amount={totalDr} />
                 </td>
                 <td className={`${asicTd} text-right font-mono tabular-nums text-red-600 dark:text-red-400`}>
-                  {fmtLedgerAed(totalCr)}
+                  <FmtLedgerAed amount={totalCr} />
                 </td>
                 <td className={`${asicTd} text-right font-mono tabular-nums`}>
-                  {statementView ? fmtLedgerAed(statementView.closing) : '—'}
+                  {statementView ? <FmtLedgerAed amount={statementView.closing} /> : '—'}
                 </td>
                 <td className={asicTd} colSpan={2} />
               </tr>

@@ -33,44 +33,36 @@ describe('metalInventory', () => {
     assert.equal(sale.units, 0);
     assert.equal(sale.metalPaymentMethod, 'AED');
     assert.equal(sale.aedAmount, 254302.42);
+    assert.ok(sale.unitRate > 0);
 
     const pl = computeMetalLotProfit({
-      paymentMethod: 'INR',
+      paymentMethod: 'CASH',
+      purchasePaymentMethod: 'AED',
       weightG: 499.71,
       purchaseInr: 6_985_945,
       purchaseAed: 253_100,
       saleInr: 6_995_940,
       saleAed: 254_302.42,
     });
-    assert.equal(pl.bookedCurrency, 'AED');
-    assert.ok(Math.abs(pl.bookedProfit - 1_202.42) < 0.01);
+    assert.equal(pl.bookedCurrency, 'INR');
+    assert.ok(Math.abs(pl.bookedProfit - 9_995) < 0.5);
     assert.ok(Math.abs(pl.profitInr - 9_995) < 0.5);
   });
 
-  it('books metal lot profit in AED', () => {
-    const sale = normalizeMetalLotSale({
-      metalPurchaseId: 'lot-1',
-      input: {
-        metalWeightG: 499.71,
-        metalRateInrPerG: 14000,
-        metalRateAedPerG: 508.9,
-        totalInr: 6_995_940,
-        totalAed: 254_302.42,
-      },
-    });
-    assert.equal(sale.units, 0);
-    assert.equal(sale.aedAmount, 254302.42);
-
+  it('books metal P&L in INR when both legs are AED', () => {
     const pl = computeMetalLotProfit({
       paymentMethod: 'AED',
+      purchasePaymentMethod: 'AED',
       weightG: 499.71,
       purchaseInr: 6_985_945,
       purchaseAed: 253_100,
       saleInr: 6_995_940,
       saleAed: 254_302.42,
     });
-    assert.equal(pl.bookedCurrency, 'AED');
-    assert.ok(Math.abs(pl.bookedProfit - 1_202.42) < 0.01);
+    assert.equal(pl.bookedCurrency, 'INR');
+    assert.ok(Math.abs(pl.bookedProfit - 9_995) < 0.5);
+    assert.ok(Math.abs(pl.bookedProfitInr - 9_995) < 0.5);
+    assert.equal(pl.bookedProfitAed, 0);
   });
 
   it('allocates lot cost by grams for later partial sells', () => {

@@ -36,10 +36,11 @@ export const addSupplierSchema = z.object({
   regionId: z.string().optional().nullable(),
   email: z.string().email('Invalid email').optional().nullable().or(z.literal('')),
   address: z.string().optional().nullable(),
-  country: z.string().min(1, 'Country is required'),
+  country: z.string().optional().nullable().or(z.literal('')),
   subdivision: z.string().optional().nullable().or(z.literal('')),
   locality: z.string().optional().nullable().or(z.literal('')),
   branchId: z.string().optional().nullable(),
+  roles: z.array(z.enum(['supplier', 'party', 'agent'])).min(1).optional(),
 });
 
 export const updateSupplierSchema = addSupplierSchema.extend({
@@ -54,8 +55,8 @@ export const addWarehouseSchema = z.object({
   regionId: z.string().optional().nullable(),
   email: z.string().email('Invalid email').optional().nullable().or(z.literal('')),
   address: z.string().optional().nullable(),
-  indiaState: z.string().min(1, 'Indian state is required'),
-  indiaCity: z.string().optional().nullable(),
+  indiaState: z.string().optional().nullable().or(z.literal('')),
+  indiaCity: z.string().optional().nullable().or(z.literal('')),
   sendDeliveryProofToCustomer: z.boolean().optional().default(true),
   branchId: z.string().optional().nullable(),
 });
@@ -155,11 +156,16 @@ const purchaseFieldsBaseSchema = z.object({
   units: z.number().nonnegative().optional(),
   metalWeightG: z.number().positive().optional(),
   metalRateInrPerG: z.number().positive().optional(),
-  metalRateAedPerG: z.number().positive().optional(),
+  metalRateAedPerG: z.number().nonnegative().optional(),
   inrTotal: z.number().positive().optional(),
+  metalPaymentMethod: z.enum(['CASH', 'AED', 'INR']).optional(),
+  aedAgentId: z.string().uuid().optional().nullable(),
   paymentMethod: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
-  aedTotal: z.number().positive().optional().nullable(),
+  aedTotal: z.number().nonnegative().optional().nullable(),
+  labWeightG: z.number().nonnegative().optional().nullable(),
+  labChargeInrPerG: z.number().nonnegative().optional().nullable(),
+  labTotalInr: z.number().nonnegative().optional().nullable(),
 });
 
 const purchaseFieldsSchema = purchaseFieldsBaseSchema.transform(data => ({
@@ -187,14 +193,28 @@ export const addPurchaseSchema = purchaseFieldsSchema.superRefine((data, ctx) =>
     if (data.metalRateInrPerG == null || data.metalRateInrPerG <= 0) {
       ctx.addIssue({ code: 'custom', message: 'INR rate per gram required', path: ['metalRateInrPerG'] });
     }
-    if (data.metalRateAedPerG == null || data.metalRateAedPerG <= 0) {
-      ctx.addIssue({ code: 'custom', message: 'AED rate per gram required', path: ['metalRateAedPerG'] });
-    }
     if (data.inrTotal == null || data.inrTotal <= 0) {
       ctx.addIssue({ code: 'custom', message: 'Total INR required', path: ['inrTotal'] });
     }
-    if (data.aedTotal == null || data.aedTotal <= 0) {
-      ctx.addIssue({ code: 'custom', message: 'Total AED required', path: ['aedTotal'] });
+    const pay = data.metalPaymentMethod === 'AED' ? 'AED' : 'CASH';
+    if (pay === 'AED') {
+      if (data.metalRateAedPerG == null || data.metalRateAedPerG <= 0) {
+        ctx.addIssue({ code: 'custom', message: 'AED rate required for AED payment', path: ['metalRateAedPerG'] });
+      }
+      if (data.aedTotal == null || data.aedTotal <= 0) {
+        ctx.addIssue({ code: 'custom', message: 'Total AED required', path: ['aedTotal'] });
+      }
+      if (!data.aedAgentId?.trim()) {
+        ctx.addIssue({ code: 'custom', message: 'AED agent required', path: ['aedAgentId'] });
+      }
+    }
+    const labTotal = Number(data.labTotalInr) || 0;
+    if (labTotal > 0 && data.inrTotal != null && labTotal - data.inrTotal > 0.0001) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Lab test total cannot exceed metal INR total',
+        path: ['labTotalInr'],
+      });
     }
   });
 
@@ -214,15 +234,14 @@ const saleFieldsSchema = z.object({
   unitRate: z.number().nonnegative().optional(),
   metalWeightG: z.number().positive().optional(),
   metalRateInrPerG: z.number().positive().optional(),
-  metalRateAedPerG: z.number().positive().optional(),
+  metalRateAedPerG: z.number().nonnegative().optional(),
   inrTotal: z.number().positive().optional(),
   metalPurchaseId: z.string().uuid().optional().nullable(),
-  metalPaymentMethod: z.enum(['INR', 'AED']).optional().nullable(),
+  metalPaymentMethod: z.enum(['CASH', 'AED', 'INR']).optional().nullable(),
+  aedAgentId: z.string().uuid().optional().nullable(),
   aedAmount: z.number().nonnegative().optional().nullable(),
   bank: z.string().optional().nullable(),
   address: z.string().optional().nullable(),
-  location: z.string().optional().nullable(),
-  district: z.string().optional().nullable(),
   imageUrl: z.string().optional().nullable(),
   serviceCharge: z.number().default(0.0),
   priority: z.enum(['High', 'Normal', 'Low']).default('Normal'),
@@ -232,6 +251,9 @@ const saleFieldsSchema = z.object({
   orderStatus: z.string().optional(),
   paymentStatus: z.string().optional(),
   rejectionRemarks: z.string().optional().nullable(),
+  labWeightG: z.number().nonnegative().optional().nullable(),
+  labChargeInrPerG: z.number().nonnegative().optional().nullable(),
+  labTotalInr: z.number().nonnegative().optional().nullable(),
 });
 
 export const addSaleSchema = saleFieldsSchema.superRefine((data, ctx) => {
@@ -254,14 +276,30 @@ export const addSaleSchema = saleFieldsSchema.superRefine((data, ctx) => {
     if (data.metalRateInrPerG == null || data.metalRateInrPerG <= 0) {
       ctx.addIssue({ code: 'custom', message: 'INR rate per gram required', path: ['metalRateInrPerG'] });
     }
-    if (data.metalRateAedPerG == null || data.metalRateAedPerG <= 0) {
-      ctx.addIssue({ code: 'custom', message: 'AED rate per gram required', path: ['metalRateAedPerG'] });
-    }
     if (data.inrTotal == null || data.inrTotal <= 0) {
       ctx.addIssue({ code: 'custom', message: 'Total INR required', path: ['inrTotal'] });
     }
     if (data.aedAmount == null || data.aedAmount <= 0) {
-      ctx.addIssue({ code: 'custom', message: 'Total AED required', path: ['aedAmount'] });
+      ctx.addIssue({ code: 'custom', message: 'AED total required (unit rate × units)', path: ['aedAmount'] });
+    }
+    if (data.unitRate == null || data.unitRate <= 0) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'AED unit rate required (same as IC purchase)',
+        path: ['unitRate'],
+      });
+    }
+    const pay = data.metalPaymentMethod === 'AED' ? 'AED' : 'CASH';
+    if (pay === 'AED' && !data.aedAgentId?.trim()) {
+      ctx.addIssue({ code: 'custom', message: 'AED agent required', path: ['aedAgentId'] });
+    }
+    const labTotal = Number(data.labTotalInr) || 0;
+    if (labTotal > 0 && data.inrTotal != null && labTotal - data.inrTotal > 0.0001) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Lab test total cannot exceed metal INR total',
+        path: ['labTotalInr'],
+      });
     }
   });
 

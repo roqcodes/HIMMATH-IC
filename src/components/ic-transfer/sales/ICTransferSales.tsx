@@ -10,7 +10,9 @@ import {
   saleMatchesDateFilter,
   saleMatchesSearchQuery,
 } from '@/lib/icTransfer/branchOrderOwnership';
-import { resolveDateFilterRange } from '@/lib/dateFilterRange';
+import { resolveDateFilterRange, getDateFilterLabel } from '@/lib/dateFilterRange';
+import { computeSaleBookKpis, countSalesInRange } from '@/lib/icTransfer/dealBookKpis';
+import { saleDealAed, saleDealInr } from '@/lib/icTransfer/dealTableDisplay';
 import { useICTransferFilters } from '../ui';
 import { canManageICTransferGlobalSettings } from '@/lib/icTransfer/settings';
 import AddSaleModal from './AddSaleModal';
@@ -21,7 +23,6 @@ import { isBranchHandledSale } from '@/lib/icTransfer/fulfillmentHandler';
 import { normalizeOrderStatus, getCustomerOrderStatus } from '@/lib/icTransfer/orderStatus';
 import { hasAdminWorkflowActions } from '@/lib/icTransfer/orderWorkflowRules';
 import { comparePriority } from '@/lib/icTransfer/orderPriority';
-import { sumMetalSaleWeightG } from '@/lib/icTransfer/warehouseMatrixMetrics';
 import { adminBulkVerifyDeliveryAction } from '@/app/actions/icTransferActions';
 import SalesHeader from './sales-header';
 import { useWriteAccess } from '@/context/RbacWriteContext';
@@ -119,6 +120,26 @@ export default function ICTransferSales() {
     );
   }, [icSales, isBranchAdminView, branchName, branchCustomerIds, branchCustomerNames, allBranches]);
 
+  const range = useMemo(
+    () => resolveDateFilterRange(dateFilter, customStartDate, customEndDate),
+    [dateFilter, customStartDate, customEndDate],
+  );
+
+  const rangeLabel = useMemo(
+    () => getDateFilterLabel(dateFilter, customStartDate, customEndDate),
+    [dateFilter, customStartDate, customEndDate],
+  );
+
+  const saleBookKpis = useMemo(
+    () => computeSaleBookKpis(scopedSales, range),
+    [scopedSales, range],
+  );
+
+  const saleCountHint = useMemo(() => {
+    const { cash, metal } = countSalesInRange(scopedSales, range);
+    return `${cash} IC · ${metal} metal`;
+  }, [scopedSales, range]);
+
   const customerFilterOptions = useMemo(() => {
     const byKey = new Map<string, string>();
     for (const s of scopedSales) {
@@ -134,8 +155,6 @@ export default function ICTransferSales() {
   }, [scopedSales, branchName, branches]);
 
   const baseFilteredSales = useMemo<ICSale[]>(() => {
-    const range = resolveDateFilterRange(dateFilter, customStartDate, customEndDate);
-
     return scopedSales.filter((s: ICSale) => {
       if (!saleMatchesDateFilter(s, range)) return false;
       if (search && !saleMatchesSearchQuery(s, search, branches, branchName)) return false;
@@ -167,9 +186,7 @@ export default function ICTransferSales() {
     filterCustomer,
     filterWarehouse,
     filterSettlement,
-    dateFilter,
-    customStartDate,
-    customEndDate,
+    range,
     branches,
     branchName,
   ]);
@@ -217,15 +234,18 @@ export default function ICTransferSales() {
       let valA: string | number;
       let valB: string | number;
 
-      if (sortField === 'Customer') {
+      if (sortField === 'Party') {
         valA = getAdminSaleCustomerName(a, branchName, branches) || '';
         valB = getAdminSaleCustomerName(b, branchName, branches) || '';
       } else if (sortField === 'Units') {
         valA = Number(a.units || 0);
         valB = Number(b.units || 0);
+      } else if (sortField === 'Total INR') {
+        valA = saleDealInr(a);
+        valB = saleDealInr(b);
       } else if (sortField === 'Total AED') {
-        valA = Number(a.aedAmount || 0);
-        valB = Number(b.aedAmount || 0);
+        valA = saleDealAed(a);
+        valB = saleDealAed(b);
       } else if (sortField === 'Metal (g)') {
         valA = Number(a.metalWeightG || 0);
         valB = Number(b.metalWeightG || 0);
@@ -255,41 +275,6 @@ export default function ICTransferSales() {
     });
     return sorted;
   }, [filteredSales, sortField, sortOrder, branchName, branches, tab, getWarehouseName]);
-
-  const stats = useMemo(() => {
-    const totalOrders = filteredSales.length;
-    const totalValue = filteredSales.reduce((acc: number, s: ICSale) => acc + (s.aedAmount || 0), 0);
-    const totalUnits = filteredSales.reduce(
-      (acc: number, s: ICSale) => acc + (s.settlementMode === 'metal' ? 0 : s.units),
-      0,
-    );
-    const totalMetalG = sumMetalSaleWeightG(filteredSales);
-    const metalCount = filteredSales.filter(s => s.settlementMode === 'metal').length;
-    const cashCount = filteredSales.length - metalCount;
-    const avgRate = totalUnits > 0 ? totalValue / totalUnits : 0;
-    const pendingCount = filteredSales.filter(
-      (s: ICSale) => normalizeOrderStatus(s.orderStatus) === 'pending',
-    ).length;
-    const pendingVerificationCount = filteredSales.filter(
-      (s: ICSale) => normalizeOrderStatus(s.orderStatus) === 'delivery_pending_admin',
-    ).length;
-    const partialCount = filteredSales.filter(
-      (s: ICSale) => getCustomerOrderStatus(s) === 'Partial',
-    ).length;
-
-    return {
-      totalOrders,
-      totalValue,
-      totalUnits,
-      totalMetalG,
-      metalCount,
-      cashCount,
-      avgRate,
-      pendingCount,
-      pendingVerificationCount,
-      partialCount,
-    };
-  }, [filteredSales]);
 
   useEffect(() => {
     if (!viewModalOpen || !selectedSale) return;
@@ -357,7 +342,7 @@ export default function ICTransferSales() {
           setCustomEndDate={setCustomEndDate}
         />
 
-        <SalesKpiCards stats={stats} />
+        <SalesKpiCards books={saleBookKpis} rangeLabel={rangeLabel} countHint={saleCountHint} />
       </div>
 
       <div className="min-h-0 flex-1 pt-2">
@@ -462,8 +447,8 @@ export default function ICTransferSales() {
         title="Verify Selected Deliveries"
         message={
           selectedVerifyIds.size === 1
-            ? 'Confirm delivery proof and mark this order as completed? The customer will see the order as delivered.'
-            : `Confirm delivery proof and mark ${selectedVerifyIds.size} orders as completed? Customers will see these orders as delivered.`
+            ? 'Confirm delivery proof and mark this order as completed? The party will see the order as delivered.'
+            : `Confirm delivery proof and mark ${selectedVerifyIds.size} orders as completed? Parties will see these orders as delivered.`
         }
         confirmLabel={
           selectedVerifyIds.size === 1

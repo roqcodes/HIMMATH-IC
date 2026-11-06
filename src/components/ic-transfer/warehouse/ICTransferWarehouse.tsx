@@ -4,11 +4,8 @@ import React, { useMemo, useRef } from 'react';
 import { useApp } from '@/context/AppContext';
 import { asicBtnPrimary } from '@/components/asic/ui';
 import { resolveDateFilterRange, getDateFilterLabel } from '@/lib/dateFilterRange';
-import {
-  computeWarehouseMatrix,
-  matrixRowToCells,
-  WAREHOUSE_MATRIX_COLUMNS,
-} from '@/lib/icTransfer/warehouseMatrixMetrics';
+import { computeWarehouseMatrix } from '@/lib/icTransfer/warehouseMatrixMetrics';
+import { buildICTransferInventoryKpiMetrics } from '@/lib/icTransfer/inventoryKpiMetrics';
 import {
   filterSalesForBranchPortal,
   filterPurchasesForBranchPortal,
@@ -20,15 +17,13 @@ import ManageWarehousesSection from '@/components/ic-transfer/warehouse/ManageWa
 import ICTransferDateFilterBar from '@/components/ic-transfer/shared/ICTransferDateFilterBar';
 import AsicPageHeader from '@/components/asic/AsicPageHeader';
 import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
+import ICTransferDealBookKpiStrips from '@/components/ic-transfer/shared/ICTransferDealBookKpiStrips';
+import {
+  computeCombinedTradeBookKpis,
+  countPurchasesInRange,
+  countSalesInRange,
+} from '@/lib/icTransfer/dealBookKpis';
 import { useICTransferRegionFilter } from '@/components/ic-transfer/shared/ICTransferFilterProvider';
-import SalesTableShell, {
-  salesTableClass,
-  salesTableEmptyClass,
-  salesTableTdClass,
-  salesTableTdLabelClass,
-  salesTableThClass,
-  salesTableTheadRowClass,
-} from '@/components/ic-transfer/shared/SalesTableShell';
 import {
   PageShell,
   useICTransferFilters,
@@ -103,6 +98,17 @@ export default function ICTransferWarehouse({
     [scopedWarehouses, icRegions, scopedPurchases, scopedSales, range, selectedRegionIds],
   );
 
+  const tradeBookKpis = useMemo(
+    () => computeCombinedTradeBookKpis(scopedPurchases, scopedSales, range),
+    [scopedPurchases, scopedSales, range],
+  );
+
+  const tradeCountHint = useMemo(() => {
+    const p = countPurchasesInRange(scopedPurchases, range);
+    const s = countSalesInRange(scopedSales, range);
+    return `${p.cash + p.metal} purchases · ${s.cash + s.metal} sales`;
+  }, [scopedPurchases, scopedSales, range]);
+
   const openAddWarehouseRef = useRef<(() => void) | null>(null);
 
   const addWarehouseButton = (
@@ -115,9 +121,19 @@ export default function ICTransferWarehouse({
     </button>
   );
 
-  const fmtStock = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 4 });
-  const formatAedKpi = (n: number) =>
-    `AED ${n.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const inventoryKpis = useMemo(
+    () =>
+      buildICTransferInventoryKpiMetrics({
+        currentStock: totals.currentStock,
+        currentMetalG: totals.currentMetalG,
+        cashGrossProfitAed: totals.cashGrossProfitAed,
+        metalProfitAed: totals.metalProfitAed,
+        metalProfitInr: totals.metalProfitInr,
+        rangeLabel,
+        metalHint: 'Grams',
+      }),
+    [totals, rangeLabel],
+  );
 
   return (
     <PageShell>
@@ -132,95 +148,21 @@ export default function ICTransferWarehouse({
         setCustomEndDate={setCustomEndDate}
       />
 
-      <AsicKpiStrip
-        metrics={[
-          {
-            label: 'Stock (units)',
-            value: fmtStock(totals.currentStock),
-            hint: 'On hand',
-          },
-          {
-            label: 'Metal on hand',
-            value: fmtStock(totals.currentMetalG),
-            hint: 'Grams',
-            tone: 'amber',
-          },
-          {
-            label: 'IC purchases',
-            value: totals.cashPurchases.toLocaleString(),
-            hint: `Cash · ${rangeLabel}`,
-          },
-          {
-            label: 'Metal purchases',
-            value: totals.metalPurchases.toLocaleString(),
-            hint: `In range · ${rangeLabel}`,
-            tone: 'indigo',
-          },
-          {
-            label: 'IC sales',
-            value: totals.cashSales.toLocaleString(),
-            hint: `Cash · ${rangeLabel}`,
-            tone: 'emerald',
-          },
-          {
-            label: 'Metal sales',
-            value: totals.metalSales.toLocaleString(),
-            hint: `In range · ${rangeLabel}`,
-          },
-          {
-            label: 'IC gross profit',
-            value: formatAedKpi(totals.cashGrossProfitAed),
-            hint: `WAC · ${rangeLabel}`,
-            tone: totals.cashGrossProfitAed >= 0 ? 'emerald' : 'red',
-          },
-          {
-            label: 'Metal P&L',
-            value: formatAedKpi(totals.metalProfitAed),
-            hint: 'Sale − purchase AED',
-            tone: totals.metalProfitAed >= 0 ? 'emerald' : 'red',
-          },
-        ]}
-        columns={3}
-      />
+      <AsicKpiStrip columns={4} metrics={inventoryKpis} />
 
-      <div className="mb-3">
-        <SalesTableShell title={`Warehouse Matrix · ${rangeLabel}`}>
-          <table className={`${salesTableClass} min-w-[960px]`}>
-            <thead>
-              <tr className={salesTableTheadRowClass}>
-                {['Warehouse', ...WAREHOUSE_MATRIX_COLUMNS].map(col => (
-                  <th key={col} className={salesTableThClass}>{col}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (
-                <tr>
-                  <td colSpan={WAREHOUSE_MATRIX_COLUMNS.length + 1} className={salesTableEmptyClass}>
-                    {isBranchPortal
-                      ? 'No branch warehouses yet. Add one below.'
-                      : 'No warehouses match the selected regions.'}
-                  </td>
-                </tr>
-              ) : (
-                rows.map(row => (
-                  <tr key={row.warehouseId} className="border-b border-slate-100 transition-colors hover:bg-slate-50/80">
-                    <td className={salesTableTdLabelClass}>{row.warehouseName}</td>
-                    {matrixRowToCells(row).map((cell, j) => (
-                      <td key={j} className={salesTableTdClass}>{cell}</td>
-                    ))}
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </SalesTableShell>
-      </div>
+      <ICTransferDealBookKpiStrips
+        books={tradeBookKpis}
+        rangeLabel={rangeLabel}
+        flow="combined"
+        countHint={tradeCountHint}
+      />
 
       <ManageWarehousesSection
         portalMode={portalMode}
         branchId={isBranchPortal ? branchId : undefined}
         warehouses={scopedWarehouses}
+        matrixRows={rows}
+        rangeLabel={rangeLabel}
         registerOpenAdd={fn => {
           openAddWarehouseRef.current = fn;
         }}

@@ -302,9 +302,6 @@ export default function RateGroupBulkUpdateBar({
       <div className="flex flex-col gap-1 border-b border-slate-100 px-4 py-4 md:flex-row md:items-end md:justify-between md:px-6 md:py-5">
         <div>
           <h3 className="text-sm font-bold text-slate-900 sm:text-base">Bulk rate update</h3>
-          <p className="mt-0.5 text-xs text-slate-500">
-            Pick groups, set a rate, apply once — use Load previous data to copy an existing setup.
-          </p>
         </div>
         {selectedCount > 0 ? (
           <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-accent/10 px-2.5 py-1 text-[11px] font-bold text-accent">
@@ -455,13 +452,6 @@ export default function RateGroupBulkUpdateBar({
               Step 2
             </p>
             <p className="text-sm font-bold text-slate-900">Set the rate</p>
-            <p className="mt-0.5 text-xs text-slate-500">
-              {convertedRateOnly
-                ? `Select types on the left, then set ${currency} flat or slab rates on the right.`
-                : loadedGroup
-                  ? `Editing from "${loadedGroup.name}" — select types and set flat or slab rates.`
-                  : 'Select transaction types, then set flat or slab rates on the right.'}
-            </p>
           </div>
 
           <div className="flex-1 space-y-5 px-3 py-4 lg:pl-4 lg:pr-4">

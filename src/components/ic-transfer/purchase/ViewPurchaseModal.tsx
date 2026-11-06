@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import Modal from '@/components/ui/Modal';
 import { asicBtnOutline } from '@/components/asic/ui';
+import { DealInvoiceTextButtons } from '@/components/ic-transfer/invoice/DealInvoiceButtons';
 import { btnDangerOutline } from '@/lib/ui';
 import { ICPurchase } from '@/types';
 import { useApp } from '@/context/AppContext';
@@ -10,6 +11,9 @@ import { ConfirmModal } from '@/components/warehouse/shared';
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
 import { formatAmount } from '@/lib/icTransfer/rateCalculations';
 import { computeMetalSheetRateAed, formatSettlementModeLabel } from '@/lib/icTransfer/metalSettlement';
+import { isMetalAedPayment } from '@/lib/domain/books';
+import { hasLab } from '@/lib/icTransfer/labTest';
+import { fmtLedgerInr, FmtLedgerInr } from '@/lib/icFunds/format';
 import InrAmountInWords from '../shared/InrAmountInWords';
 import {
   ModalCalcLabel,
@@ -45,6 +49,7 @@ export default function ViewPurchaseModal({ open, onClose, purchase }: Props) {
   if (!purchase || !amounts) return null;
 
   const isMetal = purchase.settlementMode === 'metal';
+  const metalPaidAed = isMetal && isMetalAedPayment(purchase.metalPaymentMethod);
 
   const getSupplierName = (id?: string) => icSuppliers.find(s => s.id === id)?.name || id || 'Unknown';
   const getWarehouseName = (id?: string) => {
@@ -77,9 +82,12 @@ export default function ViewPurchaseModal({ open, onClose, purchase }: Props) {
             >
               Delete
             </button>
-            <button type="button" className={asicBtnOutline} onClick={onClose} disabled={deleteLoading}>
-              Close
-            </button>
+            <div className="flex items-center gap-2">
+              <DealInvoiceTextButtons purchase={purchase} />
+              <button type="button" className={asicBtnOutline} onClick={onClose} disabled={deleteLoading}>
+                Close
+              </button>
+            </div>
           </div>
         }
       >
@@ -109,7 +117,7 @@ export default function ViewPurchaseModal({ open, onClose, purchase }: Props) {
               label="Settlement"
               value={
                 <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-700">
-                  {formatSettlementModeLabel(purchase.settlementMode)}
+                  {formatSettlementModeLabel(purchase.settlementMode, purchase.metalPaymentMethod)}
                 </span>
               }
             />
@@ -132,18 +140,50 @@ export default function ViewPurchaseModal({ open, onClose, purchase }: Props) {
                   <WarehouseLink warehouseId={purchase.warehouseId} name={getWarehouseName(purchase.warehouseId)} />
                 }
               />
+              {isMetal ? (
+                <ModalDetailRow
+                  label="Paid in"
+                  value={purchase.metalPaymentMethod === 'AED' ? 'AED via agent' : 'Cash (INR)'}
+                />
+              ) : null}
+              {isMetal && purchase.metalPaymentMethod === 'AED' ? (
+                <ModalDetailRow
+                  label="AED agent"
+                  value={
+                    purchase.aedAgentCounterpartyId || purchase.aedAgentId ? (
+                      <CounterpartyLink
+                        counterpartyId={purchase.aedAgentCounterpartyId || purchase.aedAgentId}
+                        name={
+                          purchase.aedAgentName ||
+                          getSupplierName(purchase.aedAgentCounterpartyId || purchase.aedAgentId || undefined)
+                        }
+                      />
+                    ) : (
+                      '—'
+                    )
+                  }
+                />
+              ) : null}
             </div>
           </div>
 
           <div className="space-y-3">
             {isMetal ? (
-              <div className={`grid grid-cols-2 gap-4 sm:grid-cols-3 ${modalCalcPanelClass}`}>
+              <div className={`grid grid-cols-2 gap-4 ${metalPaidAed ? 'sm:grid-cols-3' : ''} ${modalCalcPanelClass}`}>
                 <ModalDetailRow label="Weight (g)" value={formatAmount(purchase.metalWeightG ?? 0, 4)} />
                 <ModalDetailRow label="G rate (INR)" value={formatAmount(purchase.metalRateInrPerG ?? 0)} />
-                <ModalDetailRow
-                  label="Rate (AED)"
-                  value={formatAmount(computeMetalSheetRateAed(purchase.inrTotal ?? 0, purchase.aedTotal ?? 0))}
-                />
+                {metalPaidAed ? (
+                  <ModalDetailRow
+                    label="Rate (AED)"
+                    value={formatAmount(computeMetalSheetRateAed(purchase.inrTotal ?? 0, purchase.aedTotal ?? 0))}
+                  />
+                ) : null}
+                {hasLab(purchase) ? (
+                  <ModalDetailRow
+                    label="Lab test (INR)"
+                    value={<FmtLedgerInr amount={purchase.labTotalInr ?? 0} />}
+                  />
+                ) : null}
               </div>
             ) : (
             <div className={`grid grid-cols-2 gap-4 ${modalCalcPanelClass}`}>
@@ -162,28 +202,28 @@ export default function ViewPurchaseModal({ open, onClose, purchase }: Props) {
             </div>
             )}
 
-            <div className={`grid grid-cols-1 gap-4 ${isMetal ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} ${modalCalcPanelClass}`}>
-              {isMetal ? (
-                <div>
-                  <ModalCalcLabel>Stock units</ModalCalcLabel>
-                  <p className="mt-0.5 text-sm font-bold tabular-nums text-slate-900">
-                    {formatAmount(purchase.units, 4)}
-                  </p>
-                </div>
-              ) : null}
+            <div className={`grid grid-cols-1 gap-4 ${isMetal && metalPaidAed ? 'sm:grid-cols-2' : isMetal ? '' : 'sm:grid-cols-2'} ${modalCalcPanelClass}`}>
               <div>
-                <ModalCalcLabel>Total (INR)</ModalCalcLabel>
+                <ModalCalcLabel>{hasLab(purchase) ? 'Net (INR)' : 'Total (INR)'}</ModalCalcLabel>
                 <p className="mt-0.5 text-sm font-bold tabular-nums text-slate-900">
                   {formatModalInrTotal(amounts.inrTotal)}
                 </p>
-                <InrAmountInWords amount={amounts.inrTotal} className="mt-1" />
+                {hasLab(purchase) ? (
+                  <p className="mt-1 text-[11px] font-medium text-slate-500">
+                    Gross <FmtLedgerInr amount={purchase.inrTotal ?? 0} /> − Lab <FmtLedgerInr amount={purchase.labTotalInr ?? 0} />
+                  </p>
+                ) : (
+                  <InrAmountInWords amount={amounts.inrTotal} className="mt-1" />
+                )}
               </div>
-              <div>
-                <ModalCalcLabel>Total (AED)</ModalCalcLabel>
-                <p className="mt-0.5 text-sm font-bold tabular-nums text-slate-900">
-                  {formatModalAedTotal(amounts.aedTotal)}
-                </p>
-              </div>
+              {(!isMetal || metalPaidAed) ? (
+                <div>
+                  <ModalCalcLabel>Total (AED)</ModalCalcLabel>
+                  <p className="mt-0.5 text-sm font-bold tabular-nums text-slate-900">
+                    {formatModalAedTotal(amounts.aedTotal)}
+                  </p>
+                </div>
+              ) : null}
             </div>
 
             {purchase.notes ? (

@@ -77,7 +77,6 @@ export default function ICTransferSettingsUsersPage({
     <PageShell>
       <PageHeader
         title={title}
-        subtitle={subtitle}
         actions={actions || <AddButton label={addButtonLabel} onClick={() => setModalOpen(true)} />}
       />
 

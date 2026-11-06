@@ -4,7 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
 import { asicBtnPrimary } from '@/components/asic/ui';
-import { PageHeader, PageShell, SectionCard } from '../ui';
+import { PageHeader, PageShell } from '../ui';
 import { sectionHref } from '@/lib/asic/nav';
 
 export default function ICTransferFinance() {
@@ -30,11 +30,6 @@ export default function ICTransferFinance() {
         ]}
       />
 
-      <SectionCard>
-        <div className="px-3 py-6 text-center text-sm text-slate-500">
-          Payments, receipts, journal, contra, cash &amp; bank, and P&amp;L are in IC Funds.
-        </div>
-      </SectionCard>
     </PageShell>
   );
 }

@@ -1,7 +1,9 @@
 import type { AsicKpiMetric } from '@/components/asic/AsicKpiStrip';
 import type { ICFundVoucherRangeStats } from '@/app/actions/icFundsActions';
 import type { ICFundAccountType, ICFundVoucher, ICFundVoucherType } from '@/types';
-import { fmtLedgerAed } from '@/lib/icFunds/format';
+import { fmtLedgerAed, fmtLedgerInr } from '@/lib/icFunds/format';
+import { ledgerAedNode, ledgerInrNode } from '@/lib/icFunds/formatDisplay';
+import { formatMetalPlKpi } from '@/lib/icTransfer/inventoryKpiMetrics';
 import type { ICFundAccountDetailStats } from '@/lib/icFunds/accountDetailAnalytics';
 import type { ICFundsReportId } from '@/lib/icFunds/nav';
 import type { ICWarehousePLReport } from '@/lib/icFunds/warehouseProfit';
@@ -18,29 +20,58 @@ type ProfitLossSummary = {
   net: number;
 };
 
+function computeInrPlKpisFromStatement(statement: PlStatement): AsicKpiMetric[] {
+  return [
+    {
+      label: 'Metal sales',
+      value: ledgerInrNode(statement.salesTotal),
+      hint: 'Income plus transfers to reserve',
+      tone: statement.salesTotal > 0 ? 'emerald' : 'slate',
+    },
+    {
+      label: 'Cost of metal',
+      value: ledgerInrNode(statement.directCostsTotal),
+      hint: 'COGS on completed cash-metal sales',
+      tone: statement.directCostsTotal > 0 ? 'red' : 'slate',
+    },
+    {
+      label: 'Gross result',
+      value: ledgerInrNode(statement.grossResult),
+      hint: 'Sales less cost of metal sold',
+      tone: statement.grossResult >= 0 ? 'emerald' : 'red',
+    },
+    {
+      label: 'Net result (INR)',
+      value: ledgerInrNode(statement.netForPeriod),
+      hint: 'Metal commodity ledger',
+      tone: statement.netForPeriod >= 0 ? 'emerald' : 'red',
+    },
+  ];
+}
+
 function computePlKpisFromStatement(statement: PlStatement, voucherCount?: number): AsicKpiMetric[] {
   const metrics: AsicKpiMetric[] = [
     {
       label: 'Sales',
-      value: fmtLedgerAed(statement.salesTotal),
+      value: ledgerAedNode(statement.salesTotal),
       hint: 'Income plus transfers to reserve',
       tone: statement.salesTotal > 0 ? 'emerald' : 'slate',
     },
     {
       label: 'Direct costs',
-      value: fmtLedgerAed(statement.directCostsTotal),
+      value: ledgerAedNode(statement.directCostsTotal),
       hint: 'COGS on completed sales (WAC); unsold stock stays in inventory',
       tone: statement.directCostsTotal > 0 ? 'red' : 'slate',
     },
     {
       label: 'Gross result',
-      value: fmtLedgerAed(statement.grossResult),
+      value: ledgerAedNode(statement.grossResult),
       hint: 'Sales less direct costs',
       tone: statement.grossResult >= 0 ? 'emerald' : 'red',
     },
     {
       label: 'Net result',
-      value: fmtLedgerAed(statement.netForPeriod),
+      value: ledgerAedNode(statement.netForPeriod),
       hint:
         voucherCount != null
           ? `${voucherCount} P&L ${voucherCount === 1 ? 'voucher' : 'vouchers'} in period`
@@ -146,7 +177,7 @@ export function computeAccountsKpis(
   const metrics: AsicKpiMetric[] = [
     {
       label: 'Cash & bank',
-      value: fmtLedgerAed(cashBank),
+      value: ledgerAedNode(cashBank),
       hint: `${bankAccounts.length} tills & wallets`,
       tone: cashBank < 0 ? 'red' : 'emerald',
     },
@@ -156,12 +187,12 @@ export function computeAccountsKpis(
     metrics.push(
       {
         label: 'Receivables',
-        value: fmtLedgerAed(receivables),
+        value: ledgerAedNode(receivables),
         hint: `${receivableRows.length} customers owe us`,
       },
       {
         label: 'Payables',
-        value: fmtLedgerAed(payables),
+        value: ledgerAedNode(payables),
         hint: `${payableRows.length} balances we owe`,
         tone: payables > 0 ? 'amber' : 'slate',
       },
@@ -172,7 +203,7 @@ export function computeAccountsKpis(
     pending.count > 0
       ? {
           label: 'Pending approval',
-          value: fmtLedgerAed(pending.total),
+          value: ledgerAedNode(pending.total),
           hint: `${pending.count} awaiting activation`,
           tone: 'amber',
         }
@@ -200,20 +231,21 @@ export function computeVoucherKpis(
     stats.pending > 0
       ? {
           label: 'Awaiting approval',
-          value: fmtLedgerAed(stats.pendingTotal),
+          value: ledgerAedNode(stats.pendingTotal),
           hint: `${stats.pending} pending ${stats.pending === 1 ? 'entry' : 'entries'}`,
           tone: 'amber',
         }
       : {
           label: 'Largest entry',
-          value: stats.largest > 0 ? fmtLedgerAed(stats.largest) : '—',
+          value: stats.largest > 0 ? ledgerAedNode(stats.largest) : '—',
+          valueTitle: stats.largest > 0 ? fmtLedgerAed(stats.largest) : undefined,
           hint: 'Biggest posted amount',
         };
 
   return [
     {
       label: labels.total,
-      value: fmtLedgerAed(stats.total),
+      value: ledgerAedNode(stats.total),
       hint: labels.totalHint,
       tone: 'emerald',
     },
@@ -240,19 +272,19 @@ export function computePlKpis(summary: ProfitLossSummary, voucherCount?: number)
   return [
     {
       label: 'Income',
-      value: fmtLedgerAed(summary.income),
+      value: ledgerAedNode(summary.income),
       hint: 'Revenue credited in period',
       tone: summary.income > 0 ? 'emerald' : 'slate',
     },
     {
       label: 'Total costs',
-      value: fmtLedgerAed(totalCosts),
+      value: ledgerAedNode(totalCosts),
       hint: `Op ${fmtLedgerAed(summary.expense)} · Direct ${fmtLedgerAed(summary.dExpense)}`,
       tone: totalCosts > 0 ? 'red' : 'slate',
     },
     {
       label: 'Net result',
-      value: fmtLedgerAed(summary.net),
+      value: ledgerAedNode(summary.net),
       hint: summary.net >= 0 ? 'Profit for the period' : 'Loss for the period',
       tone: summary.net >= 0 ? 'emerald' : 'red',
     },
@@ -280,7 +312,13 @@ export function computeBooksKpis(input: {
   payables?: ICFundAccount[];
   warehousePl?: ICWarehousePLReport | null;
   settlementTradeReport?: ICSettlementTradeReport | null;
-  statement?: { opening: number; closing: number; lines: Array<{ debit: number; credit: number; status?: string }> } | null;
+  statement?: {
+    opening: number;
+    closing: number;
+    currency?: 'AED' | 'INR';
+    lines: Array<{ debit: number; credit: number; status?: string }>;
+  } | null;
+  warehouseBook?: 'ic' | 'metal';
 }): AsicKpiMetric[] {
   const {
     reportView,
@@ -295,7 +333,12 @@ export function computeBooksKpis(input: {
     warehousePl,
     settlementTradeReport,
     statement,
+    warehouseBook,
   } = input;
+
+  if (reportView === 'metal-pl' && plStatement) {
+    return computeInrPlKpisFromStatement(plStatement);
+  }
 
   if (reportView === 'profit-loss' && plStatement) {
     return computePlKpisFromStatement(plStatement, vouchers.length);
@@ -311,7 +354,7 @@ export function computeBooksKpis(input: {
     return [
       {
         label: 'Total assets',
-        value: fmtLedgerAed(balanceSheet.totalAssets),
+        value: ledgerAedNode(balanceSheet.totalAssets),
         hint:
           inventory > 0.005
             ? `Cash ${fmtLedgerAed(balanceSheet.bank)} · AR ${fmtLedgerAed(balanceSheet.receivables)} · IC stock ${fmtLedgerAed(inventory)}`
@@ -320,19 +363,20 @@ export function computeBooksKpis(input: {
       },
       {
         label: 'Liabilities',
-        value: fmtLedgerAed(balanceSheet.payables),
+        value: ledgerAedNode(balanceSheet.payables),
         hint: 'Trade payables',
         tone: balanceSheet.payables > 0 ? 'amber' : 'slate',
       },
       {
         label: 'Equity',
-        value: fmtLedgerAed(balanceSheet.totalLiabilitiesEquity - balanceSheet.payables),
+        value: ledgerAedNode(balanceSheet.totalLiabilitiesEquity - balanceSheet.payables),
         hint: 'Reserve + current period',
         tone: 'indigo',
       },
       {
         label: balanceSheet.balanced ? 'Balanced' : 'Out of balance',
-        value: balanceSheet.balanced ? 'Yes' : fmtLedgerAed(Math.abs(ob)),
+        value: balanceSheet.balanced ? 'Yes' : ledgerAedNode(Math.abs(ob)),
+        valueTitle: balanceSheet.balanced ? 'Yes' : fmtLedgerAed(Math.abs(ob)),
         hint: balanceSheet.balanced
           ? 'Assets = liabilities + equity'
           : 'Review opening balances or journals',
@@ -351,23 +395,24 @@ export function computeBooksKpis(input: {
     return [
       {
         label: 'Total debits',
-        value: fmtLedgerAed(debit),
+        value: ledgerAedNode(debit),
         hint: `${trialBalance.length} accounts with balance`,
       },
       {
         label: 'Total credits',
-        value: fmtLedgerAed(credit),
+        value: ledgerAedNode(credit),
         hint: 'Posted trial balance',
       },
       {
         label: 'Difference',
-        value: diff < 0.01 ? '—' : fmtLedgerAed(diff),
+        value: diff < 0.01 ? '—' : ledgerAedNode(diff),
+        valueTitle: diff < 0.01 ? undefined : fmtLedgerAed(diff),
         hint: diff < 0.01 ? 'Debits equal credits' : 'Out of balance',
         tone: diff < 0.01 ? 'emerald' : 'red',
       },
       {
         label: 'Pending',
-        value: fmtLedgerAed(pendingDr + pendingCr),
+        value: ledgerAedNode(pendingDr + pendingCr),
         hint: `Dr ${fmtLedgerAed(pendingDr)} · Cr ${fmtLedgerAed(pendingCr)}`,
         tone: pendingDr + pendingCr > 0 ? 'amber' : 'slate',
       },
@@ -385,13 +430,14 @@ export function computeBooksKpis(input: {
     return [
       {
         label: 'Cash & bank',
-        value: fmtLedgerAed(total),
+        value: ledgerAedNode(total),
         hint: `${cashBank.length} accounts`,
         tone: total < 0 ? 'red' : 'emerald',
       },
       {
         label: 'Largest till',
-        value: largest ? fmtLedgerAed(largest.balance) : '—',
+        value: largest ? ledgerAedNode(largest.balance) : '—',
+        valueTitle: largest ? fmtLedgerAed(largest.balance) : undefined,
         hint: largest?.name ? largest.name : 'No bank accounts',
       },
       {
@@ -403,7 +449,7 @@ export function computeBooksKpis(input: {
       pending.count > 0
         ? {
             label: 'Pending',
-            value: fmtLedgerAed(pending.total),
+            value: ledgerAedNode(pending.total),
             hint: `${pending.count} accounts awaiting approval`,
             tone: 'amber',
           }
@@ -423,18 +469,18 @@ export function computeBooksKpis(input: {
     return [
       {
         label: 'Receivables',
-        value: fmtLedgerAed(ar),
+        value: ledgerAedNode(ar),
         hint: `${receivables.length} customers owe us`,
       },
       {
         label: 'Payables',
-        value: fmtLedgerAed(ap),
+        value: ledgerAedNode(ap),
         hint: `${payables.length} balances we owe`,
         tone: ap > 0 ? 'amber' : 'slate',
       },
       {
         label: 'Net personal',
-        value: fmtLedgerAed(ar - ap),
+        value: ledgerAedNode(ar - ap),
         hint: 'Receivables minus payables',
         tone: ar - ap >= 0 ? 'emerald' : 'red',
       },
@@ -447,59 +493,89 @@ export function computeBooksKpis(input: {
     ];
   }
 
-  if ((reportView === 'fund-trades' || reportView === 'metal-trades') && settlementTradeReport) {
+  if (
+    (reportView === 'fund-trades' ||
+      reportView === 'metal-trades' ||
+      reportView === 'metal-agent-trades') &&
+    settlementTradeReport
+  ) {
     const s = settlementTradeReport.summary;
-    const isMetal = settlementTradeReport.settlementMode === 'metal';
-    if (isMetal) {
+    if (reportView === 'metal-agent-trades') {
       return [
         {
-          label: 'Purchases',
-          value: fmtLedgerAed(s.purchaseAed),
-          hint: `${s.purchaseCount} buys · ${s.metalWeightPurchasedG.toLocaleString(undefined, { maximumFractionDigits: 2 })} g`,
+          label: 'Purchase (AED)',
+          value: ledgerAedNode(s.purchaseAed),
+          hint: `${s.purchaseCount} agent settlements`,
           tone: 'amber',
         },
         {
-          label: 'Sales',
-          value: fmtLedgerAed(s.saleAed),
-          hint: `${s.saleCount} sells · ${s.metalWeightSoldG.toLocaleString(undefined, { maximumFractionDigits: 2 })} g`,
+          label: 'Sales (AED)',
+          value: ledgerAedNode(s.saleAed),
+          hint: `${s.saleCount} agent collections`,
           tone: 'emerald',
         },
         {
+          label: 'Net settlement',
+          value: ledgerAedNode(s.saleAed - s.purchaseAed),
+          hint: 'Agent book — not INR metal profit',
+          tone: s.saleAed - s.purchaseAed >= 0 ? 'emerald' : 'red',
+        },
+        {
+          label: 'Fine metal (g)',
+          value: s.metalWeightSoldG.toLocaleString(undefined, { maximumFractionDigits: 2 }),
+          hint: 'Quantity memo on agent deals',
+          tone: 'slate',
+        },
+      ];
+    }
+    if (reportView === 'metal-trades') {
+      return [
+        {
           label: 'INR purchased',
-          value: `${s.purchaseInr.toLocaleString(undefined, { maximumFractionDigits: 2 })} INR`,
-          hint: 'Metal settlement value (buy side)',
+          value: ledgerInrNode(s.purchaseInr),
+          valueTitle: fmtLedgerInr(s.purchaseInr),
+          hint: `${s.purchaseCount} cash-metal buys · ${s.metalWeightPurchasedG.toLocaleString(undefined, { maximumFractionDigits: 2 })} g`,
           tone: 'indigo',
         },
         {
           label: 'INR sold',
-          value: `${s.saleInr.toLocaleString(undefined, { maximumFractionDigits: 2 })} INR`,
-          hint: 'Metal settlement value (sell side)',
+          value: ledgerInrNode(s.saleInr),
+          valueTitle: fmtLedgerInr(s.saleInr),
+          hint: `${s.saleCount} cash-metal sells · ${s.metalWeightSoldG.toLocaleString(undefined, { maximumFractionDigits: 2 })} g`,
           tone: 'slate',
         },
         {
-          label: 'Booked P&L',
-          value: fmtLedgerAed(s.bookedAedProfit),
-          hint: 'Sale AED − purchase AED on matched lots',
-          tone: s.bookedAedProfit >= 0 ? 'emerald' : 'red',
+          label: 'Metal P&L (INR)',
+          ...formatMetalPlKpi({
+            metalProfitAed: 0,
+            metalProfitInr: s.bookedInrProfit,
+            rangeLabel: `${s.metalWeightSoldG.toLocaleString(undefined, { maximumFractionDigits: 2 })} g sold`,
+          }),
+        },
+        {
+          label: 'Total entries',
+          value: (s.purchaseCount + s.saleCount).toLocaleString(),
+          hint: 'Buy + sell lines',
+          tone: 'indigo',
         },
       ];
     }
     return [
       {
         label: 'Purchase (fund)',
-        value: fmtLedgerAed(s.purchaseAed),
+        value: ledgerAedNode(s.purchaseAed),
         hint: `${s.purchaseCount} entries · ${s.purchaseUnits.toLocaleString(undefined, { maximumFractionDigits: 2 })} units`,
         tone: 'amber',
       },
       {
         label: 'Sales (fund)',
-        value: fmtLedgerAed(s.saleAed),
+        value: ledgerAedNode(s.saleAed),
         hint: `${s.saleCount} entries · ${s.saleUnits.toLocaleString(undefined, { maximumFractionDigits: 2 })} units`,
         tone: 'emerald',
       },
       {
         label: 'Net movement',
-        value: fmtLedgerAed(s.saleAed - s.purchaseAed),
+        value: ledgerAedNode(s.saleAed - s.purchaseAed),
         hint: 'Cash AED in minus out — not gross profit (see P&L / warehouse GP)',
         tone: s.saleAed - s.purchaseAed >= 0 ? 'emerald' : 'red',
       },
@@ -512,62 +588,103 @@ export function computeBooksKpis(input: {
     ];
   }
 
-  if (reportView === 'warehouse-pl' && warehousePl) {
+  if (reportView === 'warehouse-pl' && warehousePl && warehouseBook !== 'metal') {
     const t = warehousePl.totals;
     return [
       {
         label: 'IC revenue',
-        value: fmtLedgerAed(t.revenue),
+        value: ledgerAedNode(t.revenue),
         hint: `${t.saleUnits.toLocaleString(undefined, { maximumFractionDigits: 2 })} cash IC units sold`,
         tone: 'emerald',
       },
       {
         label: 'IC gross profit',
-        value: fmtLedgerAed(t.grossProfit),
+        value: ledgerAedNode(t.grossProfit),
         hint: `COGS ${fmtLedgerAed(t.cogs)} · WAC`,
         tone: t.grossProfit >= 0 ? 'emerald' : 'red',
       },
       {
-        label: 'Metal P&L',
-        value: fmtLedgerAed(t.metalProfitAed),
-        hint: `${t.metalSoldG.toLocaleString(undefined, { maximumFractionDigits: 2 })} g · sale − purchase AED`,
-        tone: t.metalProfitAed >= 0 ? 'emerald' : 'red',
-      },
-      {
         label: 'Warehouses',
         value: warehousePl.warehouses.length.toLocaleString(),
-        hint: 'With activity in period',
+        hint: 'With IC activity in period',
         tone: 'slate',
+      },
+      {
+        label: 'Closing units',
+        value: warehousePl.warehouses
+          .reduce((sum, w) => sum + w.closingUnits, 0)
+          .toLocaleString(undefined, { maximumFractionDigits: 2 }),
+        hint: 'IC stock across warehouses',
+        tone: 'indigo',
       },
     ];
   }
 
-  if (reportView === 'statement' && statement) {
+  if (reportView === 'warehouse-metal' && warehousePl && warehouseBook === 'metal') {
+    const t = warehousePl.totals;
+    return [
+      {
+        label: 'Metal sold (g)',
+        value: t.metalSoldG.toLocaleString(undefined, { maximumFractionDigits: 2 }),
+        hint: 'Fine metal out in period',
+        tone: 'slate',
+      },
+      {
+        label: 'Metal P&L (INR)',
+        ...formatMetalPlKpi({
+          metalProfitAed: 0,
+          metalProfitInr: t.metalProfitInr,
+          rangeLabel: `${t.metalSoldG.toLocaleString(undefined, { maximumFractionDigits: 2 })} g sold`,
+        }),
+      },
+      {
+        label: 'Warehouses',
+        value: warehousePl.warehouses.length.toLocaleString(),
+        hint: 'With metal activity in period',
+        tone: 'slate',
+      },
+      {
+        label: 'Metal in (g)',
+        value: warehousePl.warehouses
+          .reduce((sum, w) => sum + w.metalInG, 0)
+          .toLocaleString(undefined, { maximumFractionDigits: 2 }),
+        hint: 'Purchases into stock',
+        tone: 'indigo',
+      },
+    ];
+  }
+
+  if ((reportView === 'statement' || reportView === 'inr-statement') && statement) {
     const postedLines = statement.lines.filter(line => line.status !== 'pending');
     const periodDr = postedLines.reduce((sum, line) => sum + line.debit, 0);
     const periodCr = postedLines.reduce((sum, line) => sum + line.credit, 0);
     const pending = statement.lines.filter(line => line.status === 'pending').length;
+    const inrBook = statement.currency === 'INR';
+    const fmtOpen = inrBook ? ledgerInrNode(statement.opening) : ledgerAedNode(statement.opening);
+    const fmtClose = inrBook ? ledgerInrNode(statement.closing) : ledgerAedNode(statement.closing);
+    const fmtDr = inrBook ? ledgerInrNode(periodDr) : ledgerAedNode(periodDr);
+    const fmtCr = inrBook ? ledgerInrNode(periodCr) : ledgerAedNode(periodCr);
 
     return [
       {
         label: 'Opening',
-        value: fmtLedgerAed(statement.opening),
+        value: fmtOpen,
         hint: 'Balance before period',
       },
       {
         label: 'Period debits',
-        value: fmtLedgerAed(periodDr),
+        value: fmtDr,
         hint: `${postedLines.length} posted lines`,
       },
       {
         label: 'Period credits',
-        value: fmtLedgerAed(periodCr),
+        value: fmtCr,
         hint: pending > 0 ? `${pending} pending lines excluded` : 'Posted credits in range',
         tone: periodCr > 0 ? 'amber' : 'slate',
       },
       {
         label: 'Closing',
-        value: fmtLedgerAed(statement.closing),
+        value: fmtClose,
         hint: 'Balance after period',
         tone: statement.closing >= 0 ? 'emerald' : 'red',
       },
@@ -578,9 +695,9 @@ export function computeBooksKpis(input: {
     const rollup = rollupVouchers(vouchers);
     return [
       {
-        label: 'Direct expense',
-        value: fmtLedgerAed(rollup.postedTotal),
-        hint: 'Posted COGS (WAC on completed sales) and other d-expense',
+        label: 'Expense total',
+        value: ledgerAedNode(rollup.postedTotal),
+        hint: 'Direct COGS and operating expenses in view',
         tone: 'red',
       },
       {
@@ -590,7 +707,8 @@ export function computeBooksKpis(input: {
       },
       {
         label: 'Pending',
-        value: rollup.pending > 0 ? fmtLedgerAed(rollup.pendingTotal) : '—',
+        value: rollup.pending > 0 ? ledgerAedNode(rollup.pendingTotal) : '—',
+        valueTitle: rollup.pending > 0 ? fmtLedgerAed(rollup.pendingTotal) : undefined,
         hint: rollup.pending > 0 ? `${rollup.pending} awaiting approval` : 'Nothing pending',
         tone: rollup.pending > 0 ? 'amber' : 'slate',
       },
@@ -598,8 +716,12 @@ export function computeBooksKpis(input: {
         label: 'Largest',
         value:
           rollup.posted > 0
-            ? fmtLedgerAed(Math.max(...vouchers.filter(v => v.status === 'active').map(v => v.amount), 0))
+            ? ledgerAedNode(Math.max(...vouchers.filter(v => v.status === 'active').map(v => v.amount), 0))
             : '—',
+        valueTitle:
+          rollup.posted > 0
+            ? fmtLedgerAed(Math.max(...vouchers.filter(v => v.status === 'active').map(v => v.amount), 0))
+            : undefined,
         hint: 'Biggest posted voucher',
       },
     ];
@@ -609,7 +731,7 @@ export function computeBooksKpis(input: {
   return [
     {
       label: 'Posted value',
-      value: fmtLedgerAed(rollup.postedTotal),
+      value: ledgerAedNode(rollup.postedTotal),
       hint: `${rollup.posted} active vouchers`,
       tone: 'emerald',
     },
@@ -620,7 +742,8 @@ export function computeBooksKpis(input: {
     },
     {
       label: 'Pending',
-      value: rollup.pending > 0 ? fmtLedgerAed(rollup.pendingTotal) : '—',
+      value: rollup.pending > 0 ? ledgerAedNode(rollup.pendingTotal) : '—',
+      valueTitle: rollup.pending > 0 ? fmtLedgerAed(rollup.pendingTotal) : undefined,
       hint: rollup.pending > 0 ? `${rollup.pending} awaiting approval` : 'Nothing pending',
       tone: rollup.pending > 0 ? 'amber' : 'slate',
     },
@@ -628,8 +751,12 @@ export function computeBooksKpis(input: {
       label: 'Largest',
       value:
         rollup.posted > 0
-          ? fmtLedgerAed(Math.max(...vouchers.filter(v => v.status === 'active').map(v => v.amount), 0))
+          ? ledgerAedNode(Math.max(...vouchers.filter(v => v.status === 'active').map(v => v.amount), 0))
           : '—',
+      valueTitle:
+        rollup.posted > 0
+          ? fmtLedgerAed(Math.max(...vouchers.filter(v => v.status === 'active').map(v => v.amount), 0))
+          : undefined,
       hint: 'Biggest posted voucher',
     },
   ];

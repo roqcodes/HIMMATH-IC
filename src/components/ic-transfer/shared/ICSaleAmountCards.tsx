@@ -3,7 +3,7 @@
 import React from 'react';
 import { formatAmount } from '@/lib/icTransfer/rateCalculations';
 import InrAmountInWords from './InrAmountInWords';
-import { icFormTotalsLabel } from './icTransferFormModalLayout';
+import { icFormFieldInnerGap, icFormTotalsLabel } from './icTransferFormModalLayout';
 
 type Props = {
   units: number;
@@ -20,9 +20,9 @@ export default function ICSaleAmountCards({
   showLabel = true,
 }: Props) {
   return (
-    <div className="space-y-1">
+    <div className={`flex flex-col ${icFormFieldInnerGap}`}>
       {showLabel ? <p className={icFormTotalsLabel}>Totals</p> : null}
-      <div className="grid grid-cols-1 gap-2 rounded-lg border border-slate-100 bg-slate-50/50 p-2 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 rounded-lg border border-slate-100 bg-slate-50/50 p-2.5 sm:grid-cols-3">
         <div className="flex flex-col justify-center rounded-lg border border-slate-100 bg-white px-1.5 py-1.5 text-center shadow-sm">
           <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Units</span>
           <span className="mt-0.5 font-mono text-xs font-bold text-slate-800 sm:text-sm">

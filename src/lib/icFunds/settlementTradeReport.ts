@@ -1,3 +1,4 @@
+import { isMetalAedPayment } from '@/lib/domain/books';
 import type { ICSettlementMode } from '@/lib/icTransfer/metalSettlement';
 
 export type ICSettlementTradeLine = {
@@ -7,6 +8,8 @@ export type ICSettlementTradeLine = {
   reference: string;
   counterparty: string;
   counterpartyCode?: string;
+  counterpartyId?: string;
+  warehouseId?: string;
   warehouseName?: string;
   warehouseCode?: string;
   units: number;
@@ -19,11 +22,15 @@ export type ICSettlementTradeLine = {
   settlementLabel: string;
   metalPaymentMethod?: 'INR' | 'AED';
   bookedProfit?: number;
-  bookedCurrency?: 'AED';
+  bookedCurrency?: 'AED' | 'INR';
+  bookedProfitAed?: number;
+  bookedProfitInr?: number;
   paymentMethod?: string;
   paymentStatus?: string;
   orderStatus?: string;
   notes?: string;
+  aedAgentId?: string;
+  aedAgentName?: string;
 };
 
 export type ICSettlementTradeSummary = {
@@ -56,6 +63,23 @@ function round4(n: number): number {
   return Number((Number.isFinite(n) ? n : 0).toFixed(4));
 }
 
+/** Cash-metal INR only. AED-agent INR is a rate memo. */
+export function tradeLineBookInr(row: ICSettlementTradeLine): number {
+  if (row.metalPaymentMethod === 'AED' || isMetalAedPayment(row.metalPaymentMethod)) return 0;
+  return Number(row.inrTotal) || 0;
+}
+
+/** Cash IC + metal AED. Cash-metal AED is ignored. */
+export function tradeLineBookAed(row: ICSettlementTradeLine): number {
+  if (row.metalPaymentMethod === 'INR') return 0;
+  return Number(row.aedTotal) || 0;
+}
+
+export function tradeLinePaymentFromDb(value: unknown): 'INR' | 'AED' | undefined {
+  if (value == null || String(value).trim() === '') return undefined;
+  return isMetalAedPayment(String(value)) ? 'AED' : 'INR';
+}
+
 /** Imputed AED/unit when legacy rows omit unit_rate (common on metal settlement). */
 export function resolveTradeUnitRateAed(units: number, unitRate: number, aedTotal: number): number {
   const rate = Number(unitRate);
@@ -74,13 +98,20 @@ export function summarizeSettlementTrades(
 ): ICSettlementTradeSummary {
   const purchaseUnits = purchases.reduce((s, r) => s + r.units, 0);
   const saleUnits = sales.reduce((s, r) => s + r.units, 0);
-  const purchaseAed = purchases.reduce((s, r) => s + r.aedTotal, 0);
-  const saleAed = sales.reduce((s, r) => s + r.aedTotal, 0);
-  const purchaseInr = purchases.reduce((s, r) => s + (r.inrTotal ?? 0), 0);
-  const saleInr = sales.reduce((s, r) => s + (r.inrTotal ?? 0), 0);
+  const purchaseAed = purchases.reduce((s, r) => s + tradeLineBookAed(r), 0);
+  const saleAed = sales.reduce((s, r) => s + tradeLineBookAed(r), 0);
+  const purchaseInr = purchases.reduce((s, r) => s + tradeLineBookInr(r), 0);
+  const saleInr = sales.reduce((s, r) => s + tradeLineBookInr(r), 0);
   const metalWeightPurchasedG = purchases.reduce((s, r) => s + (r.metalWeightG ?? 0), 0);
   const metalWeightSoldG = sales.reduce((s, r) => s + (r.metalWeightG ?? 0), 0);
-  const bookedAedProfit = sales.reduce((s, r) => s + (r.bookedProfit ?? 0), 0);
+  const bookedAedProfit = sales.reduce(
+    (s, r) => s + (r.bookedProfitAed ?? (r.bookedCurrency === 'AED' ? r.bookedProfit ?? 0 : 0)),
+    0,
+  );
+  const bookedInrProfit = sales.reduce(
+    (s, r) => s + (r.bookedProfitInr ?? (r.bookedCurrency === 'INR' ? r.bookedProfit ?? 0 : 0)),
+    0,
+  );
 
   return {
     purchaseCount: purchases.length,
@@ -93,7 +124,7 @@ export function summarizeSettlementTrades(
     saleInr: round2(saleInr),
     metalWeightPurchasedG: round4(metalWeightPurchasedG),
     metalWeightSoldG: round4(metalWeightSoldG),
-    bookedInrProfit: 0,
+    bookedInrProfit: round2(bookedInrProfit),
     bookedAedProfit: round2(bookedAedProfit),
   };
 }
@@ -104,6 +135,6 @@ export function settlementTradeReportTitle(mode: ICSettlementMode): string {
 
 export function settlementTradeReportSubtitle(mode: ICSettlementMode): string {
   return mode === 'metal'
-    ? 'Metal lots in grams. P&L (AED) = sale total AED − purchase total AED on the lot.'
+    ? 'Metal lots in grams. Booked P&L is INR (net sale minus net lot cost). Agent AED is cash with the agent, not profit.'
     : 'Cash (AED fund) IC purchases and sales — units, rates, and ledger amounts.';
 }

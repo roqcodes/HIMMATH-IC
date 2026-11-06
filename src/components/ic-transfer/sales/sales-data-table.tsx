@@ -4,14 +4,16 @@ import React from 'react';
 import type { Branch, ICSale } from '@/types';
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
 import { getAdminSaleCustomerName } from '@/lib/icTransfer/branchOrderOwnership';
+import { SALE_PARTY_COLUMN_LABEL, SALE_FILTER_ALL_PARTIES_LABEL, SALE_FILTER_BY_PARTY_ARIA } from '@/lib/counterparties/labels';
 import { effectiveSaleCounterpartyId } from '@/lib/counterparties/effectiveId';
 import CounterpartyLink from '@/components/counterparties/CounterpartyLink';
 import WarehouseLink from '@/components/ic-transfer/warehouse/WarehouseLink';
 import { isBranchHandledSale } from '@/lib/icTransfer/fulfillmentHandler';
 import { getAdminRowAccentClass } from '@/lib/icTransfer/orderStatus';
 import { highPriorityRowClass } from '@/lib/icTransfer/orderPriority';
-import { fmtLedgerAed } from '@/lib/icFunds/format';
+import { formatDealTableAed, formatDealTableInr, saleDealAed, saleDealInr } from '@/lib/icTransfer/dealTableDisplay';
 import { formatSettlementModeLabel } from '@/lib/icTransfer/metalSettlement';
+import DealAgentHint from '@/components/ic-transfer/shared/DealAgentHint';
 import ICTransferDataTableShell, {
   ICTransferTableFilterSelect,
   type ICTransferTableColumn,
@@ -23,16 +25,18 @@ import {
   ICTransferEditIconButton,
   ICTransferViewIconButton,
 } from '@/components/ic-transfer/shared/ICTransferTableActions';
+import { DealInvoiceIconButtons } from '@/components/ic-transfer/invoice/DealInvoiceButtons';
 
 export type SalesTab = 'needs_action' | 'all' | 'awaiting_verification';
 
 const SALES_COLUMNS: ICTransferTableColumn[] = [
   { id: 'Date', label: 'Date', align: 'left' },
-  { id: 'Customer', label: 'Customer', align: 'left' },
+  { id: SALE_PARTY_COLUMN_LABEL, label: SALE_PARTY_COLUMN_LABEL, align: 'left' },
   { id: 'Warehouse', label: 'Warehouse', align: 'left' },
   { id: 'Settlement', label: 'Settlement', align: 'left' },
   { id: 'Units', label: 'Units', align: 'right' },
   { id: 'Metal (g)', label: 'Metal (g)', align: 'right' },
+  { id: 'Total INR', label: 'INR', align: 'right' },
   { id: 'Total AED', label: 'AED', align: 'right' },
   { id: 'Actions', label: 'Actions', align: 'center', sortable: false },
 ];
@@ -156,10 +160,10 @@ export default function SalesDataTable(props: SalesDataTableProps) {
       <ICTransferTableFilterSelect
         value={filterCustomer}
         onChange={onFilterCustomerChange}
-        aria-label="Filter by customer"
+        aria-label={SALE_FILTER_BY_PARTY_ARIA}
         className="min-w-[9.5rem]"
       >
-        <option value="All">All customers</option>
+        <option value="All">{SALE_FILTER_ALL_PARTIES_LABEL}</option>
         {customerOptions.map(c => (
           <option key={c.id} value={c.id}>
             {c.name}
@@ -336,6 +340,7 @@ function SaleRow({
             branchSlug={branchSlug}
             stopPropagation
           />
+          <DealAgentHint deal={s} branchSlug={branchSlug} />
           <div className="mt-0.5 flex flex-wrap items-center gap-1">
             {s.transactionType === 'by_hand' && <OutlineBadge tone="violet">By Hand</OutlineBadge>}
             {s.derivedFromSaleId && (
@@ -351,7 +356,7 @@ function SaleRow({
       </td>
       <td className={icTdClass('left')}>
         <span className="text-xs font-medium text-slate-700">
-          {formatSettlementModeLabel(s.settlementMode)}
+          {formatSettlementModeLabel(s.settlementMode, s.metalPaymentMethod)}
         </span>
       </td>
       <td className={icTdClass('right')}>
@@ -367,13 +372,19 @@ function SaleRow({
         </span>
       </td>
       <td className={icTdClass('right')}>
+        <span className="font-mono tabular-nums text-indigo-900 dark:text-indigo-300">
+          {formatDealTableInr(saleDealInr(s))}
+        </span>
+      </td>
+      <td className={icTdClass('right')}>
         <span className="font-mono font-medium tabular-nums text-slate-900">
-          {fmtLedgerAed(s.aedAmount || 0)}
+          {formatDealTableAed(saleDealAed(s))}
         </span>
       </td>
       <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-center gap-0.5">
           <ICTransferViewIconButton onClick={() => onView(s)} />
+          <DealInvoiceIconButtons sale={s} />
           {!branchHandled && (
             <>
               <ICTransferEditIconButton onClick={() => onEdit(s)} />

@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import type { ICFundAccount } from '@/types';
 import type { ICFundAccountType } from '@/lib/icFunds/constants';
 import { accountTypeLabel } from '@/lib/icFunds/constants';
-import { fmtLedgerAed } from '@/lib/icFunds/format';
+import { fmtLedgerAed, FmtLedgerAed } from '@/lib/icFunds/format';
 import { icfInput, icfLabel } from '@/components/ic-funds/ui';
 
 function matchAccount(account: ICFundAccount, query: string): boolean {
@@ -151,7 +151,7 @@ export default function AccountPicker({
           <span
             className={`font-mono text-[11px] tabular-nums ${selected.balance < 0 ? 'text-red-600' : 'text-slate-500'}`}
           >
-            {fmtLedgerAed(selected.balance)}
+            <FmtLedgerAed amount={selected.balance} />
           </span>
         ) : null}
       </div>
@@ -218,7 +218,7 @@ export default function AccountPicker({
                           </span>
                         </span>
                         <span className="shrink-0 font-mono text-[11px] tabular-nums text-slate-500">
-                          {fmtLedgerAed(account.balance)}
+                          <FmtLedgerAed amount={account.balance} />
                         </span>
                       </button>
                     </li>

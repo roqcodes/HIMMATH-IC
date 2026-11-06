@@ -9,6 +9,7 @@ import { RbacWriteProvider } from '@/context/RbacWriteContext';
 import { usePathname } from 'next/navigation';
 import { getSessionSlugFromPath, isAdminAsicPath, isAsicPortalPath } from '@/lib/asic/routing';
 import { ASICAppShellSkeleton } from '@/components/asic/ASICTableSkeleton';
+import { DealInvoiceProvider } from '@/components/ic-transfer/invoice/DealInvoiceContext';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isInitialLoading, toasts } = useApp();
@@ -29,6 +30,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <RbacWriteProvider>
+    <DealInvoiceProvider>
       <div className="flex min-h-dvh bg-slate-50/50 dark:bg-[var(--theme-canvas)]">
         <BranchPageGuard />
         <div className="flex min-w-0 flex-1 flex-col">
@@ -67,6 +69,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           ))}
         </div>
       </div>
+    </DealInvoiceProvider>
     </RbacWriteProvider>
   );
 }

@@ -28,6 +28,8 @@ interface ComboSearchInputProps {
   disabled?: boolean;
   /** Called when the input is focused (e.g. refresh dropdown balances). */
   onFocus?: () => void;
+  /** Shown inside the field, before the search icon (e.g. available metal grams). */
+  trailing?: React.ReactNode;
 }
 
 const DROPDOWN_GAP = 4;
@@ -44,6 +46,7 @@ export default function ComboSearchInput({
   disabled = false,
   selectedValue,
   onFocus,
+  trailing,
 }: ComboSearchInputProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -164,6 +167,8 @@ export default function ComboSearchInput({
       </div>
     ) : null;
 
+  const hasTrailing = trailing != null && trailing !== '';
+
   return (
     <div ref={wrapperRef} className={`relative ${className}`}>
       <div className="relative">
@@ -185,10 +190,15 @@ export default function ComboSearchInput({
           placeholder={placeholder}
           className={
             inputClassName
-              ? `${inputClassName} w-full !pr-10${disabled ? ' cursor-not-allowed opacity-60' : ''}`
-              : `${formInput} w-full !py-2 !pr-10 !text-sm${disabled ? ' cursor-not-allowed opacity-60' : ''}`
+              ? `${inputClassName} w-full ${hasTrailing ? '!pr-[4.5rem]' : '!pr-10'}${disabled ? ' cursor-not-allowed opacity-60' : ''}`
+              : `${formInput} w-full !py-2 ${hasTrailing ? '!pr-[4.5rem]' : '!pr-10'} !text-sm${disabled ? ' cursor-not-allowed opacity-60' : ''}`
           }
         />
+        {hasTrailing ? (
+          <span className="pointer-events-none absolute right-9 top-1/2 max-w-[45%] -translate-y-1/2 truncate text-right text-xs font-semibold tabular-nums text-slate-500 dark:text-[var(--theme-text-secondary)]">
+            {trailing}
+          </span>
+        ) : null}
         <svg
           width="16"
           height="16"

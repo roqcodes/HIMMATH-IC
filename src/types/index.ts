@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════════════════════
 
 import type { ICSaleTransactionType } from '@/lib/icTransfer/transactionTypes';
+import type { CounterpartyRole } from '@/lib/counterparties/roles';
 
 export type UserRole = 'admin' | 'auditor' | 'staff' | 'delivery' | 'customer' | 'investor' | 'branch_manager' | 'collection_agent';
 
@@ -642,6 +643,8 @@ export interface ICSupplier {
   /** When set, supplier is owned by a branch portal (exclusive to that branch). */
   branchId?: string;
   status?: 'active' | 'inactive';
+  /** supplier = purchases; party = sales; agent = UAE AED collection. */
+  roles?: CounterpartyRole[];
   createdAt?: string;
 }
 
@@ -730,11 +733,19 @@ export interface ICPurchase {
   metalRateAedPerG?: number | null;
   inrTotal?: number | null;
   paymentMethod?: string;
+  metalPaymentMethod?: 'CASH' | 'AED' | 'INR' | null;
+  aedAgentId?: string | null;
+  /** Counterparty with agent role (for metal AED forms). */
+  aedAgentCounterpartyId?: string | null;
+  aedAgentName?: string | null;
   notes?: string;
   convertedTotal?: number;
   aedTotal?: number;
   paymentStatus?: 'pending' | 'paid';
   createdAt?: string;
+  labWeightG?: number | null;
+  labChargeInrPerG?: number | null;
+  labTotalInr?: number | null;
 }
 
 export type ICOrderStatus =
@@ -773,7 +784,10 @@ export interface ICSale {
   inrTotal?: number | null;
   /** Metal sale: which purchase lot this sale closes (partial sells later). */
   metalPurchaseId?: string | null;
-  metalPaymentMethod?: 'INR' | 'AED' | null;
+  metalPaymentMethod?: 'CASH' | 'AED' | 'INR' | null;
+  aedAgentId?: string | null;
+  aedAgentCounterpartyId?: string | null;
+  aedAgentName?: string | null;
   aedAmount?: number;
   enteredBy?: string;
   enteredByName?: string;
@@ -784,8 +798,6 @@ export interface ICSale {
   statusUpdatedAt?: string;
   statusUpdatedBy?: string;
   address?: string;
-  location?: string;
-  district?: string;
   imageUrl?: string;
   serviceCharge?: number;
   bank?: string;
@@ -797,6 +809,9 @@ export interface ICSale {
   fulfillmentHandler?: 'hq_admin';
   deliveryImageUrl?: string;
   createdAt?: string;
+  labWeightG?: number | null;
+  labChargeInrPerG?: number | null;
+  labTotalInr?: number | null;
 }
 
 export interface ICWarehouseTransaction {
@@ -864,6 +879,8 @@ export interface ICFundVoucher {
   voidedByName?: string;
   referenceType?: string;
   referenceId?: string;
+  /** AED IC Funds vs INR metal ledger. */
+  book?: 'AED' | 'INR';
 }
 
 export interface ICFundTrialBalanceLine {

@@ -22,11 +22,6 @@ export default function DetailSection({ title, description, action, children, id
           >
             {title}
           </h2>
-          {description ? (
-            <p className="mt-0.5 text-[11px] text-slate-500 dark:text-[var(--theme-text-secondary)]">
-              {description}
-            </p>
-          ) : null}
         </div>
         {action ? <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div> : null}
       </div>

@@ -1,4 +1,6 @@
 import { INR_PER_UNIT } from './rateCalculations';
+import { netMetalInr } from '@/lib/icTransfer/labTest';
+import { isMetalAedPayment, normalizeMetalPaymentMethod, type MetalPaymentMethod } from '@/lib/domain/books';
 
 export const IC_SETTLEMENT_MODES = ['cash', 'metal'] as const;
 export type ICSettlementMode = (typeof IC_SETTLEMENT_MODES)[number];
@@ -18,17 +20,20 @@ export type MetalSettlementInput = {
   metalRateAedPerG: number;
   totalInr: number;
   totalAed: number;
+  labTotalInr?: number;
 };
 
 export type MetalSettlementFields = {
   metalWeightG: number;
   metalRateInrPerG: number;
-  /** Excel RATE column (AED per 1,000 INR). */
+  /** Sheet RATE (purchases) or IC unit rate (sales) depending on aedRateMode. */
   metalSheetRateAed: number;
   /** Implied AED per gram, stored on the row. */
   metalRateAedPerG: number;
   inrTotal: number;
   aedTotal: number;
+  /** Sales: AED rate is per IC unit (1 unit = ₹1 lakh). Purchases keep sheet RATE. */
+  aedRateMode?: 'sheet' | 'unit';
 };
 
 export type NormalizedCashPurchase = {
@@ -46,11 +51,13 @@ export type NormalizedMetalPurchase = {
   settlementMode: 'metal';
   units: number;
   unitRate: number;
-  aedTotal: number;
+  aedTotal: number | null;
   inrTotal: number;
   metalWeightG: number;
   metalRateInrPerG: number;
   metalRateAedPerG: number;
+  metalPaymentMethod: 'CASH' | 'AED';
+  aedAgentId?: string | null;
 };
 
 export type NormalizedPurchase = NormalizedCashPurchase | NormalizedMetalPurchase;
@@ -79,6 +86,23 @@ export function deriveUnitsFromInrTotal(inrTotal: number): number {
     throw new Error('INR total must be greater than zero.');
   }
   return round4(inr / INR_PER_UNIT);
+}
+
+/** IC units implied by an INR total; 0 when INR is missing. */
+export function icUnitsFromInrTotal(inrTotal: number): number {
+  const inr = Number(inrTotal);
+  if (!Number.isFinite(inr) || inr <= 0) return 0;
+  return round4(inr / INR_PER_UNIT);
+}
+
+export function aedTotalFromIcUnitRate(inrTotal: number, unitRateAed: number): number {
+  return round4(icUnitsFromInrTotal(inrTotal) * (Number(unitRateAed) || 0));
+}
+
+export function icUnitRateFromAedTotal(inrTotal: number, aedTotal: number): number {
+  const units = icUnitsFromInrTotal(inrTotal);
+  if (units <= 0) return 0;
+  return round4((Number(aedTotal) || 0) / units);
 }
 
 export function deriveImputedUnitRateAed(aedTotal: number, units: number): number {
@@ -149,6 +173,24 @@ export function metalFieldsFromRecord(input: {
   };
 }
 
+/** Metal sale form: AED rate is IC unit rate, not the sheet RATE column. */
+export function metalSaleFieldsFromRecord(
+  input: Parameters<typeof metalFieldsFromRecord>[0] & { unitRate?: number | null },
+): MetalSettlementFields {
+  const base = metalFieldsFromRecord(input);
+  const unitRate =
+    Number(input.unitRate) > 0
+      ? round4(Number(input.unitRate))
+      : icUnitRateFromAedTotal(base.inrTotal, base.aedTotal);
+  return {
+    ...base,
+    aedRateMode: 'unit',
+    metalSheetRateAed: unitRate,
+    aedTotal:
+      base.aedTotal > 0 ? base.aedTotal : aedTotalFromIcUnitRate(base.inrTotal, unitRate),
+  };
+}
+
 function withDerivedAedPerG(fields: MetalSettlementFields): MetalSettlementFields {
   return {
     ...fields,
@@ -161,16 +203,16 @@ export function applyMetalFieldChange(
   field: 'weight' | 'rateInr' | 'sheetRateAed' | 'totalInr' | 'totalAed',
   num: number,
 ): MetalSettlementFields {
+  const unitMode = value.aedRateMode === 'unit';
   switch (field) {
     case 'weight': {
       if (num <= 0) {
         return { ...value, metalWeightG: num };
       }
-      const { totalInr, totalAed } = computeMetalTotalsFromWeight(
-        num,
-        value.metalRateInrPerG,
-        value.metalSheetRateAed,
-      );
+      const totalInr = round4(num * value.metalRateInrPerG);
+      const totalAed = unitMode
+        ? aedTotalFromIcUnitRate(totalInr, value.metalSheetRateAed)
+        : computeMetalAedFromInr(totalInr, value.metalSheetRateAed);
       return withDerivedAedPerG({
         ...value,
         metalWeightG: num,
@@ -181,11 +223,10 @@ export function applyMetalFieldChange(
     case 'rateInr': {
       const w = value.metalWeightG;
       if (w <= 0) return { ...value, metalRateInrPerG: num };
-      const { totalInr, totalAed } = computeMetalTotalsFromWeight(
-        w,
-        num,
-        value.metalSheetRateAed,
-      );
+      const totalInr = round4(w * num);
+      const totalAed = unitMode
+        ? aedTotalFromIcUnitRate(totalInr, value.metalSheetRateAed)
+        : computeMetalAedFromInr(totalInr, value.metalSheetRateAed);
       return withDerivedAedPerG({
         ...value,
         metalRateInrPerG: num,
@@ -194,7 +235,9 @@ export function applyMetalFieldChange(
       });
     }
     case 'sheetRateAed': {
-      const aedTotal = computeMetalAedFromInr(value.inrTotal, num);
+      const aedTotal = unitMode
+        ? aedTotalFromIcUnitRate(value.inrTotal, num)
+        : computeMetalAedFromInr(value.inrTotal, num);
       return withDerivedAedPerG({
         ...value,
         metalSheetRateAed: num,
@@ -204,7 +247,9 @@ export function applyMetalFieldChange(
     case 'totalInr': {
       const w = value.metalWeightG;
       const metalRateInrPerG = w > 0 ? computeMetalRateInrFromTotal(w, num) : value.metalRateInrPerG;
-      const aedTotal = computeMetalAedFromInr(num, value.metalSheetRateAed);
+      const aedTotal = unitMode
+        ? aedTotalFromIcUnitRate(num, value.metalSheetRateAed)
+        : computeMetalAedFromInr(num, value.metalSheetRateAed);
       return withDerivedAedPerG({
         ...value,
         inrTotal: num,
@@ -213,7 +258,9 @@ export function applyMetalFieldChange(
       });
     }
     case 'totalAed': {
-      const metalSheetRateAed = computeMetalSheetRateAed(value.inrTotal, num);
+      const metalSheetRateAed = unitMode
+        ? icUnitRateFromAedTotal(value.inrTotal, num)
+        : computeMetalSheetRateAed(value.inrTotal, num);
       return withDerivedAedPerG({
         ...value,
         aedTotal: num,
@@ -241,19 +288,43 @@ export function computeMetalRateAedFromTotal(weightG: number, totalAed: number):
   return round4(total / w);
 }
 
-export function validateMetalSettlementInput(input: MetalSettlementInput): void {
+export function validateMetalSettlementInput(
+  input: MetalSettlementInput,
+  paymentMethod: MetalPaymentMethod = 'AED',
+): void {
   const w = roundWeight(input.metalWeightG);
   if (w <= 0) throw new Error('Weight (g) is required.');
   if (round4(input.totalInr) <= 0) throw new Error('Total INR must be greater than zero.');
-  if (round4(input.totalAed) <= 0) throw new Error('Total AED must be greater than zero.');
   if (round4(input.metalRateInrPerG) <= 0) throw new Error('Rate per gram (INR) must be greater than zero.');
-  if (round4(input.metalRateAedPerG) <= 0) throw new Error('Rate per gram (AED) must be greater than zero.');
+  if (paymentMethod === 'AED') {
+    if (round4(input.totalAed) <= 0) throw new Error('Total AED must be greater than zero.');
+    if (round4(input.metalRateAedPerG) <= 0) {
+      throw new Error('Rate per gram (AED) must be greater than zero.');
+    }
+  }
 }
 
-export function normalizeMetalPurchase(input: MetalSettlementInput): NormalizedMetalPurchase {
-  validateMetalSettlementInput(input);
+export function validateMetalSaleSettlementInput(input: MetalSettlementInput): void {
+  const w = roundWeight(input.metalWeightG);
+  if (w <= 0) throw new Error('Weight (g) is required.');
+  if (round4(input.totalInr) <= 0) throw new Error('Total INR must be greater than zero.');
+  if (round4(input.metalRateInrPerG) <= 0) throw new Error('Rate per gram (INR) must be greater than zero.');
+  if (round4(input.totalAed) <= 0) throw new Error('Total AED must be greater than zero.');
+  const units = icUnitsFromInrTotal(input.totalInr);
+  if (units <= 0) throw new Error('INR total must convert to IC units (₹1 lakh = 1 unit).');
+  if (icUnitRateFromAedTotal(input.totalInr, input.totalAed) <= 0) {
+    throw new Error('AED unit rate must be greater than zero.');
+  }
+}
+
+export function normalizeMetalPurchase(
+  input: MetalSettlementInput,
+  options?: { paymentMethod?: MetalPaymentMethod; aedAgentId?: string | null },
+): NormalizedMetalPurchase {
+  const paymentMethod = normalizeMetalPaymentMethod(options?.paymentMethod);
+  validateMetalSettlementInput(input, paymentMethod);
   const inrTotal = round4(input.totalInr);
-  const aedTotal = round4(input.totalAed);
+  const aedTotal = paymentMethod === 'AED' ? round4(input.totalAed) : null;
   return {
     settlementMode: 'metal',
     units: 0,
@@ -262,7 +333,9 @@ export function normalizeMetalPurchase(input: MetalSettlementInput): NormalizedM
     inrTotal,
     metalWeightG: roundWeight(input.metalWeightG),
     metalRateInrPerG: round4(input.metalRateInrPerG),
-    metalRateAedPerG: round4(input.metalRateAedPerG),
+    metalRateAedPerG: paymentMethod === 'AED' ? round4(input.metalRateAedPerG) : 0,
+    metalPaymentMethod: paymentMethod,
+    aedAgentId: paymentMethod === 'AED' ? options?.aedAgentId ?? null : null,
   };
 }
 
@@ -295,12 +368,29 @@ export function normalizeCashPurchase(params: {
 export function normalizeMetalSale(
   input: MetalSettlementInput,
   serviceCharge: number = 0,
+  options?: { paymentMethod?: MetalPaymentMethod; aedAgentId?: string | null },
 ): NormalizedMetalSale {
-  const base = normalizeMetalPurchase(input);
+  const paymentMethod = normalizeMetalPaymentMethod(options?.paymentMethod ?? 'AED');
+  validateMetalSaleSettlementInput(input);
+  const inrTotal = round4(input.totalInr);
+  const labTotal = round4(input.labTotalInr ?? 0);
+  const netInr = netMetalInr(inrTotal, labTotal);
+  const units = deriveUnitsFromInrTotal(netInr);
+  const aedTotal = round4(input.totalAed);
+  const unitRate = icUnitRateFromAedTotal(inrTotal, aedTotal);
   const charge = round4(Math.max(0, serviceCharge));
-  const aedAmount = round4(Math.max(0, base.aedTotal - charge));
+  const aedAmount = round4(Math.max(0, aedTotal - charge));
   return {
-    ...base,
+    settlementMode: 'metal',
+    units: paymentMethod === 'CASH' ? units : 0,
+    unitRate,
+    aedTotal,
+    inrTotal,
+    metalWeightG: roundWeight(input.metalWeightG),
+    metalRateInrPerG: round4(input.metalRateInrPerG),
+    metalRateAedPerG: computeImpliedMetalRateAedPerG(input.metalWeightG, aedTotal),
+    metalPaymentMethod: paymentMethod,
+    aedAgentId: paymentMethod === 'AED' ? options?.aedAgentId ?? null : null,
     aedAmount,
   };
 }
@@ -330,8 +420,13 @@ export function normalizeCashSale(params: {
   };
 }
 
-export function formatSettlementModeLabel(mode?: ICSettlementMode | string | null): string {
-  if (mode === 'metal') return 'Metal';
+export function formatSettlementModeLabel(
+  mode?: ICSettlementMode | string | null,
+  paymentMethod?: string | null,
+): string {
+  if (mode === 'metal') {
+    return isMetalAedPayment(paymentMethod) ? 'Metal · AED' : 'Metal · INR';
+  }
   return 'Cash';
 }
 
@@ -339,9 +434,10 @@ export function resolvePurchaseInrDisplay(purchase: {
   settlementMode?: ICSettlementMode | string | null;
   inrTotal?: number | null;
   units: number;
+  labTotalInr?: number | null;
 }): number {
   if (purchase.settlementMode === 'metal' && purchase.inrTotal != null) {
-    return Number(purchase.inrTotal);
+    return netMetalInr(Number(purchase.inrTotal), Number(purchase.labTotalInr) || 0);
   }
   return round4(Number(purchase.units) * INR_PER_UNIT);
 }
@@ -350,6 +446,7 @@ export function resolveSaleInrDisplay(sale: {
   settlementMode?: ICSettlementMode | string | null;
   inrTotal?: number | null;
   units: number;
+  labTotalInr?: number | null;
 }): number {
   return resolvePurchaseInrDisplay(sale);
 }
@@ -363,11 +460,14 @@ export type PurchaseFormInput = {
   metalRateInrPerG?: number;
   metalRateAedPerG?: number;
   inrTotal?: number;
+  metalPaymentMethod?: MetalPaymentMethod | 'INR' | 'AED' | string | null;
+  aedAgentId?: string | null;
 };
 
 export type SaleFormInput = PurchaseFormInput & {
   aedAmount?: number | null;
   serviceCharge?: number;
+  metalPurchaseId?: string | null;
 };
 
 export function assertSettlementModeUnchanged(
@@ -393,13 +493,17 @@ export function resolveNormalizedPurchase(
       ? 'metal'
       : 'cash';
   if (mode === 'metal') {
-    return normalizeMetalPurchase({
-      metalWeightG: Number(input.metalWeightG),
-      metalRateInrPerG: Number(input.metalRateInrPerG),
-      metalRateAedPerG: Number(input.metalRateAedPerG),
-      totalInr: Number(input.inrTotal),
-      totalAed: Number(input.aedTotal),
-    });
+    const paymentMethod = normalizeMetalPaymentMethod(input.metalPaymentMethod);
+    return normalizeMetalPurchase(
+      {
+        metalWeightG: Number(input.metalWeightG),
+        metalRateInrPerG: Number(input.metalRateInrPerG),
+        metalRateAedPerG: Number(input.metalRateAedPerG),
+        totalInr: Number(input.inrTotal),
+        totalAed: Number(input.aedTotal ?? 0),
+      },
+      { paymentMethod, aedAgentId: input.aedAgentId },
+    );
   }
   return normalizeCashPurchase({
     units: Number(input.units),
@@ -420,6 +524,7 @@ export function resolveNormalizedSale(
       ? 'metal'
       : 'cash';
   if (mode === 'metal') {
+    const paymentMethod = normalizeMetalPaymentMethod(input.metalPaymentMethod ?? 'AED');
     return normalizeMetalSale(
       {
         metalWeightG: Number(input.metalWeightG),
@@ -429,6 +534,7 @@ export function resolveNormalizedSale(
         totalAed: Number(input.aedAmount ?? input.aedTotal),
       },
       input.serviceCharge ?? 0,
+      { paymentMethod, aedAgentId: input.aedAgentId },
     );
   }
   return normalizeCashSale({

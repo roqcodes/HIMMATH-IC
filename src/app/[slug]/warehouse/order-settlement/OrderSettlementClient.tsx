@@ -24,7 +24,7 @@ import { PriorityBadge, SkeletonRows } from '@/components/warehouse/shared';
 import { comparePriority, highPriorityRowClass, highPriorityCardClass } from '@/lib/icTransfer/orderPriority';
 import { formatUnits, getRemainingUnits, isSaleCompleted } from '@/lib/icTransfer/saleUnits';
 import { resolveDateRange } from '@/lib/warehouseDateUtils';
-import WarehouseKpiGrid from '@/components/warehouse/WarehouseKpiGrid';
+import WarehouseOrderKpiGrid from '@/components/warehouse/WarehouseOrderKpiGrid';
 import { computeDeliveryAgentKpis } from '@/lib/warehouse/kpiMetrics';
 import { warehouseOrderMatchesSearch } from '@/lib/warehouse/orderSearch';
 import { useAutoRefreshData } from '@/hooks/useAutoRefreshData';
@@ -166,7 +166,7 @@ export default function OrderSettlementClient({ branchSlug }: { branchSlug: stri
         setCustomEndDate={setCustomEndDate}
       />
 
-      <WarehouseKpiGrid metrics={kpiMetrics} variant="delivery" />
+      <WarehouseOrderKpiGrid metrics={kpiMetrics} variant="delivery" />
 
       <div className="flex flex-col gap-3 mt-2">
         <SalesTableShell

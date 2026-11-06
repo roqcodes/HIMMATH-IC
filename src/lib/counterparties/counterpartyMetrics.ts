@@ -6,6 +6,7 @@ import {
   purchaseMatchesCounterparty,
   saleMatchesCounterparty,
 } from '@/lib/counterparties/counterpartyActivity';
+import { dealPurchaseAed, dealPurchaseInr, dealSaleAed, dealSaleInr } from '@/lib/icTransfer/dealBookKpis';
 import type { ICPurchase, ICSale } from '@/types';
 
 export type CounterpartyDealMetrics = {
@@ -17,6 +18,8 @@ export type CounterpartyDealMetrics = {
   metalPurchaseAed: number;
   cashSaleAed: number;
   metalSaleAed: number;
+  metalPurchaseInr: number;
+  metalSaleInr: number;
   cashGrossProfitAed: number;
   metalProfitAed: number;
   metalProfitInr: number;
@@ -37,13 +40,25 @@ function countSales(sales: ICSale[], metal: boolean): number {
 function sumPurchaseAed(purchases: ICPurchase[], metal: boolean): number {
   return purchases
     .filter(p => isMetal(p.settlementMode) === metal)
-    .reduce((sum, p) => sum + (Number(p.aedTotal) || 0), 0);
+    .reduce((sum, p) => sum + dealPurchaseAed(p), 0);
+}
+
+function sumPurchaseInr(purchases: ICPurchase[], metal: boolean): number {
+  return purchases
+    .filter(p => isMetal(p.settlementMode) === metal)
+    .reduce((sum, p) => sum + dealPurchaseInr(p), 0);
+}
+
+function sumSaleInr(sales: ICSale[], metal: boolean): number {
+  return sales
+    .filter(s => isMetal(s.settlementMode) === metal)
+    .reduce((sum, s) => sum + dealSaleInr(s), 0);
 }
 
 function sumSaleAed(sales: ICSale[], metal: boolean): number {
   return sales
     .filter(s => isMetal(s.settlementMode) === metal)
-    .reduce((sum, s) => sum + (Number(s.aedAmount) || 0) + (Number(s.serviceCharge) || 0), 0);
+    .reduce((sum, s) => sum + dealSaleAed(s), 0);
 }
 
 export function computeSingleCounterpartyMetrics(
@@ -71,6 +86,8 @@ export function computeSingleCounterpartyMetrics(
     metalPurchaseAed: sumPurchaseAed(inRangePurchases, true),
     cashSaleAed: sumSaleAed(inRangeSales, false),
     metalSaleAed: sumSaleAed(inRangeSales, true),
+    metalPurchaseInr: sumPurchaseInr(inRangePurchases, true),
+    metalSaleInr: sumSaleInr(inRangeSales, true),
     cashGrossProfitAed: profit.cashGrossProfitAed,
     metalProfitAed: profit.metalProfitAed,
     metalProfitInr: profit.metalProfitInr,
