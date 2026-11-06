@@ -6,9 +6,7 @@ import {
   allocateMetalLotCostInr,
 } from '@/lib/icTransfer/metalLotCost';
 import { resolveSaleInrDisplay } from '@/lib/icTransfer/metalSettlement';
-import { isMetalAedPayment } from '@/lib/domain/books';
 import {
-  purchaseAedTotal,
   remainingStockWac,
   simulateWarehouseInventory,
   type WarehouseInventoryEvent,
@@ -154,23 +152,6 @@ function computeOneWarehouse(
     });
   }
 
-  for (const s of whSales) {
-    if (!isMetal(s.settlementMode)) continue;
-    if (String(s.orderStatus || '') !== 'completed') continue;
-    if (isMetalAedPayment(s.metalPaymentMethod)) continue;
-    if (!throughEnd(s.statusUpdatedAt || s.createdAt, range)) continue;
-    const units = Number(s.units) || 0;
-    const cost = purchaseAedTotal(units, Number(s.unitRate) || 0, s.aedAmount);
-    if (units <= 0 || cost <= 0) continue;
-    events.push({
-      kind: 'purchase',
-      at: saleMs(s),
-      sortKey: `metal-inr:${s.id}`,
-      units,
-      cost,
-    });
-  }
-
   const cashSalesInPeriod = whSales.filter(
     s => !isMetal(s.settlementMode) && inRange(s.createdAt, range),
   );
@@ -245,7 +226,7 @@ function computeOneWarehouse(
   };
 }
 
-/** Remaining IC WAC after all IC buys, metal-INR conversions, and IC sales. */
+/** Remaining IC WAC after cash IC buys minus cash IC sales. Metal does not enter this pool. */
 export function remainingIcStockWac(
   purchases: ICPurchase[],
   sales: ICSale[],
@@ -267,21 +248,7 @@ export function remainingIcStockWac(
     });
   }
   for (const s of whSales) {
-    if (isMetal(s.settlementMode)) {
-      if (String(s.orderStatus || '') !== 'completed') continue;
-      if (isMetalAedPayment(s.metalPaymentMethod)) continue;
-      const units = Number(s.units) || 0;
-      const cost = purchaseAedTotal(units, Number(s.unitRate) || 0, s.aedAmount);
-      if (units <= 0 || cost <= 0) continue;
-      events.push({
-        kind: 'purchase',
-        at: saleMs(s),
-        sortKey: `metal-inr:${s.id}`,
-        units,
-        cost,
-      });
-      continue;
-    }
+    if (isMetal(s.settlementMode)) continue;
     const units = Number(s.units) || 0;
     if (units <= 0) continue;
     events.push({

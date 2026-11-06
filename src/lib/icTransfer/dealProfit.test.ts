@@ -70,7 +70,7 @@ describe('dealProfit', () => {
     assert.equal(slice.metalSaleCount, 1);
   });
 
-  it('puts metal INR proceeds into IC WAC so a later IC sale is not free profit', () => {
+  it('does not put metal INR sale units into IC WAC', () => {
     const purchases: ICPurchase[] = [
       {
         id: 'p-metal-inr',
@@ -99,17 +99,6 @@ describe('dealProfit', () => {
         orderStatus: 'completed',
         createdAt: '2026-01-10T00:00:00.000Z',
       },
-      {
-        id: 's-ic',
-        customerName: 'B',
-        warehouseId: 'w1',
-        units: 50,
-        unitRate: 3500,
-        aedAmount: 175_000,
-        settlementMode: 'cash',
-        orderStatus: 'completed',
-        createdAt: '2026-01-20T00:00:00.000Z',
-      },
     ];
     const slice = computeDealProfit({
       purchases,
@@ -117,7 +106,76 @@ describe('dealProfit', () => {
       range: { startDate: '2026-01-01', endDate: '2026-01-31' },
     });
     assert.equal(slice.cashGrossProfitAed, 0);
+    assert.equal(slice.cashCogsAed, 0);
     assert.equal(slice.metalProfitInr, 1_000_000);
+    const { units } = remainingIcStockWac(purchases, sales, 'w1');
+    assert.equal(units, 0);
+  });
+
+  it('keeps DEL cash IC 360k/370k separate from metal 10L INR', () => {
+    const purchases: ICPurchase[] = [
+      {
+        id: 'p-ic',
+        warehouseId: 'del',
+        units: 100,
+        unitRate: 3600,
+        aedTotal: 360_000,
+        settlementMode: 'cash',
+        createdAt: '2026-11-01T00:00:00.000Z',
+      },
+      {
+        id: 'p-metal',
+        warehouseId: 'del',
+        units: 0,
+        inrTotal: 13_986_000,
+        labTotalInr: 14_000,
+        metalWeightG: 1000,
+        metalPaymentMethod: 'CASH',
+        settlementMode: 'metal',
+        createdAt: '2026-11-02T00:00:00.000Z',
+      },
+    ];
+    const sales: ICSale[] = [
+      {
+        id: 's-ic',
+        customerName: 'BAVA',
+        warehouseId: 'del',
+        units: 100,
+        unitRate: 3700,
+        aedAmount: 370_000,
+        settlementMode: 'cash',
+        orderStatus: 'completed',
+        createdAt: '2026-11-03T00:00:00.000Z',
+      },
+      {
+        id: 's-metal',
+        customerName: 'RONAK',
+        warehouseId: 'del',
+        units: 149.86,
+        unitRate: 0,
+        aedAmount: 0,
+        inrTotal: 14_986_000,
+        labTotalInr: 14_000,
+        metalWeightG: 1000,
+        metalPurchaseId: 'p-metal',
+        metalPaymentMethod: 'CASH',
+        settlementMode: 'metal',
+        orderStatus: 'completed',
+        createdAt: '2026-11-04T00:00:00.000Z',
+      },
+    ];
+    const slice = computeDealProfit({
+      purchases,
+      sales,
+      range: { startDate: '2026-11-01', endDate: '2026-11-30' },
+      warehouseId: 'del',
+    });
+    assert.equal(slice.cashGrossProfitAed, 10_000);
+    assert.equal(slice.cashCogsAed, 360_000);
+    assert.equal(slice.cashRevenueAed, 370_000);
+    assert.equal(slice.metalProfitInr, 1_000_000);
+    const { units } = remainingIcStockWac(purchases, sales, 'del');
+    assert.equal(units, 0);
   });
 
   it('books INR margin on cash-metal sale matched to INR lot', () => {
@@ -199,7 +257,7 @@ describe('dealProfit', () => {
     assert.ok(Math.abs(slice.metalProfitInr - 9_994.2) < 1);
   });
 
-  it('counts IC stock only from cash IC buys and metal INR sales, not metal AED sales', () => {
+  it('counts IC stock only from cash IC buys, never metal INR or AED sales', () => {
     const purchases: ICPurchase[] = [
       {
         id: 'p-inr',
@@ -256,7 +314,7 @@ describe('dealProfit', () => {
     ];
 
     const { units } = remainingIcStockWac(purchases, sales, 'ksd');
-    assert.equal(units, 70);
+    assert.equal(units, 0);
   });
 
   it('nets lab test out of metal INR P&L', () => {

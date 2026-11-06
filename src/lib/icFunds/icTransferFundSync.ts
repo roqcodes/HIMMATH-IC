@@ -364,12 +364,6 @@ async function loadWarehouseInventoryEvents(
     });
   }
 
-  await appendInrMetalConversionEvents(client, events, {
-    warehouseId,
-    excludeSaleId,
-    asOf,
-  });
-
   return events;
 }
 
@@ -426,50 +420,7 @@ async function loadGlobalInventoryEvents(
     });
   }
 
-  await appendInrMetalConversionEvents(client, events, {
-    warehouseId: null,
-    excludeSaleId,
-    asOf,
-  });
-
   return events;
-}
-
-async function appendInrMetalConversionEvents(
-  client: DbClient,
-  events: WarehouseInventoryEvent[],
-  params: { warehouseId: string | null; excludeSaleId: string; asOf: unknown },
-): Promise<void> {
-  const warehouseFilter = params.warehouseId ? 'AND s.warehouse_id = $3' : '';
-  const queryParams = params.warehouseId
-    ? [params.excludeSaleId, params.asOf, params.warehouseId]
-    : [params.excludeSaleId, params.asOf];
-  const convRes = await client.query(
-    `SELECT s.id, s.units, s.unit_rate, s.aed_amount,
-            COALESCE(s.status_updated_at, s.created_at) AS completed_at
-     FROM ic_sales s
-     WHERE s.settlement_mode = 'metal'
-       AND s.metal_payment_method IN ('INR', 'CASH')
-       AND s.order_status = 'completed'
-       AND s.units > 0
-       AND s.id <> $1::uuid
-       AND COALESCE(s.status_updated_at, s.created_at) <= $2::timestamptz
-       ${warehouseFilter}`,
-    queryParams,
-  );
-  for (const row of convRes.rows) {
-    const units = Number(row.units) || 0;
-    if (units <= 0) continue;
-    const cost = purchaseAedTotal(units, Number(row.unit_rate) || 0, row.aed_amount);
-    if (cost <= 0) continue;
-    events.push({
-      kind: 'purchase',
-      at: new Date(String(row.completed_at)).getTime(),
-      sortKey: `metal-inr:${row.id}`,
-      units,
-      cost,
-    });
-  }
 }
 
 function remainingStockPoolBeforeSale(
@@ -606,6 +557,26 @@ async function postSaleMarginVouchers(
     });
   } else {
     await voidVoucherByReference(client, branchId, 'ic_sale_profit', saleRef);
+  }
+}
+
+/** Void and repost cash IC COGS/profit in date order so leftover metal-in-WAC journals are corrected. */
+async function repairCompletedCashSaleMarginsForWarehouse(
+  client: DbClient,
+  warehouseId: string,
+  branchId: string,
+): Promise<void> {
+  const res = await client.query(
+    `SELECT *
+     FROM ic_sales
+     WHERE warehouse_id = $1
+       AND order_status = 'completed'
+       AND COALESCE(settlement_mode, 'cash') <> 'metal'
+     ORDER BY COALESCE(status_updated_at, created_at) ASC, created_at ASC, id ASC`,
+    [warehouseId],
+  );
+  for (const row of res.rows) {
+    await postSaleMarginVouchers(client, row, branchId);
   }
 }
 
@@ -863,6 +834,10 @@ export async function syncICPurchaseToICFunds(purchaseId: string): Promise<void>
       if (metal) {
         const { syncMetalPurchaseLedgers } = await import('@/lib/metal/posting');
         await syncMetalPurchaseLedgers(client, purchase, branchId);
+        const warehouseId = purchase.warehouse_id ? String(purchase.warehouse_id) : null;
+        if (warehouseId) {
+          await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId);
+        }
         return;
       }
 
@@ -921,6 +896,11 @@ export async function syncICPurchaseToICFunds(purchaseId: string): Promise<void>
         referenceType: 'ic_purchase',
         referenceId: purchaseId,
       });
+
+      const warehouseId = purchase.warehouse_id ? String(purchase.warehouse_id) : null;
+      if (warehouseId) {
+        await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId);
+      }
     });
   } catch (err) {
     logger.error({ err, purchaseId }, 'Failed to sync IC purchase to IC Funds');
@@ -972,6 +952,10 @@ export async function syncICSaleToICFunds(saleId: string): Promise<void> {
         const { syncMetalSaleLedgers } = await import('@/lib/metal/posting');
         await syncMetalSaleLedgers(client, sale, branchId);
         await voidMetalCashIcStockVoucher(client, saleId, branchId);
+        const warehouseId = sale.warehouse_id ? String(sale.warehouse_id) : null;
+        if (warehouseId) {
+          await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId);
+        }
         return;
       }
 
@@ -1031,7 +1015,12 @@ export async function syncICSaleToICFunds(saleId: string): Promise<void> {
       });
 
       if (orderStatus === 'completed') {
-        await postSaleMarginVouchers(client, sale, branchId);
+        const warehouseId = sale.warehouse_id ? String(sale.warehouse_id) : null;
+        if (warehouseId) {
+          await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId);
+        } else {
+          await postSaleMarginVouchers(client, sale, branchId);
+        }
       } else {
         await voidSaleMarginVouchers(client, branchId, saleId);
       }

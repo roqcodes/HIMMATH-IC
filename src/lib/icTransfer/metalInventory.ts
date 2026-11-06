@@ -131,8 +131,7 @@ export type NormalizedMetalLotSale = {
 };
 
 /**
- * Metal sale: INR grams + IC unit AED rate. Cash payment puts those units into IC stock at that AED cost.
- * AED payment collects AED via agent and does not add IC units.
+ * Metal sale: INR grams on the metal book. Units/rate stay on the metal deal; they do not enter the IC cash WAC pool.
  */
 export function normalizeMetalLotSale(params: {
   metalPurchaseId: string;
