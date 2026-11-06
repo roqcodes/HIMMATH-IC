@@ -35,7 +35,7 @@ function metalAgentAedNetOfLab(
   const gross = Number(grossInr) || 0;
   const aed = Number(storedAed) || 0;
   if (aed <= 0 || gross <= 0) return aed;
-  const netInr = netMetalInr(gross, labTotalInr);
+  const netInr = netMetalInr(gross, Number(labTotalInr) || 0);
   return Number(((aed * netInr) / gross).toFixed(4));
 }
 

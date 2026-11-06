@@ -35,6 +35,7 @@ import {
   formatMetalLotLabel,
   isFullRemainingSell,
   normalizeMetalLotSale,
+  remainingMetalGramsOnLot,
 } from '@/lib/icTransfer/metalInventory';
 import { sqlExcludeVoidIcSales } from '@/lib/icFunds/icTransferReportFilters';
 import { adjustWarehouseMetalStock, adjustWarehouseStock, logWarehouseStockTransaction } from '@/lib/warehouse/stockDb';

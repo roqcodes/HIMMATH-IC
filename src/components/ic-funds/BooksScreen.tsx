@@ -39,7 +39,9 @@ import ProfitLossReport from '@/components/ic-funds/reports/ProfitLossReport';
 import BalanceSheetReport from '@/components/ic-funds/reports/BalanceSheetReport';
 import DayBookReport from '@/components/ic-funds/reports/DayBookReport';
 import CashBankBookReport from '@/components/ic-funds/reports/CashBankBookReport';
-import SettlementTradeReport from '@/components/ic-funds/reports/SettlementTradeReport';
+import SettlementTradeReport, {
+  type SettlementTradeReportVariant,
+} from '@/components/ic-funds/reports/SettlementTradeReport';
 import { icFundsReportPath, type ICFundsReportId } from '@/lib/icFunds/nav';
 import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
 import { computeBooksKpis } from '@/lib/icFunds/kpiMetrics';
@@ -118,6 +120,7 @@ export default function BooksScreen({
   const [error, setError] = useState<string | null>(null);
   const [reportFilters, setReportFilters] = useState<ReportFilterState>(DEFAULT_REPORT_FILTERS);
   const [statementBook, setStatementBook] = useState<'aed' | 'inr'>('aed');
+  const [profitLossBook, setProfitLossBook] = useState<'aed' | 'inr'>('aed');
   const [warehouseStatementBook, setWarehouseStatementBook] = useState<'ic' | 'metal'>('ic');
   const [inrAccountId, setInrAccountId] = useState<string | null>(null);
   const [inrStatement, setInrStatement] = useState<{
@@ -306,6 +309,13 @@ export default function BooksScreen({
     [reportFilters, settlementTradeReport],
   );
 
+  const settlementTradeReportVariant = useMemo<SettlementTradeReportVariant>(() => {
+    const report = filteredSettlementReport ?? settlementTradeReport;
+    if (!report || report.settlementMode !== 'metal') return 'fund';
+    const hasAgentAed = [...report.purchases, ...report.sales].some(r => r.metalPaymentMethod === 'AED');
+    return hasAgentAed ? 'metal-agent' : 'metal-inr';
+  }, [filteredSettlementReport, settlementTradeReport]);
+
   const filteredWarehouseSummaries = useMemo(
     () =>
       warehousePl
@@ -321,6 +331,27 @@ export default function BooksScreen({
         : [],
     [reportFilters.search, reportFilters.warehouseId, warehousePl],
   );
+
+  /** Metal (INR) roll-up on P&L tab — same INR economics as warehouse statement detail. */
+  const profitLossMetalInrKpis = useMemo(() => {
+    if (!warehousePl) {
+      return { metalSoldG: 0, metalSaleInr: 0, metalCogsInr: 0 };
+    }
+    const lines = filterWarehousePlLines(warehousePl.lines, reportFilters.warehouseId, reportFilters.search);
+    let metalSoldG = 0;
+    let metalSaleInr = 0;
+    let metalCogsInr = 0;
+    for (const line of lines) {
+      if (line.settlementMode !== 'metal' || line.lineKind !== 'sale') continue;
+      metalSoldG += Number(line.metalWeightG ?? line.units) || 0;
+      metalSaleInr +=
+        line.metalDisplayRevenueInr ??
+        (line.bookedCurrency === 'INR' ? line.revenue : 0);
+      metalCogsInr +=
+        line.metalDisplayCostInr ?? (line.bookedCurrency === 'INR' ? line.cogs : 0);
+    }
+    return { metalSoldG, metalSaleInr, metalCogsInr };
+  }, [warehousePl, reportFilters.warehouseId, reportFilters.search]);
 
   const filteredAllVouchers = useMemo(
     () => (bundle ? filterVouchers(bundle.allVouchers, reportFilters) : []),
@@ -928,6 +959,11 @@ export default function BooksScreen({
             slug={slug}
             accounts={accounts}
             periodMetalPlInr={warehousePl?.totals.metalProfitInr ?? null}
+            metalSoldG={profitLossMetalInrKpis.metalSoldG}
+            metalSaleInr={profitLossMetalInrKpis.metalSaleInr}
+            metalCogsInr={profitLossMetalInrKpis.metalCogsInr}
+            book={profitLossBook}
+            onBookChange={setProfitLossBook}
           />
         ) : null}
         {warehousePl && reportView === 'warehouse-pl' ? (
@@ -940,7 +976,11 @@ export default function BooksScreen({
           />
         ) : null}
         {filteredSettlementReport && (reportView === 'fund-trades' || reportView === 'metal-trades') ? (
-          <SettlementTradeReport report={filteredSettlementReport} periodLabel={periodLabel} />
+          <SettlementTradeReport
+            report={filteredSettlementReport}
+            periodLabel={periodLabel}
+            variant={settlementTradeReportVariant}
+          />
         ) : null}
         {bundle && reportView === 'balance-sheet' && bundle.balanceSheetDetail ? (
           <BalanceSheetReport
