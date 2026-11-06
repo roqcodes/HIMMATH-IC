@@ -144,7 +144,9 @@ export function normalizeMetalLotSale(params: {
     throw new Error('Select the metal purchase to sell.');
   }
   const sale = normalizeMetalSale(params.input, 0, {
-    paymentMethod: params.paymentMethod,
+    paymentMethod: params.paymentMethod
+      ? normalizeMetalPaymentMethod(params.paymentMethod)
+      : undefined,
     aedAgentId: params.aedAgentId,
   });
   return {

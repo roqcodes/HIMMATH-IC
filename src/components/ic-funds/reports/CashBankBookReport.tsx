@@ -6,7 +6,7 @@ import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import { BalanceWithPending } from '@/components/ic-funds/BalanceWithPending';
 import { icfTableWrap, icfTd, icfTh, icfThAlign, icfTheadRow } from '@/components/ic-funds/ui';
 import type { ICFundAccount } from '@/types';
-import { fmtDrCr, ReportCaption } from './reportShared';
+import { AED_LEDGER_CAPTION, fmtDrCr, ReportCaption } from './reportShared';
 
 export default function CashBankBookReport({
   ledgers,
@@ -26,7 +26,7 @@ export default function CashBankBookReport({
   return (
     <div>
       <ReportCaption>
-        {periodLabel} · {asAtLabel}
+        {periodLabel} · {asAtLabel} · {AED_LEDGER_CAPTION}
       </ReportCaption>
       <div className={icfTableWrap}>
         <table className="w-full min-w-[720px] text-left text-sm">

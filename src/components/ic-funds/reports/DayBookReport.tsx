@@ -6,7 +6,7 @@ import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import VoucherUserCell from '@/components/ic-funds/VoucherUserCell';
 import { icfTableWrap, icfTd, icfTh, icfThAlign, icfTheadRow } from '@/components/ic-funds/ui';
 import type { ICFundAccount, ICFundVoucher } from '@/types';
-import { ReportCaption } from './reportShared';
+import { AED_LEDGER_CAPTION, ReportCaption } from './reportShared';
 
 export default function DayBookReport({
   vouchers,
@@ -30,7 +30,7 @@ export default function DayBookReport({
   return (
     <div>
       <ReportCaption>
-        {periodLabel} · Chronological day book
+        {periodLabel} · Day book in date order · {AED_LEDGER_CAPTION}
         {truncated ? ' · Showing first 50,000 entries; narrow the date range for full export.' : ''}
       </ReportCaption>
       <div className={icfTableWrap}>

@@ -1,5 +1,9 @@
 import type { ICFundAccount, ICFundStatementLine, ICFundTrialBalanceLine, ICFundVoucher } from '@/types';
-import type { ICSettlementTradeLine, ICSettlementTradeReport } from '@/lib/icFunds/settlementTradeReport';
+import {
+  summarizeSettlementTrades,
+  type ICSettlementTradeLine,
+  type ICSettlementTradeReport,
+} from '@/lib/icFunds/settlementTradeReport';
 import type { ICWarehousePLLine, ICWarehousePLWarehouseSummary } from '@/lib/icFunds/warehouseProfit';
 import { isVoidIcSaleOrderStatus } from '@/lib/icFunds/icTransferReportFilters';
 
@@ -171,10 +175,13 @@ export function filterSettlementTradeReport(
     return true;
   };
 
+  const purchases = report.purchases.filter(filterLine);
+  const sales = report.sales.filter(filterLine);
   return {
     ...report,
-    purchases: report.purchases.filter(filterLine),
-    sales: report.sales.filter(filterLine),
+    purchases,
+    sales,
+    summary: summarizeSettlementTrades(purchases, sales),
   };
 }
 

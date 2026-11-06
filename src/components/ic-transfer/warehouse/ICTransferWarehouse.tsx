@@ -5,7 +5,6 @@ import { useApp } from '@/context/AppContext';
 import { asicBtnPrimary } from '@/components/asic/ui';
 import { resolveDateFilterRange, getDateFilterLabel } from '@/lib/dateFilterRange';
 import { computeWarehouseMatrix } from '@/lib/icTransfer/warehouseMatrixMetrics';
-import { buildICTransferInventoryKpiMetrics } from '@/lib/icTransfer/inventoryKpiMetrics';
 import {
   filterSalesForBranchPortal,
   filterPurchasesForBranchPortal,
@@ -16,13 +15,8 @@ import {
 import ManageWarehousesSection from '@/components/ic-transfer/warehouse/ManageWarehousesSection';
 import ICTransferDateFilterBar from '@/components/ic-transfer/shared/ICTransferDateFilterBar';
 import AsicPageHeader from '@/components/asic/AsicPageHeader';
-import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
-import ICTransferDealBookKpiStrips from '@/components/ic-transfer/shared/ICTransferDealBookKpiStrips';
-import {
-  computeCombinedTradeBookKpis,
-  countPurchasesInRange,
-  countSalesInRange,
-} from '@/lib/icTransfer/dealBookKpis';
+import WarehouseInventoryKpiGrid from '@/components/warehouse/WarehouseInventoryKpiGrid';
+import { computeCombinedTradeBookKpis } from '@/lib/icTransfer/dealBookKpis';
 import { useICTransferRegionFilter } from '@/components/ic-transfer/shared/ICTransferFilterProvider';
 import {
   PageShell,
@@ -103,12 +97,6 @@ export default function ICTransferWarehouse({
     [scopedPurchases, scopedSales, range],
   );
 
-  const tradeCountHint = useMemo(() => {
-    const p = countPurchasesInRange(scopedPurchases, range);
-    const s = countSalesInRange(scopedSales, range);
-    return `${p.cash + p.metal} purchases · ${s.cash + s.metal} sales`;
-  }, [scopedPurchases, scopedSales, range]);
-
   const openAddWarehouseRef = useRef<(() => void) | null>(null);
 
   const addWarehouseButton = (
@@ -119,20 +107,6 @@ export default function ICTransferWarehouse({
     >
       Add Warehouse
     </button>
-  );
-
-  const inventoryKpis = useMemo(
-    () =>
-      buildICTransferInventoryKpiMetrics({
-        currentStock: totals.currentStock,
-        currentMetalG: totals.currentMetalG,
-        cashGrossProfitAed: totals.cashGrossProfitAed,
-        metalProfitAed: totals.metalProfitAed,
-        metalProfitInr: totals.metalProfitInr,
-        rangeLabel,
-        metalHint: 'Grams',
-      }),
-    [totals, rangeLabel],
   );
 
   return (
@@ -148,13 +122,10 @@ export default function ICTransferWarehouse({
         setCustomEndDate={setCustomEndDate}
       />
 
-      <AsicKpiStrip columns={4} metrics={inventoryKpis} />
-
-      <ICTransferDealBookKpiStrips
+      <WarehouseInventoryKpiGrid
+        metrics={totals}
         books={tradeBookKpis}
         rangeLabel={rangeLabel}
-        flow="combined"
-        countHint={tradeCountHint}
       />
 
       <ManageWarehousesSection

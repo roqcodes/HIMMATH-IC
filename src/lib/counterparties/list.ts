@@ -7,6 +7,7 @@ export type CounterpartyListRow = {
   code?: string;
   phone?: string | null;
   email?: string | null;
+  address?: string | null;
   country?: string | null;
   subdivision?: string | null;
   locality?: string | null;
@@ -24,6 +25,7 @@ export function counterpartiesFromRegistry(suppliers: ICSupplier[]): Counterpart
       code: s.code,
       phone: s.phone,
       email: s.email,
+      address: s.address,
       country: s.country,
       subdivision: s.subdivision,
       locality: s.locality,

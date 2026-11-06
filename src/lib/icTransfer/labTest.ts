@@ -39,7 +39,7 @@ export function netMetalInr(grossInr: number, labTotalInr: number): number {
   return roundInr(Math.max(0, gross - lab));
 }
 
-export function hasLab(fields: Pick<LabTestFields, 'labTotalInr'>): boolean {
+export function hasLab(fields: { labTotalInr?: number | null }): boolean {
   return roundInr(Number(fields.labTotalInr) || 0) > 0;
 }
 

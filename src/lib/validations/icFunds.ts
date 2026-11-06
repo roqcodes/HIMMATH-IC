@@ -74,6 +74,4 @@ export const icFundsDateRangeSchema = z.object({
 export const icSettlementTradeReportSchema = icFundsDateRangeSchema.extend({
   settlementMode: z.enum(['cash', 'metal']),
   includeVoidOrders: z.boolean().optional().default(false),
-  /** When settlementMode is metal: cash = INR commodity book; aed = agent settlement only. */
-  metalPaymentBook: z.enum(['cash', 'aed']).optional(),
 });

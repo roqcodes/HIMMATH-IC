@@ -5,7 +5,7 @@ import { fmtLedgerAed, icfLedgerColumnLabel, FmtLedgerAed } from '@/lib/icFunds/
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import { icfTableWrap, icfTd, icfTh, icfThAlign, icfTheadRow } from '@/components/ic-funds/ui';
 import type { ICFundAccount, ICFundTrialBalanceLine } from '@/types';
-import { fmtDrCr, ReportCaption } from './reportShared';
+import { AED_LEDGER_CAPTION, fmtDrCr, ReportCaption } from './reportShared';
 
 export default function TrialBalanceReport({
   lines,
@@ -23,7 +23,9 @@ export default function TrialBalanceReport({
 
   return (
     <div>
-      <ReportCaption>{asAtLabel} · Posted balances; pending shown separately</ReportCaption>
+      <ReportCaption>
+        {asAtLabel} · {AED_LEDGER_CAPTION} Posted balances; pending shown separately.
+      </ReportCaption>
       <div className={icfTableWrap}>
         <table className="w-full min-w-[880px] text-left text-sm">
           <thead>

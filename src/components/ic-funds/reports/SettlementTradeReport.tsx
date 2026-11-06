@@ -1,8 +1,7 @@
 'use client';
 
 import React from 'react';
-import Link from 'next/link';
-import { fmtICDate, FmtLedgerAed, FmtLedgerAmount, FmtLedgerInr } from '@/lib/icFunds/format';
+import { fmtICDate, FmtLedgerAed, FmtLedgerInr } from '@/lib/icFunds/format';
 import {
   settlementTradeReportSubtitle,
   settlementTradeReportTitle,
@@ -12,7 +11,7 @@ import {
   type ICSettlementTradeReport,
 } from '@/lib/icFunds/settlementTradeReport';
 import { icfTableWrap, icfTd, icfTh, icfThAlign, icfTheadRow } from '@/components/ic-funds/ui';
-import { ReportAmountCell, ReportCaption } from './reportShared';
+import { ReportAmountCell, ReportCaption, ReportSegmentTabs } from './reportShared';
 
 export type SettlementTradeReportVariant = 'fund' | 'metal-inr' | 'metal-agent';
 
@@ -214,32 +213,50 @@ function variantCaption(variant: SettlementTradeReportVariant): string {
     return settlementTradeReportSubtitle('cash');
   }
   if (variant === 'metal-inr') {
-    return 'Cash metal only — grams and INR. No AED agent settlement on this register.';
+    return 'Cash metal only — grams and rupees. AED agent cash is on the other tab.';
   }
-  return 'Agent AED settlement for metal deals — not commodity P&L. View agent balance on AED statement of account.';
+  return 'Cash with the AED agent — not metal profit.';
 }
 
 function variantTitle(variant: SettlementTradeReportVariant): string {
   if (variant === 'fund') return settlementTradeReportTitle('cash');
-  if (variant === 'metal-inr') return 'Metal register (cash INR)';
-  return 'Metal via AED agent';
+  if (variant === 'metal-inr') return 'Cash metal (INR)';
+  return 'AED agent';
 }
 
 export default function SettlementTradeReport({
   report,
   periodLabel,
   variant,
+  metalBook,
+  onMetalBookChange,
 }: {
   report: ICSettlementTradeReport;
   periodLabel: string;
   variant: SettlementTradeReportVariant;
+  metalBook?: 'inr' | 'aed';
+  onMetalBookChange?: (book: 'inr' | 'aed') => void;
 }) {
   const { summary } = report;
   const isFund = variant === 'fund';
   const isMetalInr = variant === 'metal-inr';
+  const showMetalTabs = !isFund && metalBook && onMetalBookChange;
 
   return (
     <div>
+      {showMetalTabs ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-2.5 py-2 dark:border-[var(--theme-border)]">
+          <ReportSegmentTabs
+            label="Metal register book"
+            value={metalBook}
+            onChange={onMetalBookChange}
+            options={[
+              { id: 'inr', label: 'Cash metal (INR)' },
+              { id: 'aed', label: 'AED agent' },
+            ]}
+          />
+        </div>
+      ) : null}
       <ReportCaption>
         {periodLabel} · {variantTitle(variant)} · {variantCaption(variant)}
       </ReportCaption>
@@ -291,12 +308,7 @@ export default function SettlementTradeReport({
               <p className="mt-0.5 text-sm font-semibold tabular-nums">
                 <FmtLedgerInr amount={summary.bookedInrProfit} />
               </p>
-              <p className="text-xs text-slate-500">
-                Commodity profit on cash metal ·{' '}
-                <Link href="/admin/reports?view=metal-pl" className="underline">
-                  metal P&amp;L
-                </Link>
-              </p>
+              <p className="text-xs text-slate-500">Sale rupees minus purchase rupees</p>
             </div>
           </>
         ) : (

@@ -25,7 +25,7 @@ export async function downloadDealInvoicePdf(doc: DealInvoiceDoc): Promise<void>
     pdfBytes = buildDealInvoicePdf(doc);
   }
 
-  const pdfBlob = new Blob([pdfBytes], { type: 'application/pdf' });
+  const pdfBlob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' });
   const url = URL.createObjectURL(pdfBlob);
   const a = document.createElement('a');
   a.href = url;

@@ -1,12 +1,10 @@
 import type { ICFundsReportId } from '@/lib/icFunds/nav';
 
-export type ReportCatalogBookId = 'ic-aed' | 'metal-inr';
-
 export type ReportCatalogGroupId =
-  | 'registers-ic'
-  | 'registers-metal'
-  | 'analysis-ic'
-  | 'analysis-metal';
+  | 'registers'
+  | 'statements'
+  | 'financial'
+  | 'operational';
 
 export type ReportCatalogEntry = {
   id: ICFundsReportId;
@@ -14,138 +12,97 @@ export type ReportCatalogEntry = {
   description: string;
 };
 
-export type ReportCatalogGroup = {
+export const REPORT_CATALOG_GROUPS: ReadonlyArray<{
   id: ReportCatalogGroupId;
-  book: ReportCatalogBookId;
   title: string;
   description: string;
   reports: readonly ReportCatalogEntry[];
-};
-
-export const REPORT_CATALOG_GROUPS: readonly ReportCatalogGroup[] = [
+}> = [
   {
-    id: 'registers-ic',
-    book: 'ic-aed',
-    title: 'IC / Fund (AED)',
-    description: 'HQ ledger in AED — cash IC deals, bank, expenses, and party balances.',
+    id: 'registers',
+    title: 'Books & registers',
+    description: 'Day-to-day debits and credits, cash movement, and expense vouchers.',
     reports: [
       {
         id: 'all-vouchers',
         title: 'Day book',
-        description: 'Every AED debit and credit in date order.',
+        description: 'Every AED voucher in date order. Metal in rupees is not on this page.',
       },
       {
         id: 'cash-bank',
         title: 'Cash & bank book',
-        description: 'Opening, receipts, payments, and closing for each till (AED).',
+        description: 'Opening, in, out, and closing for each AED till and wallet.',
       },
       {
         id: 'd-expenses',
         title: 'Expense register',
-        description: 'Operating and direct expense vouchers on the AED ledger.',
+        description: 'AED expense vouchers — cost of sales and running costs.',
       },
+    ],
+  },
+  {
+    id: 'statements',
+    title: 'Ledgers & balances',
+    description: 'Opening and closing balances by account and party.',
+    reports: [
       {
         id: 'statement',
-        title: 'Statement of account (AED)',
-        description: 'Opening, movements, and closing for one IC Funds account.',
+        title: 'Statement of account',
+        description:
+          'One account: opening, in, out, closing. Use AED or INR tabs — the two books are never added together.',
       },
       {
         id: 'receivables',
         title: 'Receivables & payables',
-        description: 'Customer and supplier AED balances (includes AED agents).',
+        description: 'Who owes us and whom we owe, in AED. INR metal balances are on Statement (INR).',
       },
     ],
   },
   {
-    id: 'registers-metal',
-    book: 'metal-inr',
-    title: 'Metal (INR)',
-    description: 'Commodity book in INR — cash metal purchases, sales, and supplier balances.',
-    reports: [
-      {
-        id: 'inr-statement',
-        title: 'Statement of account (INR)',
-        description: 'Opening, movements, and closing on the INR metal ledger.',
-      },
-    ],
-  },
-  {
-    id: 'analysis-ic',
-    book: 'ic-aed',
-    title: 'IC / Fund (AED)',
-    description: 'Financial statements and IC unit activity in AED.',
+    id: 'financial',
+    title: 'Financial statements',
+    description: 'AED statements, plus metal and fund registers. AED and INR are never added together.',
     reports: [
       {
         id: 'trial-balance',
         title: 'Trial balance',
-        description: 'AED accounts — opening, period Dr/Cr, and closing.',
+        description: 'AED accounts: opening, movement, and closing. Checks that debits equal credits.',
       },
       {
         id: 'profit-loss',
-        title: 'Profit & loss (AED)',
-        description: 'IC cash WAC gross profit and operating result on the AED ledger.',
+        title: 'Profit & loss',
+        description:
+          'AED ledger profit, or metal profit in rupees — pick a tab. The two are never added together.',
       },
       {
         id: 'balance-sheet',
         title: 'Balance sheet',
-        description: 'AED assets, liabilities, and equity as at the end date.',
+        description: 'What the business owns and owes in AED as at the end date.',
       },
       {
         id: 'fund-trades',
-        title: 'Fund register',
-        description: 'IC unit purchases and sales — amounts in AED only.',
+        title: 'Fund register (purchase & sale)',
+        description: 'Cash IC buys and sells in AED — not metal.',
       },
-      {
-        id: 'warehouse-pl',
-        title: 'Warehouse IC',
-        description: 'IC units in/out and WAC gross profit by warehouse (AED).',
-      },
-      {
-        id: 'metal-agent-trades',
-        title: 'Metal via AED agent',
-        description: 'Agent settlement for metal deals — AED only, not commodity P&L.',
-      },
-    ],
-  },
-  {
-    id: 'analysis-metal',
-    book: 'metal-inr',
-    title: 'Metal (INR)',
-    description: 'Grams, INR values, and commodity profit on the metal book.',
-    reports: [
       {
         id: 'metal-trades',
-        title: 'Metal register (cash)',
-        description: 'Cash-metal buys and sells — grams and INR only.',
-      },
-      {
-        id: 'warehouse-metal',
-        title: 'Warehouse metal',
-        description: 'Fine metal in/out and period P&L by warehouse (INR).',
-      },
-      {
-        id: 'metal-pl',
-        title: 'Metal profit & loss',
-        description: 'INR ledger: metal sales, cost of metal sold, and net result.',
+        title: 'Metal register (purchase & sale)',
+        description: 'Cash metal in INR, or metal settled with an AED agent — pick a tab.',
       },
     ],
   },
-];
-
-export const REPORT_HUB_COLUMNS: ReadonlyArray<{
-  id: 'left' | 'right';
-  heading: string;
-  groupIds: readonly ReportCatalogGroupId[];
-}> = [
   {
-    id: 'left',
-    heading: 'Registers & ledgers',
-    groupIds: ['registers-ic', 'registers-metal'],
-  },
-  {
-    id: 'right',
-    heading: 'Statements & analysis',
-    groupIds: ['analysis-ic', 'analysis-metal'],
+    id: 'operational',
+    title: 'Stock & warehouse',
+    description: 'Inventory movement and gross profit by warehouse.',
+    reports: [
+      {
+        id: 'warehouse-pl',
+        title: 'Warehouse statement',
+        description:
+          'IC units and AED profit, or metal grams with INR and AED profit shown separately — pick a tab.',
+      },
+    ],
   },
 ];
 
@@ -157,13 +114,24 @@ export function reportCatalogTitle(id: ICFundsReportId): string {
   return id;
 }
 
-export function reportCatalogBook(id: ICFundsReportId): ReportCatalogBookId | null {
-  for (const group of REPORT_CATALOG_GROUPS) {
-    if (group.reports.some(r => r.id === id)) return group.book;
-  }
-  return null;
-}
+/** Hub layout: left / right columns (horizontal split on md+). */
+export const REPORT_HUB_COLUMNS: ReadonlyArray<{
+  id: 'left' | 'right';
+  heading: string;
+  groupIds: readonly ReportCatalogGroupId[];
+}> = [
+  {
+    id: 'left',
+    heading: 'Registers & ledgers',
+    groupIds: ['registers', 'statements'],
+  },
+  {
+    id: 'right',
+    heading: 'Statements & analysis',
+    groupIds: ['financial', 'operational'],
+  },
+];
 
-export function reportCatalogGroup(id: ReportCatalogGroupId): ReportCatalogGroup | undefined {
+export function reportCatalogGroup(id: ReportCatalogGroupId) {
   return REPORT_CATALOG_GROUPS.find(g => g.id === id);
 }

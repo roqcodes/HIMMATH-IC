@@ -23,7 +23,6 @@ import {
 } from '@/lib/icFunds/accountBalance';
 import {
   accountPeriodBalanceSelectSql,
-  inrAccountPeriodBalanceSelectSql,
   mapRowToPeriodLedger,
   toTrialBalanceRow,
   type AccountPeriodLedger,
@@ -34,7 +33,6 @@ import {
   type BalanceSheetPresentation,
   type PlStatement,
 } from '@/lib/icFunds/reportPresentation';
-import { buildInrPlStatement } from '@/lib/icFunds/inrReportPresentation';
 import {
   purchaseAedTotal,
   remainingStockWac,
@@ -1854,206 +1852,6 @@ export async function getInrFundStatementAction(params: {
   }
 }
 
-export type InrFundAccountLite = {
-  id: string;
-  name: string;
-  accountType: string;
-};
-
-async function fetchInrAccountPeriodLedgers(
-  branchId: string,
-  startDate?: string | null,
-  endDate?: string | null,
-): Promise<AccountPeriodLedger[]> {
-  const branchParam = '$1';
-  let startParam: string | null = null;
-  let endParam: string | null = null;
-  const params: unknown[] = [branchId];
-  if (startDate) {
-    params.push(startDate);
-    startParam = '$2';
-  }
-  if (endDate) {
-    params.push(endDate);
-    endParam = startDate ? '$3' : '$2';
-  }
-
-  const periodCols = inrAccountPeriodBalanceSelectSql({ branchParam, startParam, endParam });
-
-  const res = await query(
-    `SELECT a.id, a.name, a.account_type, ${periodCols},
-      0::numeric AS pending_balance
-     FROM inr_fund_accounts a
-     WHERE a.branch_id = $1 AND a.status = 'active'
-     ORDER BY a.account_type, LOWER(a.name)`,
-    params,
-  );
-  return res.rows.map(r => mapRowToPeriodLedger(r as Record<string, unknown>));
-}
-
-type InrProfitLossTotals = {
-  income: number;
-  profit: number;
-  expense: number;
-};
-
-async function queryInrProfitLossTotals(
-  branchId: string,
-  opts?: { startDate?: string; endDate?: string },
-): Promise<InrProfitLossTotals> {
-  const clauses = [`v.branch_id = $1`, `COALESCE(v.status, 'active') = 'active'`];
-  const params: unknown[] = [branchId];
-  let idx = 2;
-  if (opts?.startDate) {
-    clauses.push(`v.voucher_date >= $${idx}::date`);
-    params.push(opts.startDate);
-    idx += 1;
-  }
-  if (opts?.endDate) {
-    clauses.push(`v.voucher_date <= $${idx}::date`);
-    params.push(opts.endDate);
-    idx += 1;
-  }
-
-  const res = await query(
-    `SELECT
-      COALESCE(SUM(CASE
-        WHEN ca.account_type = 'income' THEN v.amount
-        WHEN da.account_type = 'income' THEN -v.amount
-        ELSE 0
-      END), 0) AS income,
-      COALESCE(SUM(CASE
-        WHEN ca.account_type = 'profit' THEN v.amount
-        WHEN da.account_type = 'profit' THEN -v.amount
-        ELSE 0
-      END), 0) AS profit,
-      COALESCE(SUM(CASE
-        WHEN da.account_type = 'expense' THEN v.amount
-        WHEN ca.account_type = 'expense' THEN -v.amount
-        ELSE 0
-      END), 0) AS expense
-    FROM inr_fund_vouchers v
-    JOIN inr_fund_accounts da ON da.id = v.debit_account_id
-    JOIN inr_fund_accounts ca ON ca.id = v.credit_account_id
-    WHERE ${clauses.join(' AND ')}`,
-    params,
-  );
-
-  const row = res.rows[0] as Record<string, unknown> | undefined;
-  return {
-    income: Number(row?.income) || 0,
-    profit: Number(row?.profit) || 0,
-    expense: Number(row?.expense) || 0,
-  };
-}
-
-async function listInrFundVouchersForReport(params: {
-  branchId: string;
-  startDate?: string;
-  endDate?: string;
-}): Promise<
-  ReadonlyArray<{
-    debitAccountId: string;
-    creditAccountId: string;
-    amount: number;
-    status?: string | null;
-  }>
-> {
-  const clauses = [`v.branch_id = $1`, `COALESCE(v.status, 'active') = 'active'`];
-  const values: unknown[] = [params.branchId];
-  let idx = 2;
-  if (params.startDate) {
-    clauses.push(`v.voucher_date >= $${idx}`);
-    values.push(params.startDate);
-    idx += 1;
-  }
-  if (params.endDate) {
-    clauses.push(`v.voucher_date <= $${idx}`);
-    values.push(params.endDate);
-  }
-  const res = await query(
-    `SELECT v.debit_account_id, v.credit_account_id, v.amount, v.status
-     FROM inr_fund_vouchers v
-     WHERE ${clauses.join(' AND ')}
-     ORDER BY v.voucher_date ASC, v.voucher_no ASC`,
-    values,
-  );
-  return res.rows.map(row => ({
-    debitAccountId: String(row.debit_account_id),
-    creditAccountId: String(row.credit_account_id),
-    amount: Number(row.amount) || 0,
-    status: row.status ? String(row.status) : null,
-  }));
-}
-
-export async function listInrFundAccountsLiteAction(branchId: string): Promise<InrFundAccountLite[]> {
-  const access = await requireICFundsAccess(branchId, 'read');
-  if (!access.ok) return [];
-  try {
-    const res = await query(
-      `SELECT id, name, account_type
-       FROM inr_fund_accounts
-       WHERE branch_id = $1 AND status = 'active'
-       ORDER BY account_type, LOWER(name)`,
-      [branchId],
-    );
-    return res.rows.map(row => ({
-      id: String(row.id),
-      name: String(row.name ?? ''),
-      accountType: String(row.account_type ?? ''),
-    }));
-  } catch (err) {
-    logger.error({ err, branchId }, 'Failed to list INR fund accounts');
-    return [];
-  }
-}
-
-export async function getInrMetalPlReportAction(params: unknown): Promise<
-  ActionResult<{
-    startDate?: string;
-    endDate?: string;
-    plStatement: PlStatement;
-  }>
-> {
-  const parsed = icFundsDateRangeSchema.safeParse(params);
-  if (!parsed.success) {
-    return { success: false, error: parsed.error.issues[0]?.message ?? 'Invalid input' };
-  }
-
-  const access = await requireICFundsAccess(parsed.data.branchId, 'read');
-  if (!access.ok) return { success: false, error: access.error };
-
-  try {
-    const accountLedgers = await fetchInrAccountPeriodLedgers(
-      parsed.data.branchId,
-      parsed.data.startDate ?? null,
-      parsed.data.endDate ?? null,
-    );
-    const periodVouchers = await listInrFundVouchersForReport({
-      branchId: parsed.data.branchId,
-      startDate: parsed.data.startDate,
-      endDate: parsed.data.endDate,
-    });
-    const periodPL = await queryInrProfitLossTotals(parsed.data.branchId, {
-      startDate: parsed.data.startDate,
-      endDate: parsed.data.endDate,
-    });
-    const plStatement = buildInrPlStatement(accountLedgers, periodVouchers, periodPL);
-
-    return {
-      success: true,
-      data: {
-        startDate: parsed.data.startDate,
-        endDate: parsed.data.endDate,
-        plStatement,
-      },
-    };
-  } catch (err) {
-    logger.error({ err, params }, 'Failed to load INR metal P&L report');
-    return { success: false, error: 'Failed to load metal P&L' };
-  }
-}
-
 export async function getCustomerICFundStatementAction(params: {
   branchId: string;
   accountId: string;
@@ -2794,6 +2592,7 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
         metalProfitAed += Number(pl.bookedProfitAed) || 0;
         metalProfitInr += Number(pl.bookedProfitInr) || 0;
         metalSoldG += sale.saleG;
+        const isAedMetal = sale.paymentMethod === 'AED';
         lines.push({
           saleId: sale.id,
           saleDate: isoDate(sale.saleAt),
@@ -2802,14 +2601,14 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
           customerName: sale.customerName,
           units: sale.saleG,
           saleRate: 0,
-          revenue: sale.saleInr,
+          revenue: isAedMetal ? sale.saleAed : sale.saleInr,
           avgPurchaseRate: 0,
-          cogs: pl.purchaseInr,
-          grossProfit: pl.bookedProfitInr,
+          cogs: isAedMetal ? pl.purchaseAed : pl.purchaseInr,
+          grossProfit: isAedMetal ? pl.bookedProfitAed : pl.bookedProfitInr,
           marginPct: 0,
           settlementMode: 'metal',
           metalWeightG: sale.saleG,
-          bookedCurrency: 'INR',
+          bookedCurrency: isAedMetal ? 'AED' : 'INR',
         });
       }
 
@@ -2923,14 +2722,6 @@ function buildTradeDateFilter(
   return { sql, params, nextIndex: idx };
 }
 
-function metalPaymentBookSql(tableAlias: 'p' | 's', book: 'cash' | 'aed' | undefined): string {
-  if (!book) return '';
-  if (book === 'aed') {
-    return ` AND COALESCE(${tableAlias}.metal_payment_method, '') = 'AED'`;
-  }
-  return ` AND COALESCE(${tableAlias}.metal_payment_method, 'INR') <> 'AED'`;
-}
-
 export async function getICSettlementTradeReportAction(params: unknown): Promise<
   ActionResult<ICSettlementTradeReport>
 > {
@@ -2942,15 +2733,10 @@ export async function getICSettlementTradeReportAction(params: unknown): Promise
   const access = await requireICFundsAccess(parsed.data.branchId, 'read');
   if (!access.ok) return { success: false, error: access.error };
 
-  const { branchId, startDate, endDate, settlementMode, includeVoidOrders, metalPaymentBook } =
-    parsed.data;
+  const { branchId, startDate, endDate, settlementMode, includeVoidOrders } = parsed.data;
   const isHqLedger = isHqIcFundsBranchId(branchId);
   const branchFilter = isHqLedger ? '' : `AND (w.branch_id = $1 OR w.branch_id IS NULL)`;
   const branchParams: string[] = isHqLedger ? [] : [branchId];
-  const metalPayFilterP =
-    settlementMode === 'metal' ? metalPaymentBookSql('p', metalPaymentBook) : '';
-  const metalPayFilterS =
-    settlementMode === 'metal' ? metalPaymentBookSql('s', metalPaymentBook) : '';
 
   try {
     const purchaseDate = buildTradeDateFilter(startDate, endDate, branchParams.length + 1);
@@ -2971,20 +2757,16 @@ export async function getICSettlementTradeReportAction(params: unknown): Promise
          p.metal_payment_method,
          p.payment_status,
          p.notes,
-         p.aed_agent_id,
          s.name AS supplier_name,
          s.code AS supplier_code,
          s.id AS counterparty_id,
          w.id AS warehouse_id,
          w.name AS warehouse_name,
-         w.code AS warehouse_code,
-         ag.name AS aed_agent_name
+         w.code AS warehouse_code
        FROM ic_purchases p
        LEFT JOIN ic_counterparties s ON s.id = p.counterparty_id
        LEFT JOIN ic_warehouses w ON w.id = p.warehouse_id
-       LEFT JOIN ic_aed_agents ag ON ag.id = p.aed_agent_id
        WHERE p.settlement_mode = $${purchaseModeIndex}
-         ${metalPayFilterP}
          ${branchFilter.replace(/\bw\./g, 'w.')}
          ${purchaseDate.sql.replace(/\bt\./g, 'p.')}
        ORDER BY p.created_at ASC, p.id ASC`,
@@ -3013,14 +2795,12 @@ export async function getICSettlementTradeReportAction(params: unknown): Promise
          s.customer_name,
          s.order_customer_name,
          s.rejection_remarks,
-         s.aed_agent_id,
          w.id AS warehouse_id,
          w.name AS warehouse_name,
          w.code AS warehouse_code,
          cp.id AS counterparty_id,
          cp.name AS customer_master_name,
          cp.code AS customer_code,
-         ag.name AS aed_agent_name,
          mp.inr_total AS lot_purchase_inr,
          mp.lab_total_inr AS lot_purchase_lab,
          mp.aed_total AS lot_purchase_aed,
@@ -3030,9 +2810,7 @@ export async function getICSettlementTradeReportAction(params: unknown): Promise
        LEFT JOIN ic_warehouses w ON w.id = s.warehouse_id
        LEFT JOIN ic_counterparties cp ON cp.id = s.counterparty_id
        LEFT JOIN ic_purchases mp ON mp.id = s.metal_purchase_id
-       LEFT JOIN ic_aed_agents ag ON ag.id = s.aed_agent_id
        WHERE s.settlement_mode = $${saleModeIndex}
-         ${metalPayFilterS}
          ${includeVoidOrders ? '' : sqlExcludeVoidIcSales('s')}
          ${branchFilter}
          ${saleDate.sql.replace(/\bt\./g, 's.')}
@@ -3076,8 +2854,6 @@ export async function getICSettlementTradeReportAction(params: unknown): Promise
         paymentMethod: row.payment_method ? String(row.payment_method) : undefined,
         paymentStatus: row.payment_status ? String(row.payment_status) : undefined,
         notes: row.notes ? String(row.notes) : undefined,
-        aedAgentId: row.aed_agent_id ? String(row.aed_agent_id) : undefined,
-        aedAgentName: row.aed_agent_name ? String(row.aed_agent_name) : undefined,
       };
     });
 
@@ -3148,8 +2924,6 @@ export async function getICSettlementTradeReportAction(params: unknown): Promise
         paymentStatus: row.payment_status ? String(row.payment_status) : undefined,
         orderStatus: row.order_status ? String(row.order_status) : undefined,
         notes: row.rejection_remarks ? String(row.rejection_remarks) : undefined,
-        aedAgentId: row.aed_agent_id ? String(row.aed_agent_id) : undefined,
-        aedAgentName: row.aed_agent_name ? String(row.aed_agent_name) : undefined,
       };
     });
 

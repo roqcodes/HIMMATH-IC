@@ -32,6 +32,7 @@ import {
 import { SALE_PARTY_COLUMN_LABEL, SALE_FILTER_ALL_PARTIES_LABEL, SALE_FILTER_BY_PARTY_ARIA } from '@/lib/counterparties/labels';
 import { getBranchPortalDisplayName } from '@/lib/icTransfer/branchPortalScope';
 import { formatDealTableAed, formatDealTableInr, saleDealAed, saleDealInr } from '@/lib/icTransfer/dealTableDisplay';
+import { canEditOrder } from '@/lib/icTransfer/customerOrderReview';
 
 const ORDER_COLUMNS = [
   'Date', 'ID', SALE_PARTY_COLUMN_LABEL, 'Settlement', 'Units', 'Metal (g)', 'Total INR', 'Total AED', 'Status', 'Actions',

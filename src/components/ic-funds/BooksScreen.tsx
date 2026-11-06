@@ -7,15 +7,19 @@ import {
   getICFundReportBundleAction,
   getICFundStatementAction,
   getInrFundStatementAction,
-  getInrMetalPlReportAction,
   getICSettlementTradeReportAction,
   getICWarehousePLReportAction,
   listICFundAccountsLiteAction,
-  listInrFundAccountsLiteAction,
-  type InrFundAccountLite,
+  resolveInrFundAccountIdForIcFundAccountAction,
 } from '@/app/actions/icFundsActions';
 import { accountTypeLabel, IC_FUND_VOUCHER_LABELS } from '@/lib/icFunds/constants';
-import { fmtICDate, fmtLedgerAed, fmtLedgerAmount, icfLedgerColumnLabel, FmtLedgerAed, FmtLedgerAmount } from '@/lib/icFunds/format';
+import {
+  fmtICDate,
+  icfLedgerColumnLabel,
+  icfLedgerColumnLabelFor,
+  FmtLedgerAed,
+  FmtLedgerAmount,
+} from '@/lib/icFunds/format';
 import { formatReportPeriodCaption } from '@/lib/icFunds/reportCaptions';
 import { downloadCsv, exportReportPdfFromElement, openReportPreviewNewTab } from '@/lib/icFunds/booksExport';
 import { reportCatalogTitle } from '@/lib/icFunds/reportCatalog';
@@ -38,12 +42,11 @@ import WarehouseStatementReport from '@/components/ic-funds/reports/WarehouseSta
 import { btnSecondary } from '@/lib/ui';
 import TrialBalanceReport from '@/components/ic-funds/reports/TrialBalanceReport';
 import ProfitLossReport from '@/components/ic-funds/reports/ProfitLossReport';
-import MetalProfitLossReport from '@/components/ic-funds/reports/MetalProfitLossReport';
 import BalanceSheetReport from '@/components/ic-funds/reports/BalanceSheetReport';
 import DayBookReport from '@/components/ic-funds/reports/DayBookReport';
 import CashBankBookReport from '@/components/ic-funds/reports/CashBankBookReport';
 import SettlementTradeReport from '@/components/ic-funds/reports/SettlementTradeReport';
-import { icFundsReportPath, type ICFundsReportId } from '@/lib/icFunds/nav';
+import { type ICFundsReportId } from '@/lib/icFunds/nav';
 import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
 import { computeBooksKpis } from '@/lib/icFunds/kpiMetrics';
 import { icfCard, icfTableWrap, icfTd, icfTh, icfThAlign, icfTheadRow, icfAccountLink } from '@/components/ic-funds/ui';
@@ -59,8 +62,11 @@ import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { logClientActionError } from '@/lib/errors/actionError';
 import { trackLoading } from '@/lib/loadingBar';
 import type { ICWarehousePLReport } from '@/lib/icFunds/warehouseProfit';
-import type { ICSettlementTradeReport } from '@/lib/icFunds/settlementTradeReport';
-import type { PlStatement } from '@/lib/icFunds/reportPresentation';
+import {
+  sliceSettlementTradeReport,
+  type ICSettlementTradeReport,
+} from '@/lib/icFunds/settlementTradeReport';
+import { AED_LEDGER_CAPTION, ReportCaption } from '@/components/ic-funds/reports/reportShared';
 import type { ICFundAccount, ICFundStatementLine, ICFundVoucher } from '@/types';
 
 type ReportBundle = NonNullable<
@@ -121,15 +127,17 @@ export default function BooksScreen({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reportFilters, setReportFilters] = useState<ReportFilterState>(DEFAULT_REPORT_FILTERS);
-  const [inrAccounts, setInrAccounts] = useState<InrFundAccountLite[]>([]);
-  const [inrAccountId, setInrAccountId] = useState('');
+  const [statementBook, setStatementBook] = useState<'aed' | 'inr'>('aed');
+  const [plBook, setPlBook] = useState<'aed' | 'inr'>('aed');
+  const [metalBook, setMetalBook] = useState<'inr' | 'aed'>('inr');
+  const [warehouseBook, setWarehouseBook] = useState<'ic' | 'metal'>('ic');
+  const [inrAccountId, setInrAccountId] = useState<string | null>(null);
   const [inrStatement, setInrStatement] = useState<{
     opening: number;
     closing: number;
     lines: ICFundStatementLine[];
     accountName: string;
   } | null>(null);
-  const [metalPlStatement, setMetalPlStatement] = useState<PlStatement | null>(null);
 
   const showLoadError = useCallback(
     async (scope: string, message: string) => {
@@ -158,10 +166,7 @@ export default function BooksScreen({
   }, [branchId, endDate, showLoadError, startDate]);
 
   const loadSettlementTradeReport = useCallback(async () => {
-    const settlementMode =
-      reportView === 'fund-trades' ? 'cash' : ('metal' as const);
-    const metalPaymentBook =
-      reportView === 'metal-agent-trades' ? ('aed' as const) : reportView === 'metal-trades' ? ('cash' as const) : undefined;
+    const mode = reportView === 'metal-trades' ? 'metal' : 'cash';
     setLoading(true);
     setError(null);
     const result = await trackLoading(() =>
@@ -169,8 +174,7 @@ export default function BooksScreen({
         branchId,
         startDate,
         endDate,
-        settlementMode,
-        metalPaymentBook,
+        settlementMode: mode,
         includeVoidOrders: reportFilters.includeVoidOrders,
       }),
     );
@@ -182,44 +186,6 @@ export default function BooksScreen({
     }
     setLoading(false);
   }, [branchId, endDate, reportView, reportFilters.includeVoidOrders, showLoadError, startDate]);
-
-  const loadMetalPl = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    const result = await trackLoading(() => getInrMetalPlReportAction({ branchId, startDate, endDate }));
-    if (!result.success) {
-      await showLoadError('BooksScreen.loadMetalPl', result.error);
-      setMetalPlStatement(null);
-    } else {
-      setMetalPlStatement(result.data.plStatement);
-    }
-    setLoading(false);
-  }, [branchId, endDate, showLoadError, startDate]);
-
-  const loadInrStatement = useCallback(async () => {
-    if (!inrAccountId) {
-      setInrStatement(null);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    const result = await trackLoading(() =>
-      getInrFundStatementAction({ branchId, accountId: inrAccountId, startDate, endDate }),
-    );
-    if (!result.success) {
-      await showLoadError('BooksScreen.loadInrStatement', result.error);
-      setInrStatement(null);
-    } else {
-      setInrStatement({
-        opening: result.data.opening,
-        closing: result.data.closing,
-        lines: result.data.lines,
-        accountName: result.data.account.name,
-      });
-    }
-    setLoading(false);
-  }, [branchId, endDate, inrAccountId, showLoadError, startDate]);
 
   const loadBundle = useCallback(async () => {
     setLoading(true);
@@ -256,40 +222,69 @@ export default function BooksScreen({
 
   useEffect(() => {
     void trackLoading(() => listICFundAccountsLiteAction(branchId).then(setAccounts));
-    void trackLoading(() => listInrFundAccountsLiteAction(branchId).then(setInrAccounts));
   }, [branchId]);
+
+  useEffect(() => {
+    setPlBook('aed');
+    setMetalBook('inr');
+    setWarehouseBook('ic');
+  }, [reportView]);
 
   useEffect(() => {
     if (reportView === 'statement') {
       void loadStatement();
       return;
     }
-    if (reportView === 'inr-statement') {
-      void loadInrStatement();
-      return;
-    }
-    if (reportView === 'warehouse-pl' || reportView === 'warehouse-metal') {
+    if (reportView === 'warehouse-pl' || reportView === 'profit-loss') {
       void loadWarehousePl();
-      return;
+      if (reportView === 'warehouse-pl') return;
     }
-    if (reportView === 'metal-pl') {
-      void loadMetalPl();
-      return;
-    }
-    if (reportView === 'fund-trades' || reportView === 'metal-trades' || reportView === 'metal-agent-trades') {
+    if (reportView === 'fund-trades' || reportView === 'metal-trades') {
       void loadSettlementTradeReport();
       return;
     }
     void loadBundle();
-  }, [
-    loadBundle,
-    loadInrStatement,
-    loadMetalPl,
-    loadStatement,
-    loadSettlementTradeReport,
-    loadWarehousePl,
-    reportView,
-  ]);
+  }, [loadBundle, loadStatement, loadSettlementTradeReport, loadWarehousePl, reportView]);
+
+  useEffect(() => {
+    if (!accountId) {
+      setInrAccountId(null);
+      setInrStatement(null);
+      return;
+    }
+    void resolveInrFundAccountIdForIcFundAccountAction({ branchId, icFundAccountId: accountId }).then(result => {
+      if (result.success && result.data.inrAccountId) {
+        setInrAccountId(result.data.inrAccountId);
+      } else {
+        setInrAccountId(null);
+        setStatementBook('aed');
+      }
+    });
+  }, [accountId, branchId]);
+
+  useEffect(() => {
+    if (reportView !== 'statement' || statementBook !== 'inr' || !inrAccountId) {
+      setInrStatement(null);
+      return;
+    }
+    setLoading(true);
+    void trackLoading(() =>
+      getInrFundStatementAction({ branchId, accountId: inrAccountId, startDate, endDate }).then(result => {
+        if (!result.success) {
+          void showLoadError('BooksScreen.loadInrStatement', result.error);
+          setInrStatement(null);
+        } else {
+          setInrStatement({
+            opening: result.data.opening,
+            closing: result.data.closing,
+            lines: result.data.lines,
+            accountName: result.data.account.name,
+          });
+        }
+        setLoading(false);
+      }),
+    );
+  }, [branchId, endDate, inrAccountId, reportView, showLoadError, startDate, statementBook]);
 
   const { periodLabel, asAtLabel } = formatReportPeriodCaption({
     startDate: bundle?.startDate ?? startDate,
@@ -328,6 +323,12 @@ export default function BooksScreen({
     () => (settlementTradeReport ? filterSettlementTradeReport(settlementTradeReport, reportFilters) : null),
     [reportFilters, settlementTradeReport],
   );
+
+  const displayedSettlementReport = useMemo(() => {
+    if (!filteredSettlementReport) return null;
+    if (reportView !== 'metal-trades') return filteredSettlementReport;
+    return sliceSettlementTradeReport(filteredSettlementReport, metalBook);
+  }, [filteredSettlementReport, metalBook, reportView]);
 
   const filteredWarehouseSummaries = useMemo(
     () =>
@@ -370,18 +371,8 @@ export default function BooksScreen({
     [bundle, reportFilters],
   );
 
-  const inrAccountSearchOptions: EntitySearchOption[] = useMemo(
-    () =>
-      inrAccounts.map(a => ({
-        value: a.id,
-        label: a.name,
-        detail: a.accountType,
-      })),
-    [inrAccounts],
-  );
-
   const activeStatement = useMemo(() => {
-    if (reportView === 'inr-statement' && inrStatement) {
+    if (statementBook === 'inr' && inrStatement) {
       return {
         account: { name: inrStatement.accountName } as ICFundAccount,
         opening: inrStatement.opening,
@@ -390,47 +381,62 @@ export default function BooksScreen({
         currency: 'INR' as const,
       };
     }
-    if (reportView !== 'statement' || !statement) return null;
+    if (!statement) return null;
     return {
       ...statement,
       lines: filterStatementLines(statement.lines, reportFilters),
       currency: 'AED' as const,
     };
-  }, [inrStatement, reportFilters, reportView, statement]);
+  }, [inrStatement, reportFilters, statement, statementBook]);
 
-  const exportSubtitle = useMemo(
-    () =>
-      formatReportFilterSummary(reportFilters, {
-        period: periodLabel,
-        accountName: activeStatement?.account.name,
-        book: reportView === 'inr-statement' ? 'INR' : undefined,
-      }),
-    [activeStatement?.account.name, periodLabel, reportFilters, reportView],
-  );
+  const exportSubtitle = useMemo(() => {
+    let book: string | undefined;
+    if (reportView === 'statement') book = statementBook === 'inr' ? 'INR' : 'AED';
+    else if (reportView === 'profit-loss') book = plBook === 'inr' ? 'Metal INR' : 'AED ledger';
+    else if (reportView === 'metal-trades') book = metalBook === 'aed' ? 'AED agent' : 'Cash metal INR';
+    else if (reportView === 'warehouse-pl') book = warehouseBook === 'metal' ? 'Metal' : 'IC cash AED';
+    return formatReportFilterSummary(reportFilters, {
+      period: periodLabel,
+      accountName: activeStatement?.account.name,
+      book,
+    });
+  }, [
+    activeStatement?.account.name,
+    metalBook,
+    periodLabel,
+    plBook,
+    reportFilters,
+    reportView,
+    statementBook,
+    warehouseBook,
+  ]);
 
   const reportTitle = reportCatalogTitle(reportView);
 
   const booksKpiMetrics = useMemo(() => {
-    if (reportView === 'statement' || reportView === 'inr-statement') {
+    if (reportView === 'statement') {
       if (!activeStatement) return [];
-    } else if (reportView === 'warehouse-pl' || reportView === 'warehouse-metal') {
+    } else if (reportView === 'warehouse-pl') {
       if (!warehousePl) return [];
-    } else if (reportView === 'metal-pl') {
-      if (!metalPlStatement) return [];
-    } else if (
-      reportView === 'fund-trades' ||
-      reportView === 'metal-trades' ||
-      reportView === 'metal-agent-trades'
-    ) {
-      if (!filteredSettlementReport) return [];
+    } else if (reportView === 'fund-trades' || reportView === 'metal-trades') {
+      if (!displayedSettlementReport) return [];
     } else if (!bundle) {
       return [];
     }
 
+    const reportSlice =
+      reportView === 'profit-loss'
+        ? plBook
+        : reportView === 'warehouse-pl'
+          ? warehouseBook
+          : reportView === 'metal-trades'
+            ? metalBook
+            : undefined;
+
     return computeBooksKpis({
       reportView,
       profitLoss: bundle?.profitLoss,
-      plStatement: reportView === 'metal-pl' ? metalPlStatement ?? undefined : bundle?.plStatement,
+      plStatement: bundle?.plStatement,
       balanceSheet: bundle?.balanceSheet,
       trialBalance: filteredTrialBalance,
       vouchers:
@@ -442,91 +448,62 @@ export default function BooksScreen({
       cashBank: bundle?.cashBank,
       receivables: filteredReceivables,
       payables: filteredPayables,
-      warehousePl:
-        warehousePl && (reportView === 'warehouse-pl' || reportView === 'warehouse-metal')
-          ? {
-              ...warehousePl,
-              warehouses: filteredWarehouseSummaries,
-              lines: filteredWarehouseLines,
-            }
-          : null,
-      settlementTradeReport: filteredSettlementReport,
+      warehousePl: warehousePl
+        ? {
+            ...warehousePl,
+            warehouses: filteredWarehouseSummaries,
+            lines: filteredWarehouseLines,
+          }
+        : null,
+      settlementTradeReport: displayedSettlementReport,
       statement: activeStatement,
-      warehouseBook: reportView === 'warehouse-metal' ? 'metal' : reportView === 'warehouse-pl' ? 'ic' : undefined,
+      reportSlice,
     });
   }, [
     activeStatement,
     bundle,
+    displayedSettlementReport,
     filteredAllVouchers,
     filteredExpenseRegister,
     filteredPayables,
     filteredReceivables,
-    filteredSettlementReport,
     filteredTrialBalance,
     filteredWarehouseLines,
     filteredWarehouseSummaries,
-    metalPlStatement,
+    metalBook,
+    plBook,
     reportView,
+    warehouseBook,
     warehousePl,
   ]);
 
   const handleExportCsv = useCallback(() => {
-    if (
-      reportView === 'fund-trades' ||
-      reportView === 'metal-trades' ||
-      reportView === 'metal-agent-trades'
-    ) {
-      if (!filteredSettlementReport) return;
-      if (reportView === 'fund-trades') {
-        const headers = [
-          'Type',
-          'Date',
-          'Reference',
-          'Counterparty',
-          'Warehouse',
-          'Units',
-          'Rate (AED)',
-          'Amount (AED)',
-          'Status',
-        ];
-        const rows = [...filteredSettlementReport.purchases, ...filteredSettlementReport.sales].map(r => {
-          const status =
-            r.txnKind === 'purchase'
-              ? r.paymentStatus || r.paymentMethod || ''
-              : r.orderStatus || r.paymentStatus || '';
+    if (reportView === 'fund-trades' || reportView === 'metal-trades') {
+      if (!displayedSettlementReport) return;
+      const isMetal = displayedSettlementReport.settlementMode === 'metal';
+      const metalAed = isMetal && metalBook === 'aed';
+      const headers = isMetal
+        ? metalAed
+          ? ['Type', 'Date', 'Reference', 'Counterparty', 'AED agent', 'Warehouse', 'Fine weight (g)', 'Amount (AED)', 'Status']
+          : ['Type', 'Date', 'Reference', 'Counterparty', 'Warehouse', 'Fine weight (g)', 'INR/g', 'INR value', 'P&L (INR)', 'Status']
+        : ['Type', 'Date', 'Reference', 'Counterparty', 'Warehouse', 'Units', 'Rate (AED)', 'Amount (AED)', 'Status'];
+      const rows = [...displayedSettlementReport.purchases, ...displayedSettlementReport.sales].map(r => {
+        const status =
+          r.txnKind === 'purchase' ? r.paymentStatus || r.paymentMethod || '' : r.orderStatus || r.paymentStatus || '';
+        if (isMetal && metalAed) {
           return [
             r.txnKind,
             r.date.slice(0, 10),
             r.reference,
             r.counterparty,
+            r.aedAgentName ?? '',
             r.warehouseName || '',
-            r.units,
-            r.unitRateAed,
+            r.metalWeightG ?? '',
             r.aedTotal,
             status,
           ];
-        });
-        downloadCsv('fund-register.csv', headers, rows);
-        return;
-      }
-      if (reportView === 'metal-trades') {
-        const headers = [
-          'Type',
-          'Date',
-          'Reference',
-          'Counterparty',
-          'Warehouse',
-          'Fine weight (g)',
-          'INR/g',
-          'INR value',
-          'P&L (INR)',
-          'Status',
-        ];
-        const rows = [...filteredSettlementReport.purchases, ...filteredSettlementReport.sales].map(r => {
-          const status =
-            r.txnKind === 'purchase'
-              ? r.paymentStatus || r.paymentMethod || ''
-              : r.orderStatus || r.paymentStatus || '';
+        }
+        if (isMetal) {
           return [
             r.txnKind,
             r.date.slice(0, 10),
@@ -536,49 +513,40 @@ export default function BooksScreen({
             r.metalWeightG ?? '',
             r.metalRateInrPerG ?? '',
             r.inrTotal ?? '',
-            r.bookedProfitInr ?? r.bookedProfit ?? '',
+            r.bookedProfitInr ?? (r.bookedCurrency === 'INR' ? r.bookedProfit ?? '' : ''),
             status,
           ];
-        });
-        downloadCsv('metal-register-inr.csv', headers, rows);
-        return;
-      }
-      const headers = [
-        'Type',
-        'Date',
-        'Reference',
-        'Counterparty',
-        'AED agent',
-        'Warehouse',
-        'Fine weight (g)',
-        'Amount (AED)',
-        'Status',
-      ];
-      const rows = [...filteredSettlementReport.purchases, ...filteredSettlementReport.sales].map(r => {
-        const status =
-          r.txnKind === 'purchase'
-            ? r.paymentStatus || r.paymentMethod || ''
-            : r.orderStatus || r.paymentStatus || '';
+        }
         return [
           r.txnKind,
           r.date.slice(0, 10),
           r.reference,
           r.counterparty,
-          r.aedAgentName || '',
           r.warehouseName || '',
-          r.metalWeightG ?? '',
+          r.units,
+          r.unitRateAed,
           r.aedTotal,
           status,
         ];
       });
-      downloadCsv('metal-agent-register.csv', headers, rows);
+      downloadCsv(
+        reportView === 'metal-trades'
+          ? metalAed
+            ? 'metal-register-aed-agent.csv'
+            : 'metal-register-inr.csv'
+          : 'fund-register.csv',
+        headers,
+        rows,
+      );
       return;
     }
 
-    if ((reportView === 'statement' || reportView === 'inr-statement') && activeStatement) {
+    if (reportView === 'statement' && activeStatement) {
+      const book = activeStatement.currency ?? 'AED';
+      const labels = icfLedgerColumnLabelFor(book);
       downloadCsv(
-        'statement-of-account.csv',
-        ['Date', '#', 'Type', 'Particulars', 'Debit', 'Credit', 'Balance', 'Remark'],
+        book === 'INR' ? 'statement-of-account-inr.csv' : 'statement-of-account-aed.csv',
+        ['Date', '#', 'Type', 'Particulars', labels.debit, labels.credit, labels.balance, 'Remark'],
         [
           ...activeStatement.lines.map(l => [
             l.date,
@@ -596,47 +564,38 @@ export default function BooksScreen({
     }
 
     if (reportView === 'warehouse-pl' && warehousePl) {
+      if (warehouseBook === 'metal') {
+        downloadCsv(
+          'warehouse-statement-metal.csv',
+          ['Warehouse', 'Opening g', 'In g', 'Out g', 'Closing g', 'P&L INR', 'Agent P&L AED'],
+          [
+            ...filteredWarehouseSummaries.map(w => [
+              w.warehouseName,
+              w.openingMetalG,
+              w.metalInG,
+              w.metalOutG,
+              w.closingMetalG,
+              w.metalProfitInr,
+              w.metalProfitAed,
+            ]),
+          ],
+        );
+        return;
+      }
       downloadCsv(
-        'warehouse-ic.csv',
-        ['Warehouse', 'Opening units', 'In units', 'Out units', 'Closing units', 'Revenue AED', 'COGS AED', 'GP AED'],
-        filteredWarehouseSummaries.map(w => [
-          w.warehouseName,
-          w.openingUnits,
-          w.unitsIn,
-          w.unitsOut,
-          w.closingUnits,
-          w.revenue,
-          w.cogs,
-          w.grossProfit,
-        ]),
+        'warehouse-statement-ic.csv',
+        ['Warehouse', 'Opening units', 'In units', 'Out units', 'Closing units', 'IC profit AED'],
+        [
+          ...filteredWarehouseSummaries.map(w => [
+            w.warehouseName,
+            w.openingUnits,
+            w.unitsIn,
+            w.unitsOut,
+            w.closingUnits,
+            w.grossProfit,
+          ]),
+        ],
       );
-      return;
-    }
-
-    if (reportView === 'warehouse-metal' && warehousePl) {
-      downloadCsv(
-        'warehouse-metal.csv',
-        ['Warehouse', 'Opening g', 'In g', 'Out g', 'Closing g', 'Metal P&L INR'],
-        filteredWarehouseSummaries.map(w => [
-          w.warehouseName,
-          w.openingMetalG,
-          w.metalInG,
-          w.metalOutG,
-          w.closingMetalG,
-          w.metalProfitInr,
-        ]),
-      );
-      return;
-    }
-
-    if (reportView === 'metal-pl' && metalPlStatement) {
-      const s = metalPlStatement;
-      downloadCsv('metal-profit-and-loss.csv', ['Section', 'Amount (INR)'], [
-        ['Metal sales / income', s.salesTotal],
-        ['Cost of metal sold', -s.directCostsTotal],
-        ['Gross result', s.grossResult],
-        ['Net for period', s.netForPeriod],
-      ]);
       return;
     }
 
@@ -701,25 +660,41 @@ export default function BooksScreen({
     }
 
     if (reportView === 'profit-loss' && bundle.plStatement) {
+      if (plBook === 'inr') {
+        const metalLines = filteredWarehouseLines.filter(
+          l => l.settlementMode === 'metal' && l.bookedCurrency !== 'AED',
+        );
+        const saleInr = metalLines.reduce((s, l) => s + l.revenue, 0);
+        const cogsInr = metalLines.reduce((s, l) => s + l.cogs, 0);
+        downloadCsv('profit-and-loss-metal-inr.csv', ['Section', 'Amount (INR)'], [
+          ['Metal sold', saleInr],
+          ['Cost of metal', -cogsInr],
+          ['Metal profit / (loss)', warehousePl?.totals.metalProfitInr ?? 0],
+        ]);
+        return;
+      }
       const s = bundle.plStatement;
       downloadCsv('profit-and-loss-aed.csv', ['Section', 'Amount (AED)'], [
-        ['Sales / income', s.salesTotal],
-        ['Direct costs', -s.directCostsTotal],
-        ['Gross result', s.grossResult],
+        ['Sales', s.salesTotal],
+        ['Cost of IC sold', -s.directCostsTotal],
+        ['Gross profit', s.grossResult],
         ['Operating expenses', -s.operatingTotal],
-        ['Net for period', s.netForPeriod],
+        ['Net profit / (loss)', s.netForPeriod],
       ]);
     }
   }, [
     activeStatement,
     bundle,
+    displayedSettlementReport,
     filteredAllVouchers,
     filteredExpenseRegister,
-    filteredSettlementReport,
     filteredTrialBalance,
+    filteredWarehouseLines,
     filteredWarehouseSummaries,
-    metalPlStatement,
+    metalBook,
+    plBook,
     reportView,
+    warehouseBook,
     warehousePl,
   ]);
 
@@ -848,6 +823,10 @@ export default function BooksScreen({
   const totalCr =
     activeStatement?.lines.reduce((s, l) => s + (l.status === 'pending' ? 0 : l.credit), 0) ?? 0;
   const statementCurrency = activeStatement?.currency ?? 'AED';
+  const statementCols = icfLedgerColumnLabelFor(statementCurrency);
+  const metalInrLines = filteredWarehouseLines.filter(
+    l => l.settlementMode === 'metal' && l.bookedCurrency !== 'AED',
+  );
 
   return (
     <div>
@@ -869,11 +848,11 @@ export default function BooksScreen({
             accountOptions: accountSearchOptions,
             accountId,
             onAccountId: setAccountId,
-            inrAccountOptions: inrAccountSearchOptions,
-            inrAccountId,
-            onInrAccountId: setInrAccountId,
             warehouseOptions: warehouseSearchOptions,
             counterpartyOptions: counterpartySearchOptions,
+            statementBook,
+            onStatementBook: setStatementBook,
+            showInrBookTab: Boolean(inrAccountId),
           }}
         />
 
@@ -886,30 +865,26 @@ export default function BooksScreen({
             {exportSubtitle}
           </p>
         ) : null}
-        {loading && reportView !== 'statement' && reportView !== 'inr-statement' && reportView !== 'warehouse-pl' && reportView !== 'warehouse-metal' && reportView !== 'metal-pl' && !bundle ? (
+        {loading && reportView !== 'statement' && reportView !== 'warehouse-pl' && !bundle ? (
           <ASICTableSkeleton framed={false} cols={7} rows={8} />
         ) : null}
-        {loading && (reportView === 'warehouse-pl' || reportView === 'warehouse-metal') && !warehousePl ? (
+        {loading && reportView === 'warehouse-pl' && !warehousePl ? (
           <ASICTableSkeleton framed={false} cols={9} rows={8} />
         ) : null}
-        {loading && reportView === 'metal-pl' && !metalPlStatement ? (
-          <ASICTableSkeleton framed={false} cols={4} rows={8} />
-        ) : null}
-        {loading &&
-        (reportView === 'fund-trades' ||
-          reportView === 'metal-trades' ||
-          reportView === 'metal-agent-trades') &&
-        !settlementTradeReport ? (
+        {loading && (reportView === 'fund-trades' || reportView === 'metal-trades') && !settlementTradeReport ? (
           <ASICTableSkeleton framed={false} cols={10} rows={10} />
         ) : null}
 
-        {(reportView === 'statement' || reportView === 'inr-statement') ? (
-          !(reportView === 'statement' ? accountId : inrAccountId) ? (
+        {reportView === 'statement' ? (
+          !accountId ? (
             <p className={`${icfTd} py-8 text-center text-slate-500`}>
-              Choose an account above to load its statement of account (
-              {reportView === 'inr-statement' ? 'INR metal ledger' : 'AED IC Funds'}).
+              Choose an account above to load its statement of account.
             </p>
           ) : (
+            <div>
+              <ReportCaption>
+                {periodLabel} · {statementCurrency} book. AED and INR are separate ledgers — do not add the balances.
+              </ReportCaption>
             <div className={icfTableWrap}>
               <table className="w-full min-w-[760px] text-left">
                 <thead>
@@ -918,15 +893,17 @@ export default function BooksScreen({
                     <th className={icfTh}>#</th>
                     <th className={icfTh}>Type</th>
                     <th className={icfTh}>Particulars</th>
-                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.debit}</th>
-                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.credit}</th>
-                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.balance}</th>
+                    <th className={icfThAlign('right')}>{statementCols.debit}</th>
+                    <th className={icfThAlign('right')}>{statementCols.credit}</th>
+                    <th className={icfThAlign('right')}>{statementCols.balance}</th>
                     <th className={icfTh}>User</th>
                     <th className={icfTh}>Remark</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {loading ? (
+                  {loading && statementBook === 'aed' ? (
+                    <ASICTableRowsSkeleton rows={8} cols={9} />
+                  ) : loading && statementBook === 'inr' ? (
                     <ASICTableRowsSkeleton rows={8} cols={9} />
                   ) : (
                     activeStatement?.lines.map((line, i) => (
@@ -983,6 +960,7 @@ export default function BooksScreen({
                 ) : null}
               </table>
             </div>
+            </div>
           )
         ) : null}
 
@@ -1005,17 +983,28 @@ export default function BooksScreen({
           />
         ) : null}
         {bundle && reportView === 'd-expenses' ? (
-          voucherTable(filteredExpenseRegister, 'No expense vouchers match these filters.')
+          <div>
+            <ReportCaption>
+              {periodLabel} · {AED_LEDGER_CAPTION}
+            </ReportCaption>
+            {voucherTable(filteredExpenseRegister, 'No expense vouchers match these filters.')}
+          </div>
         ) : null}
         {bundle && reportView === 'receivables' ? (
           <div className="grid sm:grid-cols-2">
-            <p className="border-b border-slate-200 px-2.5 py-1 text-[11px] text-slate-500 sm:col-span-2">{asOfLabel}</p>
+            <p className="border-b border-slate-200 px-2.5 py-1 text-[11px] text-slate-500 sm:col-span-2">
+              {asOfLabel} · {AED_LEDGER_CAPTION}
+            </p>
             <div className="border-b border-slate-200 sm:border-b-0 sm:border-r">
-              <p className="border-b border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-slate-500">Receivables</p>
+              <p className="border-b border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-slate-500">
+                Customers owe us (AED)
+              </p>
               {accountTable(filteredReceivables, 'No receivable balances match these filters.')}
             </div>
             <div>
-              <p className="border-b border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-slate-500">Payables</p>
+              <p className="border-b border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-slate-500">
+                We owe suppliers (AED)
+              </p>
               {accountTable(filteredPayables, 'No payable balances match these filters.')}
             </div>
           </div>
@@ -1026,10 +1015,13 @@ export default function BooksScreen({
             periodLabel={periodLabel}
             slug={slug}
             accounts={accounts}
+            periodMetalPlInr={warehousePl?.totals.metalProfitInr ?? null}
+            metalSoldG={warehousePl?.totals.metalSoldG ?? 0}
+            metalSaleInr={metalInrLines.reduce((s, l) => s + l.revenue, 0)}
+            metalCogsInr={metalInrLines.reduce((s, l) => s + l.cogs, 0)}
+            book={plBook}
+            onBookChange={setPlBook}
           />
-        ) : null}
-        {metalPlStatement && reportView === 'metal-pl' ? (
-          <MetalProfitLossReport statement={metalPlStatement} periodLabel={periodLabel} />
         ) : null}
         {warehousePl && reportView === 'warehouse-pl' ? (
           <WarehouseStatementReport
@@ -1037,37 +1029,19 @@ export default function BooksScreen({
             warehouses={filteredWarehouseSummaries}
             lines={filteredWarehouseLines}
             periodLabel={periodLabel}
-            book="ic"
+            book={warehouseBook}
+            onBookChange={setWarehouseBook}
           />
         ) : null}
-        {warehousePl && reportView === 'warehouse-metal' ? (
-          <WarehouseStatementReport
-            report={warehousePl}
-            warehouses={filteredWarehouseSummaries}
-            lines={filteredWarehouseLines}
-            periodLabel={periodLabel}
-            book="metal"
-          />
-        ) : null}
-        {filteredSettlementReport && reportView === 'fund-trades' ? (
+        {displayedSettlementReport && (reportView === 'fund-trades' || reportView === 'metal-trades') ? (
           <SettlementTradeReport
-            report={filteredSettlementReport}
+            report={displayedSettlementReport}
             periodLabel={periodLabel}
-            variant="fund"
-          />
-        ) : null}
-        {filteredSettlementReport && reportView === 'metal-trades' ? (
-          <SettlementTradeReport
-            report={filteredSettlementReport}
-            periodLabel={periodLabel}
-            variant="metal-inr"
-          />
-        ) : null}
-        {filteredSettlementReport && reportView === 'metal-agent-trades' ? (
-          <SettlementTradeReport
-            report={filteredSettlementReport}
-            periodLabel={periodLabel}
-            variant="metal-agent"
+            variant={
+              reportView === 'fund-trades' ? 'fund' : metalBook === 'aed' ? 'metal-agent' : 'metal-inr'
+            }
+            metalBook={reportView === 'metal-trades' ? metalBook : undefined}
+            onMetalBookChange={reportView === 'metal-trades' ? setMetalBook : undefined}
           />
         ) : null}
         {bundle && reportView === 'balance-sheet' && bundle.balanceSheetDetail ? (

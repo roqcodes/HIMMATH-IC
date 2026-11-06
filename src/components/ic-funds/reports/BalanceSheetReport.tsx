@@ -5,7 +5,7 @@ import type { BalanceSheetPresentation } from '@/lib/icFunds/reportPresentation'
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import { icfTd } from '@/components/ic-funds/ui';
 import type { ICFundAccount } from '@/types';
-import { ReportCaption } from './reportShared';
+import { AED_LEDGER_CAPTION, ReportCaption } from './reportShared';
 
 function Column({
   title,
@@ -79,7 +79,9 @@ export default function BalanceSheetReport({
 }) {
   return (
     <div>
-      <ReportCaption>{asAtLabel}</ReportCaption>
+      <ReportCaption>
+        {asAtLabel} · What the business owns and owes, in AED. {AED_LEDGER_CAPTION}
+      </ReportCaption>
       <div className="grid md:grid-cols-2">
         <Column
           title="Assets"
@@ -124,7 +126,7 @@ export default function BalanceSheetReport({
           : `Out of balance by ${fmtLedgerAed(outOfBalance)} — review opening balances or post a journal adjustment.`}
       </p>
       <p className="px-2.5 pb-2 text-[11px] text-slate-500">
-        IC Stock holds unsold purchase value at cost until Cost of IC Sold is posted on sale completion.
+        Unsold IC (at cost, AED) stays in inventory until the sale completes.
       </p>
     </div>
   );

@@ -73,9 +73,7 @@ export default function JournalVoucherDetailModal({
   const warehouseMeta = (() => {
     if (reference.kind === 'purchase' && reference.purchase.warehouseId) {
       const name =
-        reference.purchase.warehouseName ||
-        icWarehouses.find(w => w.id === reference.purchase.warehouseId)?.name ||
-        'Warehouse';
+        icWarehouses.find(w => w.id === reference.purchase.warehouseId)?.name || 'Warehouse';
       return { id: reference.purchase.warehouseId, name };
     }
     if (reference.kind === 'sale' && reference.sale.warehouseId) {

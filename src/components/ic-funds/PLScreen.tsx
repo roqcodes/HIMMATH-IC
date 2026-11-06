@@ -148,26 +148,35 @@ export default function PLScreen({
     [icPurchases, icSales, startDate, endDate],
   );
 
-  const dealKpiMetrics = useMemo(
-    () => [
+  const dealKpiMetrics = useMemo(() => {
+    const metrics = [
       {
-        label: 'IC gross profit',
+        label: 'IC profit (AED)',
         value: ledgerAedNode(dealPl.cashGrossProfitAed),
         valueTitle: fmtLedgerAed(dealPl.cashGrossProfitAed),
-        hint: 'Operational WAC on cash IC sales',
+        hint: 'Cash IC sales',
         tone: dealPl.cashGrossProfitAed >= 0 ? ('emerald' as const) : ('red' as const),
       },
       {
-        label: 'Metal P&L',
+        label: 'Metal profit (INR)',
         ...formatMetalPlKpi({
-          metalProfitAed: dealPl.metalProfitAed,
+          metalProfitAed: 0,
           metalProfitInr: dealPl.metalProfitInr,
           rangeLabel: `${dealPl.metalSoldG.toLocaleString(undefined, { maximumFractionDigits: 2 })} g · ${dealPl.metalSaleCount} sales`,
         }),
       },
-    ],
-    [dealPl],
-  );
+    ];
+    if (Math.abs(dealPl.metalProfitAed) > 0.005) {
+      metrics.push({
+        label: 'Metal agent (AED)',
+        value: ledgerAedNode(dealPl.metalProfitAed),
+        valueTitle: fmtLedgerAed(dealPl.metalProfitAed),
+        hint: 'Not added to rupee metal profit',
+        tone: dealPl.metalProfitAed >= 0 ? ('emerald' as const) : ('red' as const),
+      });
+    }
+    return metrics;
+  }, [dealPl]);
 
   return (
     <div className="space-y-4">
@@ -186,14 +195,25 @@ export default function PLScreen({
         <p className="text-sm text-red-600">{error}</p>
       ) : bundle ? (
         <>
-          {plKpiMetrics.length > 0 ? <AsicKpiStrip metrics={plKpiMetrics} /> : null}
-          <AsicKpiStrip metrics={dealKpiMetrics} columns={3} />
+          {plKpiMetrics.length > 0 ? (
+            <div>
+              <p className="mb-1 px-0.5 text-[11px] font-medium text-slate-500">AED ledger</p>
+              <AsicKpiStrip metrics={plKpiMetrics} />
+            </div>
+          ) : null}
+          <div>
+            <p className="mb-1 px-0.5 text-[11px] font-medium text-slate-500">
+              Deals — IC profit in AED, metal profit in INR (not added together)
+            </p>
+            <AsicKpiStrip metrics={dealKpiMetrics} columns={3} />
+          </div>
 
           <div className={icfCard}>
             <div className="border-b border-slate-200 px-2.5 py-2">
               <h3 className="text-sm font-semibold text-slate-900">Profit & loss accounts</h3>
               <p className="text-[11px] text-slate-500">
-                Ledger amounts in AED. IC and metal operational P&amp;L is in the strip above (cash WAC + metal lots).
+                Ledger amounts in AED. Deal profit above is operational (IC cash vs metal lots) and is not a second AED
+                total.
               </p>
             </div>
             <div className={icfTableWrap}>

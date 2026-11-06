@@ -29,7 +29,6 @@ export type ICSettlementTradeLine = {
   paymentStatus?: string;
   orderStatus?: string;
   notes?: string;
-  aedAgentId?: string;
   aedAgentName?: string;
 };
 
@@ -129,12 +128,38 @@ export function summarizeSettlementTrades(
   };
 }
 
+export function isMetalAgentAedLine(row: ICSettlementTradeLine): boolean {
+  return row.metalPaymentMethod === 'AED' || isMetalAedPayment(row.metalPaymentMethod);
+}
+
+export function isMetalCashInrLine(row: ICSettlementTradeLine): boolean {
+  return !isMetalAgentAedLine(row);
+}
+
+export type MetalRegisterBook = 'inr' | 'aed';
+
+export function sliceSettlementTradeReport(
+  report: ICSettlementTradeReport,
+  book: MetalRegisterBook,
+): ICSettlementTradeReport {
+  if (report.settlementMode !== 'metal') return report;
+  const keep = book === 'aed' ? isMetalAgentAedLine : isMetalCashInrLine;
+  const purchases = report.purchases.filter(keep);
+  const sales = report.sales.filter(keep);
+  return {
+    ...report,
+    purchases,
+    sales,
+    summary: summarizeSettlementTrades(purchases, sales),
+  };
+}
+
 export function settlementTradeReportTitle(mode: ICSettlementMode): string {
   return mode === 'metal' ? 'Metal purchase & sales register' : 'Fund purchase & sales register';
 }
 
 export function settlementTradeReportSubtitle(mode: ICSettlementMode): string {
   return mode === 'metal'
-    ? 'Metal lots in grams. Booked P&L is INR (net sale minus net lot cost). Agent AED is cash with the agent, not profit.'
-    : 'Cash (AED fund) IC purchases and sales — units, rates, and ledger amounts.';
+    ? 'Metal in grams. Cash metal is rupees; AED agent is cash with the agent — not metal profit.'
+    : 'Cash IC in AED — units, rates, and amounts. Not metal.';
 }

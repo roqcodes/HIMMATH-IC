@@ -6,7 +6,8 @@ import type { PlStatement } from '@/lib/icFunds/reportPresentation';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import { icfTd } from '@/components/ic-funds/ui';
 import type { ICFundAccount } from '@/types';
-import { ReportAmountCell, ReportCaption } from './reportShared';
+import { ReportAmountCell, ReportCaption, ReportSegmentTabs } from './reportShared';
+import MetalProfitLossReport from './MetalProfitLossReport';
 
 function SectionLines({
   lines,
@@ -37,69 +38,98 @@ export default function ProfitLossReport({
   periodLabel,
   slug,
   accounts,
+  periodMetalPlInr,
+  metalSoldG,
+  metalSaleInr,
+  metalCogsInr,
+  book,
+  onBookChange,
 }: {
   statement: PlStatement;
   periodLabel: string;
   slug: string;
   accounts: ICFundAccount[];
+  periodMetalPlInr?: number | null;
+  metalSoldG?: number;
+  metalSaleInr?: number;
+  metalCogsInr?: number;
+  book: 'aed' | 'inr';
+  onBookChange: (book: 'aed' | 'inr') => void;
 }) {
   return (
     <div>
-      <ReportCaption>{periodLabel} · Active vouchers only · IC / AED ledger</ReportCaption>
-      <p className="mx-2.5 mb-2 rounded-md border border-emerald-200/80 bg-emerald-50/60 px-3 py-2 text-xs text-emerald-950 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-100">
-        Cash IC WAC gross profit and operating result in AED. Metal commodity profit is on the{' '}
-        <Link href="/admin/reports?view=metal-pl" className="font-medium underline">
-          metal P&amp;L (INR)
-        </Link>{' '}
-        report — not mixed on this page.
-      </p>
-      <table className="w-full text-sm">
-        <tbody>
-          <tr className="border-b border-slate-200 bg-slate-50/80">
-            <td className={`${icfTd} font-semibold`}>Sales / income</td>
-            <ReportAmountCell n={statement.salesTotal} />
-          </tr>
-          <SectionLines lines={statement.incomeLines} slug={slug} accounts={accounts} />
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-2.5 py-2 dark:border-[var(--theme-border)]">
+        <ReportSegmentTabs
+          label="Profit and loss book"
+          value={book}
+          onChange={onBookChange}
+          options={[
+            { id: 'aed', label: 'AED ledger' },
+            { id: 'inr', label: 'Metal (INR)' },
+          ]}
+        />
+      </div>
 
-          <tr className="border-b border-slate-100">
-            <td className={`${icfTd} font-medium`}>Less: Direct costs</td>
-            <ReportAmountCell n={-statement.directCostsTotal} danger />
-          </tr>
-          <SectionLines lines={statement.directCostLines} slug={slug} accounts={accounts} />
+      {book === 'inr' ? (
+        <MetalProfitLossReport
+          periodLabel={periodLabel}
+          netInr={periodMetalPlInr ?? 0}
+          saleInr={metalSaleInr ?? 0}
+          cogsInr={metalCogsInr ?? 0}
+          metalSoldG={metalSoldG ?? 0}
+        />
+      ) : (
+        <>
+          <ReportCaption>
+            {periodLabel} · Profit and loss in dirhams (AED). Metal profit in rupees is on the other tab — do not add
+            them.
+          </ReportCaption>
+          <table className="w-full text-sm">
+            <tbody>
+              <tr className="border-b border-slate-200 bg-slate-50/80">
+                <td className={`${icfTd} font-semibold`}>Sales</td>
+                <ReportAmountCell n={statement.salesTotal} />
+              </tr>
+              <SectionLines lines={statement.incomeLines} slug={slug} accounts={accounts} />
 
-          <tr className="border-b border-slate-200 bg-slate-50/60 font-medium">
-            <td className={icfTd}>Gross result</td>
-            <ReportAmountCell n={statement.grossResult} danger={statement.grossResult < 0} />
-          </tr>
+              <tr className="border-b border-slate-100">
+                <td className={`${icfTd} font-medium`}>Less: Cost of IC sold</td>
+                <ReportAmountCell n={-statement.directCostsTotal} danger />
+              </tr>
+              <SectionLines lines={statement.directCostLines} slug={slug} accounts={accounts} />
 
-          <tr className="border-b border-slate-100">
-            <td className={`${icfTd} font-medium`}>Less: Operating expenses</td>
-            <ReportAmountCell n={-statement.operatingTotal} danger />
-          </tr>
-          <SectionLines lines={statement.operatingLines} slug={slug} accounts={accounts} />
+              <tr className="border-b border-slate-200 bg-slate-50/60 font-medium">
+                <td className={icfTd}>Gross profit</td>
+                <ReportAmountCell n={statement.grossResult} danger={statement.grossResult < 0} />
+              </tr>
 
-          <tr className="border-b border-slate-300 bg-slate-50 font-semibold">
-            <td className={icfTd}>Net profit / (loss) for the period (AED)</td>
-            <ReportAmountCell n={statement.netForPeriod} danger={statement.netForPeriod < 0} />
-          </tr>
-        </tbody>
-      </table>
-      {statement.profitTransferred > 0.005 ? (
-        <p className="px-2.5 py-2 text-[11px] text-slate-500">
-          Transferred to profit reserve in period: <FmtLedgerAed amount={statement.profitTransferred} /> (included in sales
-          above; not double-counted in net).
-        </p>
-      ) : null}
-      <p className="px-2.5 py-2 text-[11px] text-slate-500">
-        Ledger P&amp;L is AED only: cash IC sales post WAC COGS; metal AED agent flows post supplier cost and customer bill
-        in AED — not INR commodity profit.
-      </p>
-      <p className="px-2.5 pb-2 text-[11px] text-slate-500">
-        Voucher detail:{' '}
-        <Link href="/admin/pl" className="font-medium text-slate-700 underline">
-          Profit &amp; loss workspace
-        </Link>
-      </p>
+              <tr className="border-b border-slate-100">
+                <td className={`${icfTd} font-medium`}>Less: Operating expenses</td>
+                <ReportAmountCell n={-statement.operatingTotal} danger />
+              </tr>
+              <SectionLines lines={statement.operatingLines} slug={slug} accounts={accounts} />
+
+              <tr className="border-b border-slate-300 bg-slate-50 font-semibold">
+                <td className={icfTd}>Net profit / (loss) for the period (AED)</td>
+                <ReportAmountCell n={statement.netForPeriod} danger={statement.netForPeriod < 0} />
+              </tr>
+            </tbody>
+          </table>
+          {statement.profitTransferred > 0.005 ? (
+            <p className="px-2.5 py-2 text-[11px] text-slate-500">
+              Transferred to profit reserve: <FmtLedgerAed amount={statement.profitTransferred} /> (already in sales;
+              not counted twice).
+            </p>
+          ) : null}
+          <p className="px-2.5 py-2 text-[11px] text-slate-500">
+            Unsold IC stays in inventory until the sale completes. Metal settled with an AED agent is in this AED book;
+            cash metal profit is rupees on the Metal (INR) tab.{' '}
+            <Link href="/admin/pl" className="font-medium text-slate-700 underline">
+              Voucher detail
+            </Link>
+          </p>
+        </>
+      )}
     </div>
   );
 }
