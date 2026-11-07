@@ -222,7 +222,7 @@ export function indexSaleLineProfits(options: {
   range?: DateFilterRange;
   warehouseId?: string;
 }): Map<string, SaleLineProfit> {
-  const range = options.range ?? {};
+  const range: DateFilterRange = options.range ?? { startDate: null, endDate: null };
   const scopedPurchases = options.warehouseId
     ? options.purchases.filter(p => p.warehouseId === options.warehouseId)
     : options.purchases;
