@@ -62,7 +62,7 @@ function metalInrSaleIcUnits(sale: ICSale): number {
   return Number(sale.units) || 0;
 }
 
-function icStockPurchaseEvents(
+export function icStockPurchaseEvents(
   purchases: ICPurchase[],
   throughIso?: (iso: string | undefined) => boolean,
 ): WarehouseInventoryEvent[] {
@@ -99,7 +99,7 @@ function metalInrIcPoolCostAed(sale: ICSale, units: number): number {
   return 0;
 }
 
-function icStockInflowFromMetalInrSales(
+export function icStockInflowFromMetalInrSales(
   sales: ICSale[],
   throughIso?: (iso: string | undefined) => boolean,
 ): WarehouseInventoryEvent[] {
@@ -119,7 +119,7 @@ function icStockInflowFromMetalInrSales(
   return events;
 }
 
-function icStockSaleEvents(
+export function icStockSaleEvents(
   sales: ICSale[],
   throughIso?: (iso: string | undefined) => boolean,
 ): WarehouseInventoryEvent[] {
@@ -180,6 +180,19 @@ export function emptyDealProfit(): DealProfitSlice {
   return { ...EMPTY };
 }
 
+/** Cash IC purchases + metal·INR sale inflows − cash IC sales. Same pool as warehouse IC profit. */
+export function buildIcStockInventoryEvents(
+  purchases: ICPurchase[],
+  sales: ICSale[],
+  throughIso?: (iso: string | undefined) => boolean,
+): WarehouseInventoryEvent[] {
+  return [
+    ...icStockPurchaseEvents(purchases, throughIso),
+    ...icStockInflowFromMetalInrSales(sales, throughIso),
+    ...icStockSaleEvents(sales, throughIso),
+  ];
+}
+
 export function sumDealProfit(slices: DealProfitSlice[]): DealProfitSlice {
   return slices.reduce(
     (acc, s) => ({
@@ -236,11 +249,7 @@ function computeOneWarehouse(
   const whSales = sales.filter(s => s.warehouseId === warehouseId && isDealSaleActive(s));
 
   const through = (iso: string | undefined) => throughEnd(iso, range);
-  const events: WarehouseInventoryEvent[] = [
-    ...icStockPurchaseEvents(whPurchases, through),
-    ...icStockInflowFromMetalInrSales(whSales, through),
-    ...icStockSaleEvents(whSales, through),
-  ];
+  const events = buildIcStockInventoryEvents(whPurchases, whSales, through);
 
   const cashSalesInPeriod = whSales.filter(
     s => !isMetal(s.settlementMode) && inRange(s.createdAt, range),
@@ -318,11 +327,7 @@ export function remainingIcStockWac(
 ): { units: number; rate: number } {
   const whPurchases = purchases.filter(p => p.warehouseId === warehouseId);
   const whSales = sales.filter(s => s.warehouseId === warehouseId && isDealSaleActive(s));
-  const events: WarehouseInventoryEvent[] = [
-    ...icStockPurchaseEvents(whPurchases),
-    ...icStockInflowFromMetalInrSales(whSales),
-    ...icStockSaleEvents(whSales),
-  ];
+  const events = buildIcStockInventoryEvents(whPurchases, whSales);
   const { pool } = simulateWarehouseInventory(events);
   return {
     units: pool.units,

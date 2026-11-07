@@ -56,6 +56,11 @@ import {
 } from '@/lib/icFunds/settlementTradeReport';
 import { sqlExcludeVoidIcSales } from '@/lib/icFunds/icTransferReportFilters';
 import { isMetalAedPayment } from '@/lib/domain/books';
+import {
+  buildIcStockInventoryEvents,
+  isDealSaleActive,
+} from '@/lib/icTransfer/dealProfit';
+import type { ICPurchase, ICSale } from '@/types';
 import { allocateLotAmount, computeMetalLotProfit } from '@/lib/icTransfer/metalInventory';
 import { allocateMetalLotCostAed, allocateMetalLotCostInr } from '@/lib/icTransfer/metalLotCost';
 import { netMetalInr } from '@/lib/icTransfer/labTest';
@@ -2301,7 +2306,8 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
     );
 
     const warehouseMeta = new Map<string, string>();
-    const eventsByWarehouse = new Map<string, WarehouseInventoryEvent[]>();
+    const purchasesByWarehouse = new Map<string, ICPurchase[]>();
+    const salesByWarehouseForIc = new Map<string, ICSale[]>();
     const salesByWarehouse = new Map<
       string,
       Array<{
@@ -2400,15 +2406,45 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
         continue;
       }
       const units = Number(row.units) || 0;
-      const events = eventsByWarehouse.get(warehouseId) ?? [];
-      events.push({
-        kind: 'purchase',
-        at: new Date(String(row.created_at)).getTime(),
-        sortKey: String(row.id),
+      const purchaseMs = new Date(String(row.created_at)).getTime();
+      const purchaseCost = purchaseAedTotal(units, Number(row.unit_rate) || 0, row.aed_total);
+      const createdAtIso = new Date(purchaseMs).toISOString();
+      const purchaseList = purchasesByWarehouse.get(warehouseId) ?? [];
+      purchaseList.push({
+        id: String(row.id),
+        warehouseId,
         units,
-        cost: purchaseAedTotal(units, Number(row.unit_rate) || 0, row.aed_total),
+        unitRate: Number(row.unit_rate) || 0,
+        aedTotal: purchaseCost,
+        settlementMode: 'cash',
+        createdAt: createdAtIso,
       });
-      eventsByWarehouse.set(warehouseId, events);
+      purchasesByWarehouse.set(warehouseId, purchaseList);
+
+      const inPeriod =
+        (periodStartMs == null || purchaseMs >= periodStartMs) &&
+        (periodEndMs == null || purchaseMs <= periodEndMs);
+      if (inPeriod && units > 0) {
+        const purchaseId = String(row.id);
+        lines.push({
+          lineKind: 'ic_purchase',
+          saleId: purchaseId,
+          eventAtMs: purchaseMs,
+          saleDate: isoDate(new Date(purchaseMs)),
+          warehouseId,
+          warehouseName: String(row.warehouse_name ?? 'Warehouse'),
+          customerName: String(row.supplier_name ?? 'Supplier'),
+          units,
+          saleRate: Number(row.unit_rate) || 0,
+          revenue: 0,
+          avgPurchaseRate: 0,
+          cogs: purchaseCost,
+          grossProfit: 0,
+          marginPct: 0,
+          settlementMode: 'cash',
+          referenceId: purchaseId,
+        });
+      }
     }
 
     for (const row of allSalesRes.rows) {
@@ -2421,6 +2457,25 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
         const metalEv = metalEventsByWarehouse.get(warehouseId) ?? [];
         metalEv.push({ at: saleAt.getTime(), grams: -(Number(row.metal_weight_g) || 0) });
         metalEventsByWarehouse.set(warehouseId, metalEv);
+        const metalSaleList = salesByWarehouseForIc.get(warehouseId) ?? [];
+        metalSaleList.push({
+          id: String(row.id),
+          customerName: String(row.order_customer_name || row.customer_name || 'Customer'),
+          warehouseId,
+          units: Number(row.units) || 0,
+          unitRate: Number(row.unit_rate) || 0,
+          aedAmount: Number(row.aed_amount) || 0,
+          serviceCharge: Number(row.service_charge) || 0,
+          collectedUnits: row.collected_units != null ? Number(row.collected_units) : null,
+          settlementMode: 'metal',
+          metalPaymentMethod: isMetalAedPayment(row.metal_payment_method) ? 'AED' : 'CASH',
+          metalWeightG: Number(row.metal_weight_g) || 0,
+          metalPurchaseId: row.metal_purchase_id ? String(row.metal_purchase_id) : null,
+          orderStatus: 'completed',
+          createdAt: new Date(String(row.created_at)).toISOString(),
+          statusUpdatedAt: saleAt.toISOString(),
+        });
+        salesByWarehouseForIc.set(warehouseId, metalSaleList);
         const metalSales = metalSalesByWarehouse.get(warehouseId) ?? [];
         metalSales.push({
           id: String(row.id),
@@ -2438,19 +2493,22 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
         continue;
       }
 
-      const events = eventsByWarehouse.get(warehouseId) ?? [];
-      events.push({
-        kind: 'sale',
-        at: saleAt.getTime(),
-        sortKey: String(row.id),
-        saleId: String(row.id),
+      const cashSaleList = salesByWarehouseForIc.get(warehouseId) ?? [];
+      cashSaleList.push({
+        id: String(row.id),
+        customerName: String(row.order_customer_name || row.customer_name || 'Customer'),
+        warehouseId,
         units: Number(row.units) || 0,
-        collectedUnits: row.collected_units != null ? Number(row.collected_units) : null,
         unitRate: Number(row.unit_rate) || 0,
         aedAmount: Number(row.aed_amount) || 0,
         serviceCharge: Number(row.service_charge) || 0,
+        collectedUnits: row.collected_units != null ? Number(row.collected_units) : null,
+        settlementMode: 'cash',
+        orderStatus: 'completed',
+        createdAt: new Date(String(row.created_at)).toISOString(),
+        statusUpdatedAt: saleAt.toISOString(),
       });
-      eventsByWarehouse.set(warehouseId, events);
+      salesByWarehouseForIc.set(warehouseId, cashSaleList);
 
       const sales = salesByWarehouse.get(warehouseId) ?? [];
       sales.push({
@@ -2489,19 +2547,15 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
     >();
 
     const emptyMetal = { metalProfitAed: 0, metalProfitInr: 0, metalSoldG: 0 };
-    const emptyMovement = {
-      openingUnits: 0,
-      unitsIn: 0,
-      unitsOut: 0,
-      closingUnits: 0,
-      openingMetalG: 0,
-      metalInG: 0,
-      metalOutG: 0,
-      closingMetalG: 0,
-    };
+
+    function icEventsForWarehouse(warehouseId: string): WarehouseInventoryEvent[] {
+      const purchases = purchasesByWarehouse.get(warehouseId) ?? [];
+      const sales = (salesByWarehouseForIc.get(warehouseId) ?? []).filter(isDealSaleActive);
+      return buildIcStockInventoryEvents(purchases, sales);
+    }
 
     function movementForWarehouse(warehouseId: string) {
-      const icEvents = eventsByWarehouse.get(warehouseId) ?? [];
+      const icEvents = icEventsForWarehouse(warehouseId);
       const metalEv = metalEventsByWarehouse.get(warehouseId) ?? [];
       const openingUnits = icUnitStockAt(icEvents, periodStartMs);
       const closingUnits = icUnitStockThrough(icEvents, periodEndMs);
@@ -2521,9 +2575,14 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
       };
     }
 
-    for (const [warehouseId, allEvents] of eventsByWarehouse) {
+    const icWarehouseIds = new Set<string>([
+      ...purchasesByWarehouse.keys(),
+      ...salesByWarehouseForIc.keys(),
+    ]);
+
+    for (const warehouseId of icWarehouseIds) {
       const cutoffMs = periodEndMs ?? Number.POSITIVE_INFINITY;
-      const eventsThroughPeriod = allEvents.filter(e => e.at <= cutoffMs);
+      const eventsThroughPeriod = icEventsForWarehouse(warehouseId).filter(e => e.at <= cutoffMs);
       const { pool, saleMargins } = simulateWarehouseInventory(eventsThroughPeriod);
       const warehouseName = warehouseMeta.get(warehouseId) ?? 'Warehouse';
 
@@ -2574,24 +2633,6 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
         revenue: Number(periodRevenue.toFixed(2)),
         cogs: Number(periodCogs.toFixed(2)),
         grossProfit: Number(periodGrossProfit.toFixed(2)),
-        ...emptyMetal,
-        ...movementForWarehouse(warehouseId),
-      });
-    }
-
-    for (const [warehouseId, events] of eventsByWarehouse) {
-      if (warehouseSummaries.has(warehouseId)) continue;
-      const cutoffMs = periodEndMs ?? Number.POSITIVE_INFINITY;
-      const { pool } = simulateWarehouseInventory(events.filter(e => e.at <= cutoffMs));
-      warehouseSummaries.set(warehouseId, {
-        warehouseName: warehouseMeta.get(warehouseId) ?? 'Warehouse',
-        purchaseUnits: Number(pool.units.toFixed(4)),
-        purchaseCost: Number(pool.cost.toFixed(2)),
-        weightedAvgRate: Number(remainingStockWac(pool).toFixed(4)),
-        saleUnits: 0,
-        revenue: 0,
-        cogs: 0,
-        grossProfit: 0,
         ...emptyMetal,
         ...movementForWarehouse(warehouseId),
       });
@@ -2741,11 +2782,12 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
       .sort((a, b) => a.warehouseName.localeCompare(b.warehouseName));
 
     const cashLines = lines.filter(l => l.settlementMode !== 'metal');
+    const icSaleLines = cashLines.filter(l => l.lineKind === 'sale');
     const totals = {
-      saleUnits: Number(cashLines.reduce((s, l) => s + l.units, 0).toFixed(4)),
-      revenue: Number(cashLines.reduce((s, l) => s + l.revenue, 0).toFixed(2)),
-      cogs: Number(cashLines.reduce((s, l) => s + l.cogs, 0).toFixed(2)),
-      grossProfit: Number(cashLines.reduce((s, l) => s + l.grossProfit, 0).toFixed(2)),
+      saleUnits: Number(icSaleLines.reduce((s, l) => s + l.units, 0).toFixed(4)),
+      revenue: Number(icSaleLines.reduce((s, l) => s + l.revenue, 0).toFixed(2)),
+      cogs: Number(icSaleLines.reduce((s, l) => s + l.cogs, 0).toFixed(2)),
+      grossProfit: Number(icSaleLines.reduce((s, l) => s + l.grossProfit, 0).toFixed(2)),
       metalProfitAed: Number(warehouses.reduce((s, w) => s + w.metalProfitAed, 0).toFixed(2)),
       metalProfitInr: Number(warehouses.reduce((s, w) => s + w.metalProfitInr, 0).toFixed(2)),
       metalSoldG: Number(warehouses.reduce((s, w) => s + w.metalSoldG, 0).toFixed(4)),

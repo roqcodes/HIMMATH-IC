@@ -9,6 +9,8 @@ export type WarehousePurchasePool = {
 export type RemainingStockPool = {
   units: number;
   cost: number;
+  /** Last known WAC — used when on-hand is 0 or negative so oversell still has a cost. */
+  lastWac: number;
 };
 
 export type WarehouseInventoryPurchase = {
@@ -53,7 +55,7 @@ export type SaleMarginResult = {
 };
 
 export type ICWarehousePLLine = {
-  lineKind: 'sale' | 'metal_purchase';
+  lineKind: 'sale' | 'ic_purchase' | 'metal_purchase';
   /** Sale UUID, or metal-purchase UUID when lineKind is metal_purchase (stable row id for exports/filters). */
   saleId: string;
   /** Epoch ms for ordering detail rows on the same calendar day. */
@@ -140,40 +142,66 @@ export function weightedAveragePurchaseRate(pool: WarehousePurchasePool): number
   return pool.totalCost / pool.totalUnits;
 }
 
+const STOCK_EPS = 1e-9;
+
+function rememberWac(pool: RemainingStockPool): void {
+  const u = Number(pool.units);
+  if (Number.isFinite(u) && u > STOCK_EPS) {
+    const rate = pool.cost / u;
+    if (Number.isFinite(rate) && rate > 0) pool.lastWac = rate;
+  }
+}
+
 export function remainingStockWac(pool: RemainingStockPool): number {
   const u = Number(pool.units);
-  if (!Number.isFinite(u) || Math.abs(u) < 1e-9) return 0;
-  return pool.cost / u;
+  if (Number.isFinite(u) && u > STOCK_EPS) {
+    const rate = pool.cost / u;
+    if (Number.isFinite(rate) && rate > 0) return rate;
+  }
+  return Number(pool.lastWac) > 0 ? pool.lastWac : 0;
 }
 
 export function addPurchaseToPool(pool: RemainingStockPool, units: number, cost: number): void {
   pool.units += units;
   pool.cost += cost;
+  rememberWac(pool);
 }
 
-/** Deplete remaining stock at current WAC (perpetual inventory). */
+/** Deplete remaining stock at current WAC, or last WAC if the shelf is empty. */
 export function consumeSaleFromPool(pool: RemainingStockPool, units: number): void {
   const rate = remainingStockWac(pool);
   pool.cost -= units * rate;
   pool.units -= units;
+  rememberWac(pool);
+}
+
+function inventoryUtcDayKey(at: number): string {
+  return new Date(at).toISOString().slice(0, 10);
 }
 
 export function compareInventoryEvents(
   a: WarehouseInventoryEvent,
   b: WarehouseInventoryEvent,
 ): number {
-  if (a.at !== b.at) return a.at - b.at;
+  const dayA = inventoryUtcDayKey(a.at);
+  const dayB = inventoryUtcDayKey(b.at);
+  if (dayA !== dayB) return a.at - b.at;
+  // Same calendar day: stock in before stock out so same-day buy→sell pairs get WAC cost.
   if (a.kind !== b.kind) return a.kind === 'purchase' ? -1 : 1;
+  if (a.at !== b.at) return a.at - b.at;
   return a.sortKey.localeCompare(b.sortKey);
 }
 
 export function computeSaleMargin(
   sale: SaleMarginInput,
-  pool: WarehousePurchasePool,
+  pool: WarehousePurchasePool | RemainingStockPool,
 ): SaleMarginResult {
   const deliveredUnits = getDeliveredUnits(sale.units, sale.collectedUnits, sale.orderStatus);
   const revenue = (Number(sale.aedAmount) || 0) + (Number(sale.serviceCharge) || 0);
-  const avgPurchaseRate = weightedAveragePurchaseRate(pool);
+  const avgPurchaseRate =
+    'lastWac' in pool
+      ? remainingStockWac(pool)
+      : weightedAveragePurchaseRate(pool);
   const cogs = round2(deliveredUnits * avgPurchaseRate);
   const grossProfit = round2(revenue - cogs);
   const saleRate =
@@ -196,7 +224,7 @@ export function simulateWarehouseInventory(events: WarehouseInventoryEvent[]): {
   pool: RemainingStockPool;
   saleMargins: Map<string, SaleMarginResult>;
 } {
-  const pool: RemainingStockPool = { units: 0, cost: 0 };
+  const pool: RemainingStockPool = { units: 0, cost: 0, lastWac: 0 };
   const saleMargins = new Map<string, SaleMarginResult>();
   const sorted = [...events].sort(compareInventoryEvents);
 
@@ -215,7 +243,7 @@ export function simulateWarehouseInventory(events: WarehouseInventoryEvent[]): {
         aedAmount: event.aedAmount,
         serviceCharge: event.serviceCharge,
       },
-      { totalUnits: pool.units, totalCost: pool.cost },
+      pool,
     );
     saleMargins.set(event.saleId, margin);
     consumeSaleFromPool(pool, margin.deliveredUnits);
@@ -228,7 +256,7 @@ export function resolveSaleMarginFromPool(
   sale: SaleMarginInput,
   pool: RemainingStockPool,
 ): SaleMarginResult {
-  return computeSaleMargin(sale, { totalUnits: pool.units, totalCost: pool.cost });
+  return computeSaleMargin(sale, pool);
 }
 
 export function icUnitStockAt(events: WarehouseInventoryEvent[], beforeMs: number | null): number {

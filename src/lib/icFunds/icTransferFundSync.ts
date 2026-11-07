@@ -505,7 +505,7 @@ async function loadGlobalInventoryEvents(
 function remainingStockPoolBeforeSale(
   events: WarehouseInventoryEvent[],
 ): RemainingStockPool {
-  const pool: RemainingStockPool = { units: 0, cost: 0 };
+  const pool: RemainingStockPool = { units: 0, cost: 0, lastWac: 0 };
   const sorted = [...events].sort(compareInventoryEvents);
 
   for (const event of sorted) {
@@ -522,7 +522,7 @@ function remainingStockPoolBeforeSale(
         aedAmount: event.aedAmount,
         serviceCharge: event.serviceCharge,
       },
-      { totalUnits: pool.units, totalCost: pool.cost },
+      pool,
     );
     consumeSaleFromPool(pool, margin.deliveredUnits);
   }

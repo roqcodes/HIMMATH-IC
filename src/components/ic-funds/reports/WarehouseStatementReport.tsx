@@ -49,6 +49,20 @@ function metalLineProfitInr(l: ICWarehousePLLine): number {
   return l.bookedCurrency === 'INR' ? l.grossProfit : 0;
 }
 
+function icLineRevenueAed(l: ICWarehousePLLine): number {
+  if (l.lineKind === 'ic_purchase') return 0;
+  return l.revenue;
+}
+
+function icLineCostAed(l: ICWarehousePLLine): number {
+  return l.cogs;
+}
+
+function icLineProfitAed(l: ICWarehousePLLine): number {
+  if (l.lineKind === 'ic_purchase') return 0;
+  return l.grossProfit;
+}
+
 export default function WarehouseStatementReport({
   report,
   warehouses,
@@ -138,12 +152,13 @@ export default function WarehouseStatementReport({
             IC cash — detail
           </p>
           <div className={icfTableWrap}>
-            <table className="w-full min-w-[880px] text-left text-sm">
+            <table className="w-full min-w-[920px] text-left text-sm">
               <thead>
                 <tr className={icfTheadRow}>
                   <th className={icfTh}>Date</th>
                   <th className={icfTh}>Warehouse</th>
-                  <th className={icfTh}>Customer</th>
+                  <th className={icfTh}>Party</th>
+                  <th className={icfTh}>Type</th>
                   <th className={icfThAlign('right')}>Units</th>
                   <th className={icfThAlign('right')}>Sales (AED)</th>
                   <th className={icfThAlign('right')}>Cost (AED)</th>
@@ -153,31 +168,47 @@ export default function WarehouseStatementReport({
               <tbody>
                 {icLines.length === 0 ? (
                   <tr>
-                    <td className={`${icfTd} py-6 text-center text-slate-500`} colSpan={7}>
-                      No IC cash sales in this view.
+                    <td className={`${icfTd} py-6 text-center text-slate-500`} colSpan={8}>
+                      No IC cash purchases or sales in this view.
                     </td>
                   </tr>
                 ) : (
-                  icLines.map(line => (
-                    <tr key={line.saleId} className="border-b border-slate-100">
-                      <td className={icfTd}>{fmtICDate(line.saleDate)}</td>
-                      <td className={icfTd}>{line.warehouseName}</td>
-                      <td className={`${icfTd} max-w-[10rem] truncate`}>{line.customerName}</td>
-                      <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtUnits(line.units)}</td>
-                      <AmountCell n={line.revenue} />
-                      <AmountCell n={line.cogs} />
-                      <td className={`${icfTd} text-right font-mono tabular-nums ${line.grossProfit < 0 ? 'text-red-600' : ''}`}>
-                        <FmtLedgerAed amount={line.grossProfit} />
-                      </td>
-                    </tr>
-                  ))
+                  icLines.map(line => {
+                    const isPurchase = line.lineKind === 'ic_purchase';
+                    return (
+                      <tr key={`${line.lineKind}-${line.saleId}`} className="border-b border-slate-100">
+                        <td className={icfTd}>{fmtICDate(line.saleDate)}</td>
+                        <td className={icfTd}>{line.warehouseName}</td>
+                        <td className={`${icfTd} max-w-[10rem] truncate`}>{line.customerName}</td>
+                        <td className={icfTd}>{isPurchase ? 'Purchase' : 'Sale'}</td>
+                        <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtUnits(line.units)}</td>
+                        <AmountCell n={icLineRevenueAed(line)} />
+                        <AmountCell n={icLineCostAed(line)} />
+                        <AmountCell
+                          n={icLineProfitAed(line)}
+                          danger={!isPurchase && line.grossProfit < 0}
+                        />
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
               {icLines.length > 0 ? (
                 <tfoot>
                   <tr className="border-t border-slate-200 bg-slate-50 font-medium">
-                    <td className={icfTd} colSpan={4}>
-                      Total (AED)
+                    <td className={icfTd} colSpan={5}>
+                      Total (detail)
+                    </td>
+                    <ReportAmountCell n={sum(icLines, icLineRevenueAed)} />
+                    <ReportAmountCell n={sum(icLines, icLineCostAed)} />
+                    <ReportAmountCell
+                      n={sum(icLines, icLineProfitAed)}
+                      danger={sum(icLines, icLineProfitAed) < 0}
+                    />
+                  </tr>
+                  <tr className="border-t border-slate-100 bg-slate-50/80 text-[11px] text-slate-600">
+                    <td className={icfTd} colSpan={5}>
+                      IC margin (sales only)
                     </td>
                     <ReportAmountCell n={totals.revenue} />
                     <ReportAmountCell n={totals.cogs} />
