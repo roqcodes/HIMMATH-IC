@@ -1,4 +1,4 @@
-import { computeIcCashAedTotal, INR_PER_UNIT } from './rateCalculations';
+import { computeIcCashAedTotal, computeIcCashRateFromTotals, INR_PER_UNIT } from './rateCalculations';
 import { netMetalInr } from '@/lib/icTransfer/labTest';
 import { isMetalAedPayment, normalizeMetalPaymentMethod, type MetalPaymentMethod } from '@/lib/domain/books';
 
@@ -96,15 +96,17 @@ export function icUnitsFromInrTotal(inrTotal: number): number {
 }
 
 export function aedTotalFromIcUnitRate(inrTotal: number, unitRateAed: number): number {
-  return round4(icUnitsFromInrTotal(inrTotal) * (Number(unitRateAed) || 0));
+  const u = icUnitsFromInrTotal(inrTotal);
+  return round4(computeIcCashAedTotal(u, Number(unitRateAed) || 0));
 }
 
 export function icUnitRateFromAedTotal(inrTotal: number, aedTotal: number): number {
   const units = icUnitsFromInrTotal(inrTotal);
   if (units <= 0) return 0;
-  return round4((Number(aedTotal) || 0) / units);
+  return round4(computeIcCashRateFromTotals(units, Number(aedTotal) || 0));
 }
 
+/** Imputed sheet RATE from cash IC AED and units (AED ÷ units ÷ 100). */
 export function deriveImputedUnitRateAed(aedTotal: number, units: number): number {
   const aed = Number(aedTotal);
   const u = Number(units);
@@ -114,7 +116,7 @@ export function deriveImputedUnitRateAed(aedTotal: number, units: number): numbe
   if (!Number.isFinite(u) || u <= 0) {
     throw new Error('Units must be greater than zero.');
   }
-  return round4(aed / u);
+  return round4(computeIcCashRateFromTotals(u, aed));
 }
 
 export function computeMetalAedFromInr(inrTotal: number, sheetRateAed: number): number {

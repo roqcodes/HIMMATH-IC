@@ -9,23 +9,44 @@ export const RATE_DECIMAL_PLACES = 14;
 export const INR_PER_UNIT = 100_000;
 
 /**
- * Cash IC sheet: **AED = units × RATE** (RATE ~36, same field they type on metal).
- * Example: 50 units × 36.2 = 1,810 AED.
+ * Typed **sheet** rate ~36.5 means **AED per IC unit = rate × 100**
+ * (same rupees as metal: INR × rate ÷ 1,000 = units × 100,000 × rate ÷ 1,000).
+ */
+export const IC_CASH_AED_PER_RATE_UNIT = 100;
+
+/**
+ * Pool WAC from older data used **AED = units × rate** (small dirham totals). New WAC is ~100×.
+ * Above this internal cost-per-unit we treat as new scale and divide by {@link IC_CASH_AED_PER_RATE_UNIT} for display.
+ */
+const LEGACY_IC_POOL_INTERNAL_WAC_CEILING = 200;
+
+/**
+ * Cash IC: **AED = units × RATE × 100** (RATE ~36.5 → 3,650 AED per unit).
  */
 export function computeIcCashAedTotal(units: number, unitRateAed: number): number {
   const u = Number(units);
   const r = Number(unitRateAed);
   if (!Number.isFinite(u) || u <= 0 || !Number.isFinite(r) || r <= 0) return 0;
-  return Number((u * r).toFixed(4));
+  return Number((u * r * IC_CASH_AED_PER_RATE_UNIT).toFixed(4));
 }
 
-/** Implied cash RATE from units and AED (AED ÷ units). */
+/** Implied cash sheet RATE from units and AED (AED ÷ units ÷ 100). */
 export function computeIcCashRateFromTotals(units: number, aedTotal: number): number {
   const u = Number(units);
   if (!Number.isFinite(u) || u <= 0) return 0;
   const aed = Number(aedTotal);
   if (!Number.isFinite(aed) || aed <= 0) return 0;
-  return Number((aed / u).toFixed(4));
+  return Number((aed / (u * IC_CASH_AED_PER_RATE_UNIT)).toFixed(4));
+}
+
+/** Sheet rate ~36 for UI prefill from perpetual-inventory WAC (`cost ÷ units`). */
+export function displayIcSheetRateFromPoolInternalWac(internalWacPerUnit: number): number {
+  const w = Number(internalWacPerUnit);
+  if (!Number.isFinite(w)) return 0;
+  if (Math.abs(w) <= LEGACY_IC_POOL_INTERNAL_WAC_CEILING) {
+    return Number(w.toFixed(4));
+  }
+  return Number((w / IC_CASH_AED_PER_RATE_UNIT).toFixed(4));
 }
 
 export function formatAmount(value: number, fractionDigits = 2): string {

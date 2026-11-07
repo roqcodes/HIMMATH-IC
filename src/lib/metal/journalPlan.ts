@@ -7,6 +7,7 @@ export type MetalJournalRole =
   | 'supplier'
   | 'customer'
   | 'agent'
+  | 'aed_settlement'
   | 'metal_stock'
   | 'metal_sales'
   | 'metal_cost'
@@ -39,8 +40,8 @@ export type MetalSaleJournalInput = {
   saleGrossInr: number;
   saleLabInr: number;
   saleAed: number;
-  /** INR lot cost only when the lot was bought CASH (entered Metal Stock). */
-  cashLotCostInr: number;
+  /** Pro-rata purchase-side INR cost for this sale slice (net of lab), from linked lot. */
+  lotCostInrAllocated: number;
   hasAgent: boolean;
 };
 
@@ -79,17 +80,37 @@ export function planMetalPurchaseJournals(input: MetalPurchaseJournalInput): Met
     return lines;
   }
 
-  if (input.hasAgent && aedTotal > 0) {
-    return [
-      {
-        book: 'AED',
-        referenceType: 'metal_purchase_aed',
-        debit: 'metal_aed',
-        credit: 'agent',
-        amount: aedTotal,
-        label: 'Paid via agent',
-      },
-    ];
+  if (pay === 'AED' && input.hasAgent && aedTotal > 0) {
+    const lines: MetalJournalLine[] = [];
+    if (grossInr > 0) {
+      lines.push({
+        book: 'INR',
+        referenceType: 'metal_purchase',
+        debit: 'metal_stock',
+        credit: 'aed_settlement',
+        amount: grossInr,
+        label: 'Bought metal',
+      });
+    }
+    if (labInr > 0) {
+      lines.push({
+        book: 'INR',
+        referenceType: 'lab_test_purchase',
+        debit: 'aed_settlement',
+        credit: 'metal_stock',
+        amount: labInr,
+        label: 'Lab deducted (purchase)',
+      });
+    }
+    lines.push({
+      book: 'AED',
+      referenceType: 'metal_purchase_aed',
+      debit: 'metal_aed',
+      credit: 'agent',
+      amount: aedTotal,
+      label: 'Paid via agent',
+    });
+    return lines;
   }
   return [];
 }
@@ -101,10 +122,7 @@ export function planMetalSaleJournals(input: MetalSaleJournalInput): MetalJourna
   const saleGrossInr = amt(input.saleGrossInr);
   const saleLabInr = amt(input.saleLabInr);
   const saleAed = amt(input.saleAed);
-  const lotPay: MetalPaymentMethod | null = input.hasLot
-    ? normalizeMetalPaymentMethod(input.lotPaymentMethod)
-    : null;
-  const cashLotCostInr = lotPay === 'CASH' ? amt(input.cashLotCostInr) : 0;
+  const lotCostInr = input.hasLot ? amt(input.lotCostInrAllocated) : 0;
 
   if (pay === 'CASH') {
     const lines: MetalJournalLine[] = [];
@@ -128,18 +146,18 @@ export function planMetalSaleJournals(input: MetalSaleJournalInput): MetalJourna
         label: 'Lab deducted (sale)',
       });
     }
-    if (cashLotCostInr > 0) {
+    if (lotCostInr > 0) {
       lines.push({
         book: 'INR',
         referenceType: 'metal_sale_cogs',
         debit: 'metal_cost',
         credit: 'metal_stock',
-        amount: cashLotCostInr,
+        amount: lotCostInr,
         label: 'Cost of metal sold',
       });
     }
     const netSaleInr = amt(Math.max(0, saleGrossInr - saleLabInr));
-    const profit = roundLedgerAmount(netSaleInr - cashLotCostInr);
+    const profit = roundLedgerAmount(netSaleInr - lotCostInr);
     if (profit > 0.005) {
       lines.push({
         book: 'INR',
@@ -163,7 +181,10 @@ export function planMetalSaleJournals(input: MetalSaleJournalInput): MetalJourna
   }
 
   const lines: MetalJournalLine[] = [];
-  if (input.hasAgent && saleAed > 0) {
+  const settledViaAgent = input.hasAgent && saleAed > 0;
+  const inrBillParty: MetalJournalRole = settledViaAgent ? 'aed_settlement' : 'customer';
+
+  if (settledViaAgent) {
     lines.push({
       book: 'AED',
       referenceType: 'metal_sale_aed',
@@ -173,14 +194,55 @@ export function planMetalSaleJournals(input: MetalSaleJournalInput): MetalJourna
       label: 'Collected via agent',
     });
   }
-  if (cashLotCostInr > 0) {
+  if (saleGrossInr > 0) {
+    lines.push({
+      book: 'INR',
+      referenceType: 'metal_sale_receipt',
+      debit: inrBillParty,
+      credit: 'metal_sales',
+      amount: saleGrossInr,
+      label: 'Sold metal',
+    });
+  }
+  if (saleLabInr > 0) {
+    lines.push({
+      book: 'INR',
+      referenceType: 'lab_test_sale',
+      debit: 'metal_sales',
+      credit: inrBillParty,
+      amount: saleLabInr,
+      label: 'Lab deducted (sale)',
+    });
+  }
+  if (lotCostInr > 0) {
     lines.push({
       book: 'INR',
       referenceType: 'metal_sale_cogs',
       debit: 'metal_cost',
       credit: 'metal_stock',
-      amount: cashLotCostInr,
+      amount: lotCostInr,
       label: 'Cost of metal sold',
+    });
+  }
+  const netSaleInr = amt(Math.max(0, saleGrossInr - saleLabInr));
+  const profit = roundLedgerAmount(netSaleInr - lotCostInr);
+  if (profit > 0.005) {
+    lines.push({
+      book: 'INR',
+      referenceType: 'metal_sale_profit',
+      debit: 'metal_sales',
+      credit: 'metal_profit',
+      amount: profit,
+      label: 'Metal profit',
+    });
+  } else if (profit < -0.005) {
+    lines.push({
+      book: 'INR',
+      referenceType: 'metal_sale_profit',
+      debit: 'metal_profit',
+      credit: 'metal_cost',
+      amount: Math.abs(profit),
+      label: 'Metal loss',
     });
   }
   return lines;

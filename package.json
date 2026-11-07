@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "backfill:day-closes": "tsx --tsconfig tsconfig.json scripts/backfill-day-closes.ts",
+    "resync:metal-agent-ledgers": "tsx --tsconfig tsconfig.json scripts/resync-metal-agent-ledgers.ts",
     "test": "tsx --test src/lib/businessTime.test.ts",
     "geo:build": "node scripts/build-asian-location-tree.mjs"
   },

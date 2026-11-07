@@ -27,8 +27,8 @@ describe('resolveTradeUnitRateAed', () => {
     assert.equal(resolveTradeUnitRateAed(50, 36, 1800), 36);
   });
 
-  it('imputes cash RATE as AED ÷ units when unit_rate is missing', () => {
-    assert.equal(resolveTradeUnitRateAed(50, 0, 1810), 36.2);
+  it('imputes cash RATE as AED ÷ units ÷ 100 when unit_rate is missing', () => {
+    assert.equal(resolveTradeUnitRateAed(50, 0, 181_000), 36.2);
   });
 });
 

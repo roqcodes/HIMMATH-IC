@@ -12,7 +12,7 @@ export function computeWarehouseIcUnitsOnHand(
   return remainingIcStockWac(purchases, sales, warehouseId).units;
 }
 
-/** Weighted average **AED rate per IC unit** on remaining stock (cash IC + metal INR inflows). */
+/** Sheet RATE (~36.5) implied by WAC on remaining stock (legacy pools may be 100× smaller internally). */
 export function computeWarehouseIcStockWac(
   purchases: ICPurchase[],
   sales: ICSale[],

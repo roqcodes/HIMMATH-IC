@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Modal from '@/components/ui/Modal';
+import ConfirmModal from '@/components/ui/ConfirmModal';
 import AsicFormField from '@/components/asic/AsicFormField';
 import { SmoothCollapse, SmoothModeSwap } from '@/components/ui/SmoothHeight';
 import EntitySearchSelect from '@/components/ui/EntitySearchSelect';
@@ -56,6 +57,11 @@ import {
   icPurchaseDenseInput,
   icPurchaseDenseLabel,
 } from '../shared/icTransferFormModalLayout';
+import {
+  stringifyIcPurchaseFormSnapshot,
+  type ICPurchaseFormSnapshot,
+} from '@/lib/icTransfer/icTransferModalFormSnapshots';
+import { pauseTransactionalRefetchForModal } from '@/lib/icTransfer/transactionalRefetchPause';
 
 const purchaseFieldLabel = `${icPurchaseDenseLabel} mb-1`;
 
@@ -263,6 +269,11 @@ export default function AddPurchaseModal({
   const [aedAgentId, setAedAgentId] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [now, setNow] = useState<Date | null>(null);
+  const formInitSeqRef = useRef(0);
+  const baselineFormRef = useRef('');
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
+  /** Increments each time the modal opens so we reset form even when initialData?.id is unchanged (e.g. add twice). */
+  const [purchaseModalOpenSession, setPurchaseModalOpenSession] = useState(0);
 
   const { entityLedgerById, warehouseAvailableById, warehouseMetalGById, refresh, refreshing } =
     useICTransferModalSnapshots(open, { warehouseId });
@@ -322,40 +333,108 @@ export default function AddPurchaseModal({
     .filter(p => p.settlementMode === 'metal')
     .reduce((acc, p) => acc + (p.metalWeightG || 0), 0);
 
-  useEffect(() => {
-    if (open) {
-      setNow(new Date());
-      const mode = initialData?.settlementMode === 'metal' ? 'metal' : 'cash';
-      setSettlementMode(mode);
-      setUnits(initialData?.units ?? 0);
-      setRate(initialData?.unitRate ?? 0);
-      setSupplierId(initialData?.counterpartyId || initialData?.supplierId || '');
-      setWarehouseId(lockedWarehouseId || initialData?.warehouseId || '');
-      setNotes(initialData?.notes || '');
-      setMetal(
-        metalFieldsFromRecord({
-          metalWeightG: initialData?.metalWeightG,
-          metalRateInrPerG: initialData?.metalRateInrPerG,
-          metalRateAedPerG: initialData?.metalRateAedPerG,
-          inrTotal: initialData?.inrTotal,
-          aedTotal: initialData?.aedTotal,
-        }),
-      );
-      setMetalPayment(normalizeMetalPaymentMethod(initialData?.metalPaymentMethod ?? 'CASH'));
-      setAedAgentId(initialData?.aedAgentCounterpartyId || initialData?.aedAgentId || '');
-      setLab(
-        labFieldsFromRecord({
-          labWeightG: initialData?.labWeightG,
-          labChargeInrPerG: initialData?.labChargeInrPerG,
-          labTotalInr: initialData?.labTotalInr,
-        }),
-      );
+  const capturePurchaseFormSnapshot = useCallback((): ICPurchaseFormSnapshot => {
+    return {
+      kind: 'purchase',
+      settlementMode,
+      units,
+      rate,
+      supplierId,
+      warehouseId,
+      notes,
+      metalPayment,
+      aedAgentId,
+      metal,
+      lab,
+    };
+  }, [settlementMode, units, rate, supplierId, warehouseId, notes, metalPayment, aedAgentId, metal, lab]);
 
-      if (!lockedWarehouseId && !initialData?.warehouseId && warehouseOptions.length === 1) {
-        setWarehouseId(warehouseOptions[0]!.id);
-      }
+  const formStateRef = useRef(capturePurchaseFormSnapshot());
+  formStateRef.current = capturePurchaseFormSnapshot();
+
+  const isFormDirty = useCallback(
+    () => stringifyIcPurchaseFormSnapshot(capturePurchaseFormSnapshot()) !== baselineFormRef.current,
+    [capturePurchaseFormSnapshot],
+  );
+
+  const requestClose = useCallback(() => {
+    if (!isFormDirty()) {
+      onClose();
+      return;
     }
-  }, [open, initialData, lockedWarehouseId, warehouseOptions]);
+    setDiscardConfirmOpen(true);
+  }, [onClose, isFormDirty]);
+
+  const confirmDiscardClose = useCallback(() => {
+    setDiscardConfirmOpen(false);
+    onClose();
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!open) {
+      setDiscardConfirmOpen(false);
+      return;
+    }
+    setPurchaseModalOpenSession(s => s + 1);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    return pauseTransactionalRefetchForModal();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    ++formInitSeqRef.current;
+
+    setNow(new Date());
+    const mode = initialData?.settlementMode === 'metal' ? 'metal' : 'cash';
+    setSettlementMode(mode);
+
+    const resolvedWarehouseId = lockedWarehouseId || initialData?.warehouseId || '';
+
+    setUnits(initialData?.units ?? 0);
+    setRate(initialData?.unitRate ?? 0);
+    setSupplierId(initialData?.counterpartyId || initialData?.supplierId || '');
+    setWarehouseId(resolvedWarehouseId);
+    setNotes(initialData?.notes || '');
+    const nextMetal = metalFieldsFromRecord({
+      metalWeightG: initialData?.metalWeightG,
+      metalRateInrPerG: initialData?.metalRateInrPerG,
+      metalRateAedPerG: initialData?.metalRateAedPerG,
+      inrTotal: initialData?.inrTotal,
+      aedTotal: initialData?.aedTotal,
+    });
+    setMetal(nextMetal);
+    const nextMetalPayment = normalizeMetalPaymentMethod(initialData?.metalPaymentMethod ?? 'CASH');
+    setMetalPayment(nextMetalPayment);
+    setAedAgentId(initialData?.aedAgentCounterpartyId || initialData?.aedAgentId || '');
+    const nextLab = labFieldsFromRecord({
+      labWeightG: initialData?.labWeightG,
+      labChargeInrPerG: initialData?.labChargeInrPerG,
+      labTotalInr: initialData?.labTotalInr,
+    });
+    setLab(nextLab);
+
+  }, [open, purchaseModalOpenSession, initialData?.id, lockedWarehouseId]);
+
+  /** Auto-pick lone warehouse after options load — without resetting whole form on icPurchases refresh. */
+  useEffect(() => {
+    if (!open) return;
+    if (lockedWarehouseId || initialData?.warehouseId) return;
+    if (warehouseOptions.length !== 1) return;
+    setWarehouseId(warehouseOptions[0]!.id);
+  }, [open, warehouseOptions, lockedWarehouseId, initialData?.warehouseId]);
+
+  useEffect(() => {
+    if (!open) return;
+    const seq = formInitSeqRef.current;
+    const t = window.setTimeout(() => {
+      if (formInitSeqRef.current !== seq) return;
+      baselineFormRef.current = stringifyIcPurchaseFormSnapshot(formStateRef.current);
+    }, 120);
+    return () => window.clearTimeout(t);
+  }, [open, purchaseModalOpenSession, initialData?.id]);
 
   const unitNum = units;
   const rateNum = rate;
@@ -591,8 +670,10 @@ export default function AddPurchaseModal({
   );
 
   return (
+    <>
     <Modal
       open={open}
+      onRequestClose={requestClose}
       onClose={onClose}
       title={modalTitle}
       headerCenter={
@@ -610,7 +691,7 @@ export default function AddPurchaseModal({
       bodyClassName={`${icPurchaseFormModalBody} !px-5 !py-2 lg:overflow-hidden`}
       footer={
         <>
-          <button type="button" className={btnSecondary} onClick={onClose} disabled={isSubmitting}>
+          <button type="button" className={btnSecondary} onClick={requestClose} disabled={isSubmitting}>
             Cancel
           </button>
           <button
@@ -864,5 +945,17 @@ export default function AddPurchaseModal({
         </div>
       </form>
     </Modal>
+    <ConfirmModal
+      open={discardConfirmOpen}
+      zIndexClass="z-[450]"
+      title="Discard changes?"
+      message="You have unsaved changes. Close without saving?"
+      variant="warning"
+      confirmLabel="Discard"
+      cancelLabel="Keep editing"
+      onConfirm={confirmDiscardClose}
+      onCancel={() => setDiscardConfirmOpen(false)}
+    />
+    </>
   );
 }

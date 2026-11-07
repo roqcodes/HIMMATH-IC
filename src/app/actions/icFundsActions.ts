@@ -1099,50 +1099,46 @@ export async function listCounterpartyDealVouchersAction(params: {
     `AND ($3::date IS NULL OR ${alias}.created_at >= $3::date)
      AND ($4::date IS NULL OR ${alias}.created_at < ($4::date + interval '1 day'))`;
 
-  const purchaseMatch = `(
-    p.counterparty_id = $1::uuid
-    OR EXISTS (
+  const agentOnPurchase = `EXISTS (
       SELECT 1 FROM ic_aed_agents aa
       WHERE aa.id = p.aed_agent_id AND aa.counterparty_id = $1::uuid
-    )
-  )`;
-  const saleMatch = `(
-    s.counterparty_id = $1::uuid
-    OR EXISTS (
+    )`;
+  const agentOnSale = `EXISTS (
       SELECT 1 FROM ic_aed_agents aa
       WHERE aa.id = s.aed_agent_id AND aa.counterparty_id = $1::uuid
-    )
-  )`;
+    )`;
   const dealIdSql = (alias: string) => `CAST(${alias}.id AS text) = CAST(v.reference_id AS text)`;
   const onPartyAccounts = `($7::varchar[] IS NOT NULL AND (v.debit_account_id = ANY($7::varchar[]) OR v.credit_account_id = ANY($7::varchar[])))`;
 
   const aedWhere = `(
       ${onPartyAccounts}
-      OR (v.reference_type IN ('ic_purchase', 'metal_purchase_aed') AND EXISTS (
+      OR (v.reference_type = 'ic_purchase' AND EXISTS (
         SELECT 1 FROM ic_purchases p
-        WHERE ${dealIdSql('p')} AND ${purchaseMatch}
+        WHERE ${dealIdSql('p')} AND p.counterparty_id = $1::uuid
         ${dealDateSql('p')}
       ))
-      OR (v.reference_type = ANY($2::text[]) AND EXISTS (
+      OR (v.reference_type = 'metal_purchase_aed' AND EXISTS (
+        SELECT 1 FROM ic_purchases p
+        WHERE ${dealIdSql('p')} AND ${agentOnPurchase}
+        ${dealDateSql('p')}
+      ))
+      OR (
+        v.reference_type = ANY($2::text[])
+        AND v.reference_type <> 'metal_sale_aed'
+        AND EXISTS (
+          SELECT 1 FROM ic_sales s
+          WHERE ${dealIdSql('s')} AND s.counterparty_id = $1::uuid
+          ${dealDateSql('s')}
+        )
+      )
+      OR (v.reference_type = 'metal_sale_aed' AND EXISTS (
         SELECT 1 FROM ic_sales s
-        WHERE ${dealIdSql('s')} AND ${saleMatch}
+        WHERE ${dealIdSql('s')} AND ${agentOnSale}
         ${dealDateSql('s')}
       ))
     )`;
 
-  const inrWhere = `(
-      ${onPartyAccounts}
-      OR (v.reference_type = ANY($2::text[]) AND EXISTS (
-        SELECT 1 FROM ic_purchases p
-        WHERE ${dealIdSql('p')} AND ${purchaseMatch}
-        ${dealDateSql('p')}
-      ))
-      OR (v.reference_type = ANY($6::text[]) AND EXISTS (
-        SELECT 1 FROM ic_sales s
-        WHERE ${dealIdSql('s')} AND ${saleMatch}
-        ${dealDateSql('s')}
-      ))
-    )`;
+  const inrWhere = onPartyAccounts;
 
   try {
     const [aedAccounts, inrAccounts] = await Promise.all([

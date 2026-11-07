@@ -32,7 +32,7 @@ describe('planMetalPurchaseJournals', () => {
     assert.equal(lines[0].referenceType, 'metal_purchase');
   });
 
-  it('AED buy: agent only, lab does not post', () => {
+  it('AED buy: INR stock + lab, then AED pay agent', () => {
     const lines = planMetalPurchaseJournals({
       paymentMethod: 'AED',
       grossInr: 3_00_00_000,
@@ -42,7 +42,11 @@ describe('planMetalPurchaseJournals', () => {
     });
     assert.deepEqual(
       lines.map(l => [l.referenceType, l.debit, l.credit, l.amount, l.book]),
-      [['metal_purchase_aed', 'metal_aed', 'agent', 50_000, 'AED']],
+      [
+        ['metal_purchase', 'metal_stock', 'aed_settlement', 3_00_00_000, 'INR'],
+        ['lab_test_purchase', 'aed_settlement', 'metal_stock', 12_000, 'INR'],
+        ['metal_purchase_aed', 'metal_aed', 'agent', 50_000, 'AED'],
+      ],
     );
   });
 
@@ -68,7 +72,7 @@ describe('planMetalSaleJournals', () => {
       saleGrossInr: 3_20_00_000,
       saleLabInr: 24_000,
       saleAed: 0,
-      cashLotCostInr: 2_99_88_000,
+      lotCostInrAllocated: 2_99_88_000,
       hasAgent: false,
     });
     assert.equal(lines.length, 0);
@@ -83,7 +87,7 @@ describe('planMetalSaleJournals', () => {
       saleGrossInr: 3_20_00_000,
       saleLabInr: 24_000,
       saleAed: 0,
-      cashLotCostInr: 2_99_88_000,
+      lotCostInrAllocated: 2_99_88_000,
       hasAgent: false,
     });
     assert.deepEqual(
@@ -106,7 +110,7 @@ describe('planMetalSaleJournals', () => {
       saleGrossInr: 90,
       saleLabInr: 10,
       saleAed: 0,
-      cashLotCostInr: 100,
+      lotCostInrAllocated: 100,
       hasAgent: false,
     });
     const profit = lines.find(l => l.referenceType === 'metal_sale_profit');
@@ -117,7 +121,7 @@ describe('planMetalSaleJournals', () => {
     assert.equal(profit.label, 'Metal loss');
   });
 
-  it('CASH sale of AED lot: full INR story, no cost (stock never entered)', () => {
+  it('CASH sale of AED lot: COGS from allocated INR cost, profit is margin', () => {
     const lines = planMetalSaleJournals({
       completed: true,
       paymentMethod: 'CASH',
@@ -126,14 +130,14 @@ describe('planMetalSaleJournals', () => {
       saleGrossInr: 1_000,
       saleLabInr: 0,
       saleAed: 40,
-      cashLotCostInr: 900,
+      lotCostInrAllocated: 900,
       hasAgent: true,
     });
     assert.deepEqual(
       lines.map(l => l.referenceType),
-      ['metal_sale_receipt', 'metal_sale_profit'],
+      ['metal_sale_receipt', 'metal_sale_cogs', 'metal_sale_profit'],
     );
-    assert.equal(lines[1].amount, 1_000);
+    assert.equal(lines.find(l => l.referenceType === 'metal_sale_profit')?.amount, 100);
     assert.ok(!lines.some(l => l.book === 'AED'));
   });
 
@@ -146,14 +150,14 @@ describe('planMetalSaleJournals', () => {
       saleGrossInr: 500,
       saleLabInr: 0,
       saleAed: 0,
-      cashLotCostInr: 400,
+      lotCostInrAllocated: 400,
       hasAgent: false,
     });
     assert.ok(!lines.some(l => l.referenceType === 'metal_sale_cogs'));
     assert.equal(lines.find(l => l.referenceType === 'metal_sale_profit')?.amount, 500);
   });
 
-  it('AED sale of CASH lot: collect via agent and relieve INR stock only', () => {
+  it('AED sale of CASH lot: agent AED + full INR P&L', () => {
     const lines = planMetalSaleJournals({
       completed: true,
       paymentMethod: 'AED',
@@ -162,19 +166,23 @@ describe('planMetalSaleJournals', () => {
       saleGrossInr: 3_20_00_000,
       saleLabInr: 24_000,
       saleAed: 12_000,
-      cashLotCostInr: 2_99_88_000,
+      lotCostInrAllocated: 2_99_88_000,
       hasAgent: true,
     });
     assert.deepEqual(
       lines.map(l => [l.referenceType, l.debit, l.credit, l.book]),
       [
         ['metal_sale_aed', 'agent', 'metal_aed', 'AED'],
+        ['metal_sale_receipt', 'aed_settlement', 'metal_sales', 'INR'],
+        ['lab_test_sale', 'metal_sales', 'aed_settlement', 'INR'],
         ['metal_sale_cogs', 'metal_cost', 'metal_stock', 'INR'],
+        ['metal_sale_profit', 'metal_sales', 'metal_profit', 'INR'],
       ],
     );
+    assert.equal(lines.find(l => l.referenceType === 'metal_sale_profit')?.amount, 19_88_000);
   });
 
-  it('AED sale of AED lot: agent collection only, lab ignored', () => {
+  it('AED sale of AED lot: agent collection + INR revenue, COGS, margin profit', () => {
     const lines = planMetalSaleJournals({
       completed: true,
       paymentMethod: 'AED',
@@ -183,10 +191,16 @@ describe('planMetalSaleJournals', () => {
       saleGrossInr: 1_000,
       saleLabInr: 50,
       saleAed: 40,
-      cashLotCostInr: 900,
+      lotCostInrAllocated: 900,
       hasAgent: true,
     });
-    assert.equal(lines.length, 1);
-    assert.equal(lines[0].referenceType, 'metal_sale_aed');
+    assert.deepEqual(lines.map(l => l.referenceType), [
+      'metal_sale_aed',
+      'metal_sale_receipt',
+      'lab_test_sale',
+      'metal_sale_cogs',
+      'metal_sale_profit',
+    ]);
+    assert.equal(lines.find(l => l.referenceType === 'metal_sale_profit')?.amount, 50);
   });
 });

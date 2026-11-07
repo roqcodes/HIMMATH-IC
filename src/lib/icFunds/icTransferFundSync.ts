@@ -324,7 +324,7 @@ function metalInrIcPoolCostAedFromRow(
   const rate = Number(row.unit_rate) || 0;
   if (u > 0 && rate > 0) return computeIcCashAedTotal(u, rate);
   const aed = Number(row.aed_amount) || 0;
-  if (aed > 0) return Number((aed / 100).toFixed(4));
+  if (aed > 0) return Number(aed.toFixed(4));
   return 0;
 }
 

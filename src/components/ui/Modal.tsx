@@ -6,6 +6,8 @@ import { iconBtn, uiShadowOverlay } from '@/lib/ui';
 
 type ModalProps = {
   open: boolean;
+  /** Called for backdrop click, header ×, and Escape. Defaults to onClose. Use for dirty guards (e.g. confirm before dismiss). */
+  onRequestClose?: () => void;
   onClose: () => void;
   title: React.ReactNode;
   children: React.ReactNode;
@@ -29,6 +31,7 @@ let openModalsCount = 0;
 
 export default function Modal({
   open,
+  onRequestClose,
   onClose,
   title,
   children,
@@ -41,6 +44,7 @@ export default function Modal({
   headerTrailing,
   zIndexClass = 'z-[400]',
 }: ModalProps) {
+  const dismiss = onRequestClose ?? onClose;
   const [mounted, setMounted] = useState(false);
   const [render, setRender] = useState(false);
   const [visible, setVisible] = useState(false);
@@ -79,11 +83,11 @@ export default function Modal({
   useEffect(() => {
     if (!render || !visible) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') dismiss();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [render, visible, onClose]);
+  }, [render, visible, dismiss]);
 
   if (!mounted || !render) return null;
 
@@ -92,7 +96,7 @@ export default function Modal({
       className={`fixed inset-0 ${zIndexClass} flex items-end justify-center bg-slate-900/40 sm:items-center sm:p-4 motion-safe:transition-opacity motion-safe:duration-[120ms] motion-safe:ease-out dark:bg-[var(--theme-overlay)] ${visible ? 'opacity-100' : 'pointer-events-none opacity-0'
         }`}
       style={{ transitionDuration: `${FADE_MS}ms` }}
-      onClick={onClose}
+      onClick={dismiss}
       role="presentation"
     >
       <div
@@ -127,7 +131,7 @@ export default function Modal({
             <button
               type="button"
               className={`${iconBtn} size-8 shrink-0 text-lg hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:hover:border-red-900/40 dark:hover:bg-red-950/40 dark:hover:text-red-400`}
-              onClick={onClose}
+              onClick={dismiss}
               aria-label="Close"
             >
               ×

@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import Modal from '@/components/ui/Modal';
+import ConfirmModal from '@/components/ui/ConfirmModal';
 import EntitySearchSelect from '@/components/ui/EntitySearchSelect';
 import {
   buildCounterpartySearchOptions,
@@ -80,6 +81,11 @@ import {
   icFormSectionEyebrow,
   icPurchaseDenseInput,
 } from '../shared/icTransferFormModalLayout';
+import {
+  stringifyIcSaleFormSnapshot,
+  type ICSaleFormSnapshot,
+} from '@/lib/icTransfer/icTransferModalFormSnapshots';
+import { pauseTransactionalRefetchForModal } from '@/lib/icTransfer/transactionalRefetchPause';
 
 function resolveInitialCounterpartyId(
   initialData: ICSale | undefined,
@@ -189,6 +195,11 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
   const [metalPayment, setMetalPayment] = useState<MetalPaymentMethod>('CASH');
   const [aedAgentId, setAedAgentId] = useState('');
   const [now, setNow] = useState<Date | null>(null);
+  const formInitSeqRef = useRef(0);
+  const baselineFormRef = useRef('');
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
+  /** Each modal open increments so the form resets even when initialData?.id is unchanged. */
+  const [saleModalOpenSession, setSaleModalOpenSession] = useState(0);
 
   const branchId = useMemo(() => {
     if (user?.branchId) return user.branchId;
@@ -395,79 +406,184 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
     return resolveGroupOrderRate(customerRateGroup, transactionType, unitNum);
   }, [customerRateGroup, transactionType, unitNum]);
 
+  /** Prefill cash rate from rate group when party/txn/units change — not when icRateGroups array refetches. */
   useEffect(() => {
-    if (!open) return;
-    if (isMetal || !customerRateGroup) return;
+    if (!open || isMetal || !customerRateGroup || initialData?.id) return;
     const resolved = resolveGroupOrderRate(customerRateGroup, transactionType, unitNum);
     if (resolved.saleRate > 0) {
       setRate(resolved.saleRate);
     }
-  }, [open, customerRateGroup?.id, transactionType, unitNum, isMetal, customerRateGroup]);
+  }, [
+    open,
+    isMetal,
+    counterpartyId,
+    transactionType,
+    unitNum,
+    customerRateGroup?.id,
+    initialData?.id,
+    customerRateGroup,
+  ]);
+
+  const captureSaleFormSnapshot = useCallback((): ICSaleFormSnapshot => {
+    return {
+      kind: 'sale',
+      settlementMode,
+      units,
+      rate,
+      customerName,
+      counterpartyId,
+      warehouseId,
+      metalPurchaseId,
+      metalPayment,
+      aedAgentId,
+      transactionType,
+      priority,
+      address,
+      imageUrl,
+      deleteToken,
+      metal,
+      lab,
+    };
+  }, [
+    settlementMode,
+    units,
+    rate,
+    customerName,
+    counterpartyId,
+    warehouseId,
+    metalPurchaseId,
+    metalPayment,
+    aedAgentId,
+    transactionType,
+    priority,
+    address,
+    imageUrl,
+    deleteToken,
+    metal,
+    lab,
+  ]);
+
+  const formStateRef = useRef(captureSaleFormSnapshot());
+  formStateRef.current = captureSaleFormSnapshot();
+
+  const isFormDirty = useCallback(
+    () => stringifyIcSaleFormSnapshot(captureSaleFormSnapshot()) !== baselineFormRef.current,
+    [captureSaleFormSnapshot],
+  );
+
+  const requestClose = useCallback(() => {
+    if (!isFormDirty()) {
+      onClose();
+      return;
+    }
+    setDiscardConfirmOpen(true);
+  }, [onClose, isFormDirty]);
+
+  const confirmDiscardClose = useCallback(() => {
+    setDiscardConfirmOpen(false);
+    onClose();
+  }, [onClose]);
 
   useEffect(() => {
-    if (open) {
-      setNow(new Date());
-      const mode = initialData?.settlementMode === 'metal' ? 'metal' : 'cash';
-      setSettlementMode(mode);
-      const saleMetal = metalSaleFieldsFromRecord({
-        metalWeightG: initialData?.metalWeightG,
-        metalRateInrPerG: initialData?.metalRateInrPerG,
-        metalRateAedPerG: initialData?.metalRateAedPerG,
-        inrTotal: initialData?.inrTotal,
-        aedTotal: (initialData?.aedAmount ?? 0) + (initialData?.serviceCharge ?? 0),
-        unitRate: initialData?.unitRate,
-      });
-      if (!initialData?.id && saleMetal.metalSheetRateAed <= 0) {
-        const wh = lockedWarehouseId || initialData?.warehouseId;
-        if (wh) {
-          const wac = remainingIcStockWac(icPurchases, icSales, wh);
-          if (wac.rate > 0) {
-            setMetal(
-              applyMetalFieldChange(
-                saleMetal,
-                'sheetRateAed',
-                metalSheetRateFromIcUnitRate(wac.rate),
-              ),
-            );
-          } else {
-            setMetal(saleMetal);
-          }
+    if (!open) {
+      setDiscardConfirmOpen(false);
+      return;
+    }
+    setSaleModalOpenSession(s => s + 1);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    return pauseTransactionalRefetchForModal();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    ++formInitSeqRef.current;
+
+    setNow(new Date());
+    const mode = initialData?.settlementMode === 'metal' ? 'metal' : 'cash';
+    setSettlementMode(mode);
+
+    const saleMetal = metalSaleFieldsFromRecord({
+      metalWeightG: initialData?.metalWeightG,
+      metalRateInrPerG: initialData?.metalRateInrPerG,
+      metalRateAedPerG: initialData?.metalRateAedPerG,
+      inrTotal: initialData?.inrTotal,
+      aedTotal: (initialData?.aedAmount ?? 0) + (initialData?.serviceCharge ?? 0),
+      unitRate: initialData?.unitRate,
+    });
+
+    const resolvedWarehouseId = lockedWarehouseId || initialData?.warehouseId || '';
+    const resolvedCp = resolveInitialCounterpartyId(initialData, scopedCounterparties);
+
+    if (!initialData?.id && saleMetal.metalSheetRateAed <= 0) {
+      const wh = lockedWarehouseId || initialData?.warehouseId;
+      if (wh) {
+        const wac = remainingIcStockWac(icPurchases, icSales, wh);
+        if (wac.rate > 0) {
+          setMetal(
+            applyMetalFieldChange(saleMetal, 'sheetRateAed', metalSheetRateFromIcUnitRate(wac.rate)),
+          );
         } else {
           setMetal(saleMetal);
         }
       } else {
         setMetal(saleMetal);
       }
-      setUnits(initialData?.units ?? 0);
-      setRate(initialData?.unitRate ?? 0);
-      setCustomerName(initialData?.orderCustomerName || initialData?.customerName || '');
-      setCounterpartyId(resolveInitialCounterpartyId(initialData, scopedCounterparties));
-      setWarehouseId(lockedWarehouseId || initialData?.warehouseId || '');
-      setMetalPurchaseId(initialData?.metalPurchaseId || '');
-      const wh = lockedWarehouseId || initialData?.warehouseId;
-      if (mode === 'metal' && wh) {
-        prefetchAvailableMetalLots(wh, initialData?.id);
-      }
-      setMetalPayment(normalizeMetalPaymentMethod(initialData?.metalPaymentMethod ?? 'CASH'));
-      setAedAgentId(initialData?.aedAgentCounterpartyId || initialData?.aedAgentId || '');
-      setLab(
-        labFieldsFromRecord({
-          labWeightG: initialData?.labWeightG,
-          labChargeInrPerG: initialData?.labChargeInrPerG,
-          labTotalInr: initialData?.labTotalInr,
-        }),
-      );
-      setTransactionType(normalizeICSaleTransactionType(initialData?.transactionType));
-      setPriority(initialData?.priority || 'Normal');
-      setAddress(initialData?.address || '');
-      setImageUrl(initialData?.imageUrl || '');
-      setDeleteToken('');
-
-      if (!lockedWarehouseId && !initialData?.warehouseId && allowedWarehouses.length === 1) {
-        setWarehouseId(allowedWarehouses[0]!.id);
-      }
+    } else {
+      setMetal(saleMetal);
     }
-  }, [open, initialData, lockedWarehouseId, allowedWarehouses, scopedCounterparties, icPurchases, icSales]);
+
+    setUnits(initialData?.units ?? 0);
+    setRate(initialData?.unitRate ?? 0);
+    setCustomerName(initialData?.orderCustomerName || initialData?.customerName || '');
+    setCounterpartyId(resolvedCp);
+    setWarehouseId(resolvedWarehouseId);
+    setMetalPurchaseId(initialData?.metalPurchaseId || '');
+    const whForLots = lockedWarehouseId || initialData?.warehouseId;
+    if (mode === 'metal' && whForLots) {
+      prefetchAvailableMetalLots(whForLots, initialData?.id);
+    }
+    setMetalPayment(normalizeMetalPaymentMethod(initialData?.metalPaymentMethod ?? 'CASH'));
+    setAedAgentId(initialData?.aedAgentCounterpartyId || initialData?.aedAgentId || '');
+    const nextLab = labFieldsFromRecord({
+      labWeightG: initialData?.labWeightG,
+      labChargeInrPerG: initialData?.labChargeInrPerG,
+      labTotalInr: initialData?.labTotalInr,
+    });
+    setLab(nextLab);
+    setTransactionType(normalizeICSaleTransactionType(initialData?.transactionType));
+    setPriority(initialData?.priority || 'Normal');
+    setAddress(initialData?.address || '');
+    setImageUrl(initialData?.imageUrl || '');
+    setDeleteToken('');
+  }, [
+    open,
+    saleModalOpenSession,
+    initialData?.id,
+    lockedWarehouseId,
+    scopedCounterparties,
+    icPurchases,
+    icSales,
+  ]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (lockedWarehouseId || initialData?.warehouseId) return;
+    if (allowedWarehouses.length !== 1) return;
+    setWarehouseId(allowedWarehouses[0]!.id);
+  }, [open, allowedWarehouses, lockedWarehouseId, initialData?.warehouseId]);
+
+  useEffect(() => {
+    if (!open) return;
+    const seq = formInitSeqRef.current;
+    const t = window.setTimeout(() => {
+      if (formInitSeqRef.current !== seq) return;
+      baselineFormRef.current = stringifyIcSaleFormSnapshot(formStateRef.current);
+    }, 120);
+    return () => window.clearTimeout(t);
+  }, [open, saleModalOpenSession, initialData?.id]);
 
   const handleImageUpload = async (file: File) => {
     setIsUploading(true);
@@ -750,8 +866,10 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
   );
 
   return (
+    <>
     <Modal
       open={open}
+      onRequestClose={requestClose}
       onClose={onClose}
       title={modalTitle}
       headerCenter={
@@ -769,7 +887,7 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
       bodyClassName={`${icPurchaseFormModalBody} !px-5 !py-2 lg:overflow-hidden`}
       footer={
         <>
-          <button type="button" className={btnSecondary} onClick={onClose} disabled={formDisabled}>
+          <button type="button" className={btnSecondary} onClick={requestClose} disabled={formDisabled}>
             Cancel
           </button>
           <button
@@ -1009,7 +1127,7 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
                             disabled={formDisabled}
                             value={rate}
                             onNumericChange={setRate}
-                            title="AED = units × rate (e.g. 50 × 36.2 = 1,810 AED)"
+                            title="AED = rate × 100 × units (e.g. 50 × 36.2 × 100 = 181,000 AED)"
                             placeholder={
                               customerRateGroup
                                 ? 'Filled from rate group when available'
@@ -1064,5 +1182,17 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
         </div>
       </form>
     </Modal>
+    <ConfirmModal
+      open={discardConfirmOpen}
+      zIndexClass="z-[450]"
+      title="Discard changes?"
+      message="You have unsaved changes. Close without saving?"
+      variant="warning"
+      confirmLabel="Discard"
+      cancelLabel="Keep editing"
+      onConfirm={confirmDiscardClose}
+      onCancel={() => setDiscardConfirmOpen(false)}
+    />
+    </>
   );
 }

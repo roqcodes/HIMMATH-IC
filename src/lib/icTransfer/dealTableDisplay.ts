@@ -36,7 +36,7 @@ export function saleDealAed(s: ICSale): number {
 /**
  * AED for **table/UX** when the booked AED leg is intentionally empty:
  * - Metal · INR: implied from net INR × sheet RATE ÷ 1000 (`unit_rate` stores sheet RATE).
- * - Cash: if `aed_amount` is missing, `units × unit_rate`.
+ * - Cash: if `aed_amount` is missing, `units × unit_rate × 100`.
  * Agent-AED metal still uses booked AED only.
  */
 export function saleTableDisplayAed(s: ICSale): number {

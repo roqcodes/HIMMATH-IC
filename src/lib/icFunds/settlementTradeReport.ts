@@ -81,7 +81,7 @@ export function tradeLinePaymentFromDb(value: unknown): 'INR' | 'AED' | undefine
 }
 
 /**
- * Stored unit_rate for cash IC is **AED per unit** (AED = units × rate). When missing, infer AED ÷ units.
+ * Stored unit_rate for cash IC is sheet R (~36.5). **AED = units × rate × 100** when inferring from totals.
  */
 export function resolveTradeUnitRateAed(
   units: number,

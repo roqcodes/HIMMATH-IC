@@ -109,14 +109,14 @@ describe('metalSettlement', () => {
     assert.equal(n.aedTotal, null);
   });
 
-  it('normalizes cash purchase (AED = units × RATE)', () => {
+  it('normalizes cash purchase (AED = units × RATE × 100)', () => {
     const n = normalizeCashPurchase({ units: 50, unitRate: 36.2 });
-    assert.equal(n.aedTotal, 1810);
+    assert.equal(n.aedTotal, 181_000);
     assert.equal(n.settlementMode, 'cash');
   });
 
-  it('imputed unit rate', () => {
-    assert.equal(deriveImputedUnitRateAed(2200, 0.5), 4400);
+  it('imputed sheet rate (AED ÷ units ÷ 100)', () => {
+    assert.equal(deriveImputedUnitRateAed(2200, 0.5), 44);
   });
 
   it('metal cash sale stores IC units and sheet RATE (AED × 1000 ÷ INR)', () => {

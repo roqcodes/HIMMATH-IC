@@ -1,4 +1,8 @@
-import { computeIcCashAedTotal, INR_PER_UNIT } from '@/lib/icTransfer/rateCalculations';
+import {
+  computeIcCashAedTotal,
+  displayIcSheetRateFromPoolInternalWac,
+  INR_PER_UNIT,
+} from '@/lib/icTransfer/rateCalculations';
 import { isMetalAedPayment } from '@/lib/domain/books';
 import { isDateInRange, type DateFilterRange } from '@/lib/dateFilterRange';
 import { isVoidIcSaleOrderStatus } from '@/lib/icFunds/icTransferReportFilters';
@@ -82,18 +86,16 @@ function icStockPurchaseEvents(
 }
 
 /**
- * AED “cost” for the **IC unit pool** from a metal·INR completed sale.
- * True customer AED = net INR × R ÷ 1000, but pool units are **₹1L notional**, so a naïve
- * (true AED ÷ units) gives **R × 100**. Match cash IC: use notional cost **units × R** so
- * pool average rate equals the **sheet R** (~23–37). When only `aedAmount` is present,
- * use **aed ÷ 100** (= units × R) because true AED = 100 × (units × R).
+ * AED cost for the **IC unit pool** from a metal·INR completed sale.
+ * Same as cash IC: **units × sheet RATE × 100** = customer metal AED (INR × R ÷ 1000).
+ * When only `aedAmount` is present, use full booked AED (legacy or explicit).
  */
 function metalInrIcPoolCostAed(sale: ICSale, units: number): number {
   const u = Number(units);
   const rate = Number(sale.unitRate) || 0;
   if (u > 0 && rate > 0) return computeIcCashAedTotal(u, rate);
   const aed = Number(sale.aedAmount) || 0;
-  if (aed > 0) return Number((aed / 100).toFixed(4));
+  if (aed > 0) return Number(aed.toFixed(4));
   return 0;
 }
 
@@ -322,5 +324,8 @@ export function remainingIcStockWac(
     ...icStockSaleEvents(whSales),
   ];
   const { pool } = simulateWarehouseInventory(events);
-  return { units: pool.units, rate: remainingStockWac(pool) };
+  return {
+    units: pool.units,
+    rate: displayIcSheetRateFromPoolInternalWac(remainingStockWac(pool)),
+  };
 }

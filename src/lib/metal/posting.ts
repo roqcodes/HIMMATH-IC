@@ -36,8 +36,8 @@ async function ensureMetalAedAccount(client: DbClient, branchId: string): Promis
   return ensureLinkedAccount(client, {
     branchId,
     sourceType: 'ic_counterparty',
-    sourceId: 'metal_sale_reverse',
-    name: 'Metal sale reverse',
+    sourceId: 'metal_purchase_aed_clearing',
+    name: 'Metal purchase AED',
   });
 }
 
@@ -140,6 +140,20 @@ export async function syncMetalPurchaseLedgers(
     ? await ensureInrSystemAccount(client, branchId, 'Metal Stock', 'inventory', 'metal_inventory')
     : null;
 
+  const needsAedSettlement = lines.some(
+    l => l.debit === 'aed_settlement' || l.credit === 'aed_settlement',
+  );
+  const aedSettlementInr = needsAedSettlement
+    ? await ensureInrSystemAccount(
+        client,
+        branchId,
+        'Metal AED settlement',
+        'inventory',
+        'metal_aed_settlement',
+      )
+    : null;
+  if (needsAedSettlement && !aedSettlementInr) return;
+
   let agentAccountId: string | null = null;
   let metalAedAccountId: string | null = null;
   if (lines.some(l => l.debit === 'agent' || l.credit === 'agent' || l.debit === 'metal_aed' || l.credit === 'metal_aed')) {
@@ -154,6 +168,8 @@ export async function syncMetalPurchaseLedgers(
     switch (role) {
       case 'supplier':
         return supplierAccountId;
+      case 'aed_settlement':
+        return aedSettlementInr;
       case 'metal_stock':
         return metalStockInr;
       case 'agent':
@@ -306,17 +322,16 @@ export async function syncMetalSaleLedgers(
     ? await loadLotPurchasePayment(client, purchaseId)
     : { paymentMethod: 'CASH', purchaseInr: 0, purchaseAed: 0, purchasedG: 0, labTotalInr: 0 };
 
-  const cashLotCostInr =
-    hasLot && normalizeMetalPaymentMethod(lot.paymentMethod) === 'CASH'
-      ? allocateMetalLotCostInr(
-          {
-            inrTotal: lot.purchaseInr,
-            metalWeightG: lot.purchasedG,
-            labTotalInr: lot.labTotalInr,
-          },
-          saleG,
-        )
-      : 0;
+  const lotCostInrAllocated = hasLot
+    ? allocateMetalLotCostInr(
+        {
+          inrTotal: lot.purchaseInr,
+          metalWeightG: lot.purchasedG,
+          labTotalInr: lot.labTotalInr,
+        },
+        saleG,
+      )
+    : 0;
 
   const agentId = sale.aed_agent_id ? String(sale.aed_agent_id) : null;
   const lines = planMetalSaleJournals({
@@ -327,7 +342,7 @@ export async function syncMetalSaleLedgers(
     saleGrossInr,
     saleLabInr,
     saleAed,
-    cashLotCostInr,
+    lotCostInrAllocated,
     hasAgent: Boolean(agentId),
   });
   if (lines.length === 0) return;
@@ -351,6 +366,22 @@ export async function syncMetalSaleLedgers(
     ? await ensureInrSystemAccount(client, branchId, 'Metal Profit', 'profit', 'metal_profit')
     : null;
 
+  const needsAedSettlement = lines.some(
+    l => l.debit === 'aed_settlement' || l.credit === 'aed_settlement',
+  );
+  const aedSettlementInr = needsAedSettlement
+    ? await ensureInrSystemAccount(
+        client,
+        branchId,
+        'Metal AED settlement',
+        'inventory',
+        'metal_aed_settlement',
+      )
+    : null;
+  if (needsAedSettlement && !aedSettlementInr) {
+    throw new Error('Could not resolve INR account for metal AED settlement clearing');
+  }
+
   let agentAccountId: string | null = null;
   let metalAedAccountId: string | null = null;
   if (lines.some(l => l.debit === 'agent' || l.credit === 'agent' || l.debit === 'metal_aed' || l.credit === 'metal_aed')) {
@@ -368,6 +399,8 @@ export async function syncMetalSaleLedgers(
     switch (role) {
       case 'customer':
         return customerAccountId;
+      case 'aed_settlement':
+        return aedSettlementInr;
       case 'metal_stock':
         return metalStockInr;
       case 'metal_sales':

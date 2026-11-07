@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { computeMetalSheetRateAed } from '@/lib/icTransfer/metalSettlement';
 import { computeDealProfit, remainingIcStockWac } from './dealProfit';
 import type { ICPurchase, ICSale } from '@/types';
 
@@ -90,7 +91,7 @@ describe('dealProfit', () => {
         customerName: 'A',
         warehouseId: 'w1',
         units: 110,
-        unitRate: 11_000_000 / 385_000,
+        unitRate: computeMetalSheetRateAed(11_000_000, 385_000),
         aedAmount: 385_000,
         inrTotal: 11_000_000,
         metalWeightG: 500,
@@ -111,7 +112,7 @@ describe('dealProfit', () => {
     assert.equal(slice.metalProfitInr, 1_000_000);
     const { units, rate } = remainingIcStockWac(purchases, sales, 'w1');
     assert.equal(units, 110);
-    const expectedRate = 11_000_000 / 385_000;
+    const expectedRate = computeMetalSheetRateAed(11_000_000, 385_000);
     assert.ok(Math.abs(rate - expectedRate) < 0.02);
   });
 
@@ -121,7 +122,7 @@ describe('dealProfit', () => {
         id: 'p-ic',
         warehouseId: 'del',
         units: 100,
-        unitRate: (100 * 100_000) / 360_000,
+        unitRate: 36,
         aedTotal: 360_000,
         settlementMode: 'cash',
         createdAt: '2026-11-01T00:00:00.000Z',
@@ -144,7 +145,7 @@ describe('dealProfit', () => {
         customerName: 'BAVA',
         warehouseId: 'del',
         units: 100,
-        unitRate: (100 * 100_000) / 370_000,
+        unitRate: 37,
         aedAmount: 370_000,
         settlementMode: 'cash',
         orderStatus: 'completed',
@@ -174,9 +175,7 @@ describe('dealProfit', () => {
       warehouseId: 'del',
     });
     assert.equal(slice.cashGrossProfitAed, 10_000);
-    assert.ok(
-      Math.abs(slice.cashGrossProfitInr - 10_000 * ((100 * 100_000) / 370_000)) < 0.05,
-    );
+    assert.ok(Math.abs(slice.cashGrossProfitInr - 10_000 * ((100 * 100_000) / 370_000)) < 0.05);
     assert.equal(slice.cashCogsAed, 360_000);
     assert.equal(slice.cashRevenueAed, 370_000);
     assert.equal(slice.metalProfitInr, 1_000_000);
@@ -292,7 +291,7 @@ describe('dealProfit', () => {
         customerName: 'A',
         warehouseId: 'ksd',
         units: 70,
-        unitRate: 7_000_000 / 245_000,
+        unitRate: computeMetalSheetRateAed(7_000_000, 245_000),
         aedAmount: 245_000,
         inrTotal: 7_000_000,
         metalWeightG: 500,

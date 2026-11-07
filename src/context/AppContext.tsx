@@ -9,6 +9,7 @@ import React, {
   useRef,
   ReactNode,
   useMemo,
+  useSyncExternalStore,
 } from 'react';
 import { usePathname } from 'next/navigation';
 import {
@@ -70,6 +71,11 @@ import {
   isWarehousePortalRoute,
 } from '@/lib/navigation/mainNav';
 import { useAutoRefreshData } from '@/hooks/useAutoRefreshData';
+import {
+  getTransactionalRefetchPauseDepth,
+  isTransactionalRefetchPaused,
+  subscribeTransactionalRefetchPause,
+} from '@/lib/icTransfer/transactionalRefetchPause';
 import { useTrackedCallback } from '@/hooks/useTrackedCallback';
 import { trackLoading } from '@/lib/loadingBar';
 
@@ -304,6 +310,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   });
 
   const refetchData = useCallback(async (userOverride?: User | null, options?: { silent?: boolean }) => {
+    if (options?.silent && isTransactionalRefetchPaused()) return;
     if (refetchInFlightRef.current) return;
     refetchInFlightRef.current = true;
     const run = async () => {
@@ -354,8 +361,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [refetchData]);
 
+  const transactionalRefetchPauseDepth = useSyncExternalStore(
+    subscribeTransactionalRefetchPause,
+    getTransactionalRefetchPauseDepth,
+    getTransactionalRefetchPauseDepth,
+  );
+
   useAutoRefreshData({
-    enabled: state.isAuthenticated && !state.isInitialLoading,
+    enabled:
+      state.isAuthenticated &&
+      !state.isInitialLoading &&
+      transactionalRefetchPauseDepth === 0,
     refetch: () => refetchData(undefined, { silent: true }),
   });
 

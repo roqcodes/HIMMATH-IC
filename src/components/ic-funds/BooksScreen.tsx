@@ -16,6 +16,11 @@ import { accountTypeLabel, IC_FUND_VOUCHER_LABELS } from '@/lib/icFunds/constant
 import { fmtICDate, fmtLedgerAed, fmtLedgerAmount, icfLedgerColumnLabel, FmtLedgerAed, FmtLedgerAmount } from '@/lib/icFunds/format';
 import { formatReportPeriodCaption } from '@/lib/icFunds/reportCaptions';
 import { downloadCsv, exportReportPdfFromElement, openReportPreviewNewTab } from '@/lib/icFunds/booksExport';
+import {
+  exportStatementOfAccountPdf,
+  openStatementOfAccountPreview,
+  type StatementOfAccountExportData,
+} from '@/lib/icFunds/statementOfAccountExport';
 import { reportCatalogTitle } from '@/lib/icFunds/reportCatalog';
 import {
   DEFAULT_REPORT_FILTERS,
@@ -216,6 +221,17 @@ export default function BooksScreen({
   }, [branchId]);
 
   useEffect(() => {
+    if (reportView !== 'statement') return;
+    setReportFilters(prev => (prev.warehouseId ? { ...prev, warehouseId: '' } : prev));
+  }, [reportView]);
+
+  useEffect(() => {
+    if (reportView !== 'statement' || !accountId) return;
+    const acc = accounts.find(a => a.id === accountId);
+    if (acc?.sourceType === 'ic_warehouse') setAccountId('');
+  }, [accountId, accounts, reportView]);
+
+  useEffect(() => {
     if (reportView === 'statement') {
       void loadStatement();
       return;
@@ -248,15 +264,22 @@ export default function BooksScreen({
   }, [accountId, branchId]);
 
   useEffect(() => {
-    if (reportView !== 'statement' || statementBook !== 'inr' || !inrAccountId) {
+    if (reportView !== 'statement') {
       setInrStatement(null);
       return;
     }
-    setLoading(true);
-    void trackLoading(() =>
+    if (!inrAccountId) {
+      setInrStatement(null);
+      return;
+    }
+
+    const isVisibleTab = statementBook === 'inr';
+    if (isVisibleTab) setLoading(true);
+
+    const loader = () =>
       getInrFundStatementAction({ branchId, accountId: inrAccountId, startDate, endDate }).then(result => {
         if (!result.success) {
-          void showLoadError('BooksScreen.loadInrStatement', result.error);
+          if (isVisibleTab) void showLoadError('BooksScreen.loadInrStatement', result.error);
           setInrStatement(null);
         } else {
           setInrStatement({
@@ -266,9 +289,14 @@ export default function BooksScreen({
             accountName: result.data.account.name,
           });
         }
-        setLoading(false);
-      }),
-    );
+        if (isVisibleTab) setLoading(false);
+      });
+
+    if (isVisibleTab) {
+      void trackLoading(loader);
+    } else {
+      void loader();
+    }
   }, [branchId, endDate, inrAccountId, reportView, showLoadError, startDate, statementBook]);
 
   const { periodLabel, asAtLabel } = formatReportPeriodCaption({
@@ -284,13 +312,16 @@ export default function BooksScreen({
     [bundle?.accountLedgers],
   );
 
+  /** Warehouse balances have a dedicated "Warehouse statement" report — hide them here. */
   const accountSearchOptions: EntitySearchOption[] = useMemo(
     () =>
-      accounts.map(a => ({
-        value: a.id,
-        label: a.name,
-        detail: accountTypeLabel(a.accountType),
-      })),
+      accounts
+        .filter(a => a.sourceType !== 'ic_warehouse')
+        .map(a => ({
+          value: a.id,
+          label: a.name,
+          detail: accountTypeLabel(a.accountType),
+        })),
     [accounts],
   );
 
@@ -402,7 +433,7 @@ export default function BooksScreen({
         period: periodLabel,
         accountName: activeStatement?.account.name,
         book: statementBook === 'inr' ? 'INR' : undefined,
-        omitWarehouseCaption: reportView === 'warehouse-pl',
+        omitWarehouseCaption: reportView === 'warehouse-pl' || reportView === 'statement',
       }),
     [activeStatement?.account.name, periodLabel, reportFilters, reportView, statementBook],
   );
@@ -521,23 +552,49 @@ export default function BooksScreen({
       return;
     }
 
-    if (reportView === 'statement' && activeStatement) {
-      downloadCsv(
-        'statement-of-account.csv',
-        ['Date', '#', 'Type', 'Particulars', 'Debit', 'Credit', 'Balance', 'Remark'],
-        [
-          ...activeStatement.lines.map(l => [
-            l.date,
-            l.voucherNo,
+    if (reportView === 'statement') {
+      const targetAccount = accounts.find(a => a.id === accountId) ?? statement?.account;
+      if (!targetAccount) return;
+
+      const aedLines = statement?.lines ? filterStatementLines(statement.lines, reportFilters) : [];
+      const inrLines = inrStatement?.lines ? filterStatementLines(inrStatement.lines, reportFilters) : [];
+
+      const headers = ['Book', 'Date', '#', 'Type', 'Particulars', 'Debit', 'Credit', 'Balance', 'Remark'];
+      const rows: (string | number)[][] = [];
+
+      for (const l of aedLines) {
+        rows.push([
+          'AED',
+          l.date ? l.date.slice(0, 10) : '',
+          l.voucherNo === 0 ? 'OB' : l.voucherNo,
+          l.voucherType,
+          l.particulars,
+          l.debit || '',
+          l.credit || '',
+          l.balance,
+          l.notes || '',
+        ]);
+      }
+
+      if (inrLines.length > 0) {
+        rows.push(['', '', '', '', '', '', '', '', '']);
+        for (const l of inrLines) {
+          rows.push([
+            'INR',
+            l.date ? l.date.slice(0, 10) : '',
+            l.voucherNo === 0 ? 'OB' : l.voucherNo,
             l.voucherType,
             l.particulars,
-            l.debit,
-            l.credit,
+            l.debit || '',
+            l.credit || '',
             l.balance,
             l.notes || '',
-          ]),
-        ],
-      );
+          ]);
+        }
+      }
+
+      const slugName = targetAccount.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      downloadCsv(`statement-${slugName}.csv`, headers, rows);
       return;
     }
 
@@ -650,6 +707,8 @@ export default function BooksScreen({
       ]);
     }
   }, [
+    accountId,
+    accounts,
     activeStatement,
     bundle,
     filteredAllVouchers,
@@ -657,9 +716,107 @@ export default function BooksScreen({
     filteredSettlementReport,
     filteredTrialBalance,
     filteredWarehouseSummaries,
+    inrStatement,
+    reportFilters,
     reportView,
+    statement,
     warehousePl,
   ]);
+
+  const prepareStatementExportData = useCallback(async (): Promise<StatementOfAccountExportData | null> => {
+    const targetAccount = accounts.find(a => a.id === accountId) ?? statement?.account;
+    if (!targetAccount) return null;
+
+    let inrData = inrStatement;
+    if (!inrData && inrAccountId) {
+      const res = await getInrFundStatementAction({ branchId, accountId: inrAccountId, startDate, endDate });
+      if (res.success) {
+        inrData = {
+          opening: res.data.opening,
+          closing: res.data.closing,
+          lines: res.data.lines,
+          accountName: res.data.account.name,
+        };
+      }
+    }
+
+    const filteredAedLines = statement?.lines
+      ? filterStatementLines(statement.lines, reportFilters)
+      : [];
+    const filteredInrLines = inrData?.lines
+      ? filterStatementLines(inrData.lines, reportFilters)
+      : [];
+
+    return {
+      account: targetAccount,
+      branchName: branch?.name ?? 'Himmath HQ',
+      periodLabel,
+      startDate,
+      endDate,
+      inrLedgerLinked: Boolean(inrAccountId),
+      aedStatement: statement
+        ? {
+            opening: statement.opening,
+            closing: statement.closing,
+            lines: filteredAedLines,
+          }
+        : null,
+      inrStatement: inrData
+        ? {
+            opening: inrData.opening,
+            closing: inrData.closing,
+            lines: filteredInrLines,
+            accountName: inrData.accountName,
+          }
+        : null,
+    };
+  }, [
+    accountId,
+    accounts,
+    branch?.name,
+    branchId,
+    endDate,
+    inrAccountId,
+    inrStatement,
+    periodLabel,
+    reportFilters,
+    startDate,
+    statement,
+  ]);
+
+  const handleView = useCallback(async () => {
+    if (reportView === 'statement') {
+      const exportData = await prepareStatementExportData();
+      if (!exportData) {
+        await alert({
+          title: 'Select an account',
+          message: 'Please choose an account first to view its statement of account.',
+          variant: 'info',
+        });
+        return;
+      }
+      openStatementOfAccountPreview(exportData);
+      return;
+    }
+    openReportPreviewNewTab('icf-report-print', { title: reportTitle, subtitle: exportSubtitle });
+  }, [alert, exportSubtitle, prepareStatementExportData, reportTitle, reportView]);
+
+  const handleExportPdf = useCallback(async () => {
+    if (reportView === 'statement') {
+      const exportData = await prepareStatementExportData();
+      if (!exportData) {
+        await alert({
+          title: 'Select an account',
+          message: 'Please choose an account first to export its statement of account.',
+          variant: 'info',
+        });
+        return;
+      }
+      exportStatementOfAccountPdf(exportData);
+      return;
+    }
+    exportReportPdfFromElement('icf-report-print', { title: reportTitle, subtitle: exportSubtitle });
+  }, [alert, exportSubtitle, prepareStatementExportData, reportTitle, reportView]);
 
   const headerToolbar = useMemo(
     () => (
@@ -667,14 +824,14 @@ export default function BooksScreen({
         <button
           type="button"
           className={btnSecondary}
-          onClick={() => openReportPreviewNewTab('icf-report-print', { title: reportTitle, subtitle: exportSubtitle })}
+          onClick={() => void handleView()}
         >
           View
         </button>
         <button
           type="button"
           className={btnSecondary}
-          onClick={() => exportReportPdfFromElement('icf-report-print', { title: reportTitle, subtitle: exportSubtitle })}
+          onClick={() => void handleExportPdf()}
         >
           Export PDF
         </button>
@@ -683,7 +840,7 @@ export default function BooksScreen({
         </button>
       </>
     ),
-    [exportSubtitle, handleExportCsv, reportTitle],
+    [handleExportCsv, handleExportPdf, handleView],
   );
 
   useICFundsReportHeaderToolbar(headerToolbar);
