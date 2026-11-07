@@ -16,8 +16,10 @@ import {
   formatDealTableInr,
   saleDealAed,
   saleDealInr,
+  formatSaleLineProfit,
   saleTableDisplayAed,
 } from '@/lib/icTransfer/dealTableDisplay';
+import type { SaleLineProfit } from '@/lib/icTransfer/dealProfit';
 import { formatSettlementModeLabel } from '@/lib/icTransfer/metalSettlement';
 import DealAgentHint from '@/components/ic-transfer/shared/DealAgentHint';
 import ICTransferDataTableShell, {
@@ -44,6 +46,7 @@ const SALES_COLUMNS: ICTransferTableColumn[] = [
   { id: 'Metal (g)', label: 'Metal (g)', align: 'right' },
   { id: 'Total INR', label: 'INR', align: 'right' },
   { id: 'Total AED', label: 'AED', align: 'right' },
+  { id: 'Profit', label: 'Profit', align: 'right' },
   { id: 'Actions', label: 'Actions', align: 'center', sortable: false },
 ];
 
@@ -83,6 +86,7 @@ type SalesDataTableProps = {
   branches: Branch[];
   txnBranchName?: string;
   warehouseFulfillmentEnabled?: boolean;
+  saleProfits?: Map<string, SaleLineProfit>;
 };
 
 function OutlineBadge({
@@ -142,6 +146,7 @@ export default function SalesDataTable(props: SalesDataTableProps) {
     branches,
     txnBranchName,
     warehouseFulfillmentEnabled = true,
+    saleProfits,
   } = props;
 
   const isVerificationTab = warehouseFulfillmentEnabled && tab === 'awaiting_verification';
@@ -265,6 +270,7 @@ export default function SalesDataTable(props: SalesDataTableProps) {
           branchName={branchName}
           branches={branches}
           txnBranchName={txnBranchName}
+          profit={saleProfits?.get(s.id)}
         />
       ))}
     </ICTransferDataTableShell>
@@ -284,6 +290,7 @@ function SaleRow({
   branchName,
   branches,
   txnBranchName,
+  profit,
 }: {
   sale: ICSale;
   isVerificationTab: boolean;
@@ -297,6 +304,7 @@ function SaleRow({
   branchName: string;
   branches: Branch[];
   txnBranchName?: string;
+  profit?: SaleLineProfit;
 }) {
   const customerLabel = getAdminSaleCustomerName(s, branchName, branches);
   const counterpartyId = effectiveSaleCounterpartyId(s) || s.orderCustomerId;
@@ -387,6 +395,7 @@ function SaleRow({
           {formatDealTableAed(saleTableDisplayAed(s))}
         </span>
       </td>
+      <td className={icTdClass('right')}>{formatSaleLineProfit(profit)}</td>
       <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-center gap-0.5">
           <ICTransferViewIconButton onClick={() => onView(s)} />

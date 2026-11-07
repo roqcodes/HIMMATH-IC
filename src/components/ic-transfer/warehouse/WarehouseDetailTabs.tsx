@@ -25,9 +25,11 @@ import {
   formatDealTableInr,
   purchaseDealAed,
   purchaseDealInr,
+  formatSaleLineProfit,
   saleDealInr,
   saleTableDisplayAed,
 } from '@/lib/icTransfer/dealTableDisplay';
+import { indexSaleLineProfits } from '@/lib/icTransfer/dealProfit';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import JournalVoucherDetailModal from '@/components/ic-transfer/journal/JournalVoucherDetailModal';
 import { ASICTableRowsSkeleton } from '@/components/asic/ASICTableSkeleton';
@@ -72,6 +74,7 @@ const ACTIVITY_COLUMNS: ICTransferTableColumn[] = [
   { id: 'Metal (g)', label: 'Metal (g)', align: 'right' },
   { id: 'INR', label: 'INR', align: 'right' },
   { id: 'AED', label: 'AED', align: 'right' },
+  { id: 'Profit', label: 'Profit', align: 'right' },
   { id: 'Actions', label: 'Actions', align: 'center', sortable: false },
 ];
 
@@ -138,6 +141,17 @@ export default function WarehouseDetailTabs({
   );
 
   const activity = useMemo(() => mergeWarehouseActivity(purchases, sales), [purchases, sales]);
+
+  const saleProfits = useMemo(
+    () =>
+      indexSaleLineProfits({
+        purchases: icPurchases,
+        sales: icSales,
+        range,
+        warehouseId,
+      }),
+    [icPurchases, icSales, range, warehouseId],
+  );
 
   const getSupplierName = useCallback(
     (id: string) => icSuppliers.find(s => s.id === id)?.name || '—',
@@ -280,6 +294,9 @@ export default function WarehouseDetailTabs({
           {formatDealTableAed(purchaseDealAed(p))}
         </span>
       </td>
+      <td className={icTdClass('right')}>
+        <span className="text-slate-400">—</span>
+      </td>
       <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-center gap-0.5">
           <ICTransferViewIconButton onClick={() => setViewPurchase(p)} />
@@ -347,6 +364,7 @@ export default function WarehouseDetailTabs({
           {formatDealTableAed(saleTableDisplayAed(s))}
         </span>
       </td>
+      <td className={icTdClass('right')}>{formatSaleLineProfit(saleProfits.get(s.id))}</td>
       <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-center gap-0.5">
           <ICTransferViewIconButton onClick={() => setViewSale(s)} />

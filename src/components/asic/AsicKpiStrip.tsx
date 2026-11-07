@@ -37,6 +37,14 @@ function MetricCell({ label, value, valueTitle, hint, tone = 'default' }: AsicKp
       >
         {value}
       </p>
+      {hint ? (
+        <p
+          className="mt-1 truncate text-[11px] font-medium leading-snug text-slate-500 dark:text-[var(--theme-text-muted)]"
+          title={hint}
+        >
+          {hint}
+        </p>
+      ) : null}
     </div>
   );
 }

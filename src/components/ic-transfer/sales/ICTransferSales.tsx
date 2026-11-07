@@ -30,6 +30,7 @@ import SalesKpiCards from './sales-kpi-cards';
 import ICTransferDateFilterBar from '@/components/ic-transfer/shared/ICTransferDateFilterBar';
 import SalesDataTable, { type SalesTab } from './sales-data-table';
 import { getAdminSaleCustomerName } from '@/lib/icTransfer/branchOrderOwnership';
+import { indexSaleLineProfits } from '@/lib/icTransfer/dealProfit';
 
 export default function ICTransferSales() {
   const {
@@ -44,6 +45,7 @@ export default function ICTransferSales() {
     user,
     icTransferSettings,
     updateICTransferSalesEnabled,
+    icPurchases,
   } = useApp();
   const { canWrite } = useWriteAccess();
 
@@ -133,6 +135,11 @@ export default function ICTransferSales() {
   const saleBookKpis = useMemo(
     () => computeSaleBookKpis(scopedSales, range),
     [scopedSales, range],
+  );
+
+  const saleProfits = useMemo(
+    () => indexSaleLineProfits({ purchases: icPurchases, sales: icSales, range }),
+    [icPurchases, icSales, range],
   );
 
   const saleCountHint = useMemo(() => {
@@ -246,6 +253,9 @@ export default function ICTransferSales() {
       } else if (sortField === 'Total AED') {
         valA = saleTableDisplayAed(a);
         valB = saleTableDisplayAed(b);
+      } else if (sortField === 'Profit') {
+        valA = saleProfits.get(a.id)?.amount ?? 0;
+        valB = saleProfits.get(b.id)?.amount ?? 0;
       } else if (sortField === 'Metal (g)') {
         valA = Number(a.metalWeightG || 0);
         valB = Number(b.metalWeightG || 0);
@@ -274,7 +284,7 @@ export default function ICTransferSales() {
       return new Date(b.createdAt || '').getTime() - new Date(a.createdAt || '').getTime();
     });
     return sorted;
-  }, [filteredSales, sortField, sortOrder, branchName, branches, tab, getWarehouseName]);
+  }, [filteredSales, sortField, sortOrder, branchName, branches, tab, getWarehouseName, saleProfits, warehouseFulfillmentEnabled]);
 
   useEffect(() => {
     if (!viewModalOpen || !selectedSale) return;
@@ -399,6 +409,7 @@ export default function ICTransferSales() {
         branches={branches}
         txnBranchName={txnBranchName}
         warehouseFulfillmentEnabled={warehouseFulfillmentEnabled}
+        saleProfits={saleProfits}
         />
       </div>
 

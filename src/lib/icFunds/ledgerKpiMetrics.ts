@@ -98,7 +98,7 @@ export function buildDealFlowBookMetrics(params: {
 }): AsicKpiMetric[] {
   const { book, rangeLabel, currency, flow, countHint } = params;
   const dash = '—';
-  const suffix = countHint ? ` · ${countHint}` : '';
+  const rangeWithCount = countHint ? `${rangeLabel} · ${countHint}` : rangeLabel;
   const fmtPlain = currency === 'INR' ? fmtLedgerInr : fmtLedgerAed;
   const amountNode = currency === 'INR' ? ledgerInrNode : ledgerAedNode;
 
@@ -111,20 +111,20 @@ export function buildDealFlowBookMetrics(params: {
         value: fmtSignedLedgerValue(currency, book.opening),
         valueTitle: fmtSignedLedgerAmount(fmtPlain, book.opening),
         hint: inrStock
-          ? `Unsold metal at cost before period${suffix}`
-          : `Net purchased before period${suffix}`,
+          ? `Unsold metal at cost before period${countHint ? ` · ${countHint}` : ''}`
+          : `Net purchased before period${countHint ? ` · ${countHint}` : ''}`,
       },
       {
         label: `${currency} period Dr`,
         value: book.periodDebit > 0.005 ? amountNode(book.periodDebit) : dash,
         valueTitle: book.periodDebit > 0.005 ? fmtPlain(book.periodDebit) : undefined,
-        hint: `Purchases · ${rangeLabel}`,
+        hint: `Purchases · ${rangeWithCount}`,
       },
       {
         label: `${currency} period Cr`,
         value: book.periodCredit > 0.005 ? amountNode(book.periodCredit) : dash,
         valueTitle: book.periodCredit > 0.005 ? fmtPlain(book.periodCredit) : undefined,
-        hint: `Sales · ${rangeLabel}`,
+        hint: `Sales · ${rangeWithCount}`,
         tone: book.periodCredit > 0.005 ? 'amber' : 'slate',
       },
       {
@@ -148,19 +148,19 @@ export function buildDealFlowBookMetrics(params: {
       label: `${currency} opening`,
       value: fmtSignedLedgerValue(currency, book.opening),
       valueTitle: fmtSignedLedgerAmount(fmtPlain, book.opening),
-      hint: `${cumulativeFlowHint(flow, book.opening)}${suffix}`,
+      hint: cumulativeFlowHint(flow, book.opening),
     },
     {
       label: `${currency} period Dr`,
       value: periodDr > 0.005 ? amountNode(periodDr) : dash,
       valueTitle: periodDr > 0.005 ? fmtPlain(periodDr) : undefined,
-      hint: flow === 'purchase' ? rangeLabel : '—',
+      hint: flow === 'purchase' ? rangeWithCount : '—',
     },
     {
       label: `${currency} period Cr`,
       value: periodCr > 0.005 ? amountNode(periodCr) : dash,
       valueTitle: periodCr > 0.005 ? fmtPlain(periodCr) : undefined,
-      hint: flow === 'sale' ? rangeLabel : '—',
+      hint: flow === 'sale' ? rangeWithCount : '—',
       tone: periodCr > 0.005 ? 'amber' : 'slate',
     },
     {

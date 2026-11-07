@@ -63,8 +63,11 @@ function KpiCell({
           {value}
         </div>
         {count !== undefined && (
-          <span className="text-[11px] font-medium text-slate-400">
-            ({count})
+          <span
+            className="shrink-0 rounded-md border border-slate-200/90 bg-slate-100/80 px-1.5 py-px text-xs font-semibold tabular-nums text-slate-600 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300"
+            title={`${count.toLocaleString()} in range`}
+          >
+            {count.toLocaleString()}
           </span>
         )}
       </div>

@@ -7,6 +7,7 @@ import { netMetalInr } from '@/lib/icTransfer/labTest';
 import { computeMetalAedFromInr, resolvePurchaseInrDisplay, resolveSaleInrDisplay } from '@/lib/icTransfer/metalSettlement';
 import { computeIcCashAedTotal } from '@/lib/icTransfer/rateCalculations';
 import type { ICPurchase, ICSale } from '@/types';
+import type { SaleLineProfit } from '@/lib/icTransfer/dealProfit';
 
 export function purchaseDealInr(
   p: Pick<ICPurchase, 'settlementMode' | 'inrTotal' | 'units' | 'labTotalInr'>,
@@ -61,6 +62,14 @@ export function saleTableDisplayAed(s: ICSale): number {
 export function formatDealTableAed(amount: number): React.ReactNode {
   if (Math.abs(Number(amount) || 0) < 0.005) return '—';
   return React.createElement(CurrencyAmount, { currency: 'AED', amount });
+}
+
+export function formatSaleLineProfit(line: SaleLineProfit | undefined): React.ReactNode {
+  if (!line || !Number.isFinite(line.amount) || Math.abs(line.amount) < 0.005) return '—';
+  const amountNode =
+    line.currency === 'AED' ? formatDealTableAed(line.amount) : formatDealTableInr(line.amount);
+  const tone = line.amount < 0 ? 'text-red-600' : 'text-emerald-700';
+  return React.createElement('span', { className: `font-mono font-medium tabular-nums ${tone}` }, amountNode);
 }
 
 /** Plain strings for titles / exports. */

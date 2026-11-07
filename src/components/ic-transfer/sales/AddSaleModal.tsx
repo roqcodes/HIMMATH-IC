@@ -73,6 +73,7 @@ import { invalidateICTransferModalSnapshotCache } from '@/lib/icTransfer/useICTr
 import ICTransferBreakdownPanel, {
   type ICTransferBreakdownItem,
 } from '../shared/ICTransferBreakdownPanel';
+import PartyLedgerStrip from '../shared/PartyLedgerStrip';
 import ICTransferFormField from '../shared/ICTransferFormField';
 import { FmtLedgerAed, FmtLedgerInr } from '@/lib/icFunds/format';
 import {
@@ -1172,6 +1173,15 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
 
           <ICTransferBreakdownPanel
             heading="Price breakdown"
+            ledger={
+              counterpartyId ? (
+                <PartyLedgerStrip
+                  counterpartyId={counterpartyId}
+                  partyLabel={selectedCounterparty?.name || customerName}
+                  book={isMetal ? 'INR' : 'AED'}
+                />
+              ) : undefined
+            }
             items={breakdownItems}
             metalG={kpiMetalG}
             inrAmount={kpiInr}

@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { computeMetalSheetRateAed } from '@/lib/icTransfer/metalSettlement';
-import { computeDealProfit, remainingIcStockWac } from './dealProfit';
+import { computeDealProfit, indexSaleLineProfits, remainingIcStockWac } from './dealProfit';
 import type { ICPurchase, ICSale } from '@/types';
 
 describe('dealProfit', () => {
@@ -70,6 +70,12 @@ describe('dealProfit', () => {
     assert.equal(slice.metalProfitAed, 0);
     assert.ok(Math.abs(slice.metalProfitInr - 9_994.2) < 1);
     assert.equal(slice.metalSaleCount, 1);
+
+    const bySale = indexSaleLineProfits({ purchases, sales, range: { startDate: '2026-01-01', endDate: '2026-01-31' } });
+    assert.equal(bySale.get('s-cash')?.currency, 'AED');
+    assert.equal(bySale.get('s-cash')?.amount, 60);
+    assert.equal(bySale.get('s-metal')?.currency, 'INR');
+    assert.ok(Math.abs((bySale.get('s-metal')?.amount ?? 0) - 9_994.2) < 1);
   });
 
   it('puts metal INR sale units into IC stock', () => {

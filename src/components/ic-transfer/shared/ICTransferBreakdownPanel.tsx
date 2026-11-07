@@ -24,6 +24,7 @@ function SectionEyebrow({ children }: { children: React.ReactNode }) {
 
 type Props = {
   heading: string;
+  ledger?: React.ReactNode;
   items: ICTransferBreakdownItem[];
   metalG: number;
   inrAmount: number;
@@ -41,6 +42,7 @@ type Props = {
 
 export default function ICTransferBreakdownPanel({
   heading,
+  ledger,
   items,
   metalG,
   inrAmount,
@@ -57,6 +59,7 @@ export default function ICTransferBreakdownPanel({
 }: Props) {
   return (
     <aside className="flex min-h-0 flex-col gap-2 lg:col-span-4 lg:border-l lg:border-slate-200 lg:pl-4">
+      {ledger}
       <SectionEyebrow>{heading}</SectionEyebrow>
       <SmoothModeSwap mode={swapKey} className="min-h-0 flex-1 flex-col">
         <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-slate-200 bg-slate-50/50">

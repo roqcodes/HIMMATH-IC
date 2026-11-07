@@ -48,6 +48,7 @@ import {
 import { PURCHASE_COUNTERPARTY_FIELD_LABEL } from '@/lib/counterparties/labels';
 import { effectivePurchaseCounterpartyId } from '@/lib/counterparties/effectiveId';
 import { emptyLabFields, applyLabFieldChange, labFieldsFromRecord, netMetalInr } from '@/lib/icTransfer/labTest';
+import PartyLedgerStrip from '../shared/PartyLedgerStrip';
 import type { LabTestFieldKey } from '@/lib/icTransfer/labTest';
 import { FmtLedgerAed, FmtLedgerInr } from '@/lib/icFunds/format';
 import {
@@ -117,6 +118,7 @@ type BreakdownItem = {
 
 function PurchaseBreakdownPanel({
   heading,
+  ledger,
   items,
   metalG,
   inrAmount,
@@ -128,6 +130,7 @@ function PurchaseBreakdownPanel({
   notesDisabled,
 }: {
   heading: string;
+  ledger?: React.ReactNode;
   items: BreakdownItem[];
   metalG: number;
   inrAmount: number;
@@ -140,6 +143,7 @@ function PurchaseBreakdownPanel({
 }) {
   return (
     <aside className="flex min-h-0 flex-col gap-2 lg:col-span-4 lg:border-l lg:border-slate-200 lg:pl-4">
+      {ledger}
       <SectionEyebrow>{heading}</SectionEyebrow>
       <SmoothModeSwap mode={swapKey} className="min-h-0 flex-1 flex-col">
         <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-slate-200 bg-slate-50/50">
@@ -310,6 +314,10 @@ export default function AddPurchaseModal({
   const isMetal = settlementMode === 'metal';
   const lockMode = Boolean(initialData?.id);
   const metalAed = metalPayment === 'AED';
+  const selectedSupplier = useMemo(
+    () => supplierOptions.find(s => s.id === supplierId) ?? null,
+    [supplierOptions, supplierId],
+  );
 
   const selectedPurchases = icPurchases.filter(p => {
     if (effectivePurchaseCounterpartyId(p) !== supplierId) return false;
@@ -932,6 +940,15 @@ export default function AddPurchaseModal({
 
           <PurchaseBreakdownPanel
             heading="Price breakdown"
+            ledger={
+              supplierId ? (
+                <PartyLedgerStrip
+                  counterpartyId={supplierId}
+                  partyLabel={selectedSupplier?.name}
+                  book={isMetal ? 'INR' : 'AED'}
+                />
+              ) : undefined
+            }
             items={breakdownItems}
             metalG={kpiMetalG}
             inrAmount={kpiInr}

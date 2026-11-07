@@ -210,6 +210,86 @@ export function sumDealProfit(slices: DealProfitSlice[]): DealProfitSlice {
   );
 }
 
+export type SaleLineProfit = {
+  currency: 'AED' | 'INR';
+  amount: number;
+};
+
+/** Per-sale IC WAC profit (AED) or metal lot profit (INR). Same engine as warehouse KPIs. */
+export function indexSaleLineProfits(options: {
+  purchases: ICPurchase[];
+  sales: ICSale[];
+  range?: DateFilterRange;
+  warehouseId?: string;
+}): Map<string, SaleLineProfit> {
+  const range = options.range ?? {};
+  const scopedPurchases = options.warehouseId
+    ? options.purchases.filter(p => p.warehouseId === options.warehouseId)
+    : options.purchases;
+  const scopedSales = options.warehouseId
+    ? options.sales.filter(s => s.warehouseId === options.warehouseId)
+    : options.sales;
+
+  const warehouseIds = new Set<string>();
+  for (const p of scopedPurchases) {
+    if (p.warehouseId) warehouseIds.add(p.warehouseId);
+  }
+  for (const s of scopedSales) {
+    if (s.warehouseId) warehouseIds.add(s.warehouseId);
+  }
+
+  const out = new Map<string, SaleLineProfit>();
+  for (const id of warehouseIds) {
+    for (const [saleId, line] of indexOneWarehouseSaleProfits(id, scopedPurchases, scopedSales, range)) {
+      out.set(saleId, line);
+    }
+  }
+  return out;
+}
+
+function indexOneWarehouseSaleProfits(
+  warehouseId: string,
+  purchases: ICPurchase[],
+  sales: ICSale[],
+  range: DateFilterRange,
+): Map<string, SaleLineProfit> {
+  const out = new Map<string, SaleLineProfit>();
+  const whPurchases = purchases.filter(p => p.warehouseId === warehouseId);
+  const whSales = sales.filter(s => s.warehouseId === warehouseId && isDealSaleActive(s));
+  const through = (iso: string | undefined) => throughEnd(iso, range);
+  const events = buildIcStockInventoryEvents(whPurchases, whSales, through);
+  const { saleMargins } = simulateWarehouseInventory(events);
+
+  for (const s of whSales) {
+    if (isMetal(s.settlementMode)) continue;
+    if (!inRange(s.createdAt, range)) continue;
+    const margin = saleMargins.get(s.id);
+    if (!margin) continue;
+    out.set(s.id, { currency: 'AED', amount: round2(margin.grossProfit) });
+  }
+
+  const lots = new Map(whPurchases.filter(p => isMetal(p.settlementMode)).map(p => [p.id, p]));
+  for (const s of whSales) {
+    if (!isMetal(s.settlementMode)) continue;
+    if (String(s.orderStatus || '') !== 'completed') continue;
+    const saleIso = s.statusUpdatedAt || s.createdAt;
+    if (!inRange(saleIso, range)) continue;
+    const lot = s.metalPurchaseId ? lots.get(s.metalPurchaseId) : undefined;
+    const saleG = Number(s.metalWeightG) || 0;
+    const pl = computeMetalLotProfit({
+      paymentMethod: s.metalPaymentMethod,
+      purchasePaymentMethod: lot?.metalPaymentMethod ?? s.metalPaymentMethod,
+      weightG: saleG,
+      purchaseInr: allocateMetalLotCostInr(lot, saleG),
+      purchaseAed: allocateMetalLotCostAed(lot, saleG),
+      saleInr: resolveSaleInrDisplay(s),
+      saleAed: Number(s.aedAmount) || 0,
+    });
+    out.set(s.id, { currency: 'INR', amount: round2(Number(pl.profitInr) || 0) });
+  }
+  return out;
+}
+
 export function computeDealProfit(options: {
   purchases: ICPurchase[];
   sales: ICSale[];
