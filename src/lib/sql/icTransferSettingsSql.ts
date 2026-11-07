@@ -1,3 +1,7 @@
+/**
+ * Reference DDL only. Do not execute on the request path.
+ * Schema source of truth: supabase/migrations + src/data/schema.sql
+ */
 export const SQL_ENSURE_IC_TRANSFER_SETTINGS = `
 CREATE TABLE IF NOT EXISTS ic_transfer_settings (
   id VARCHAR(20) PRIMARY KEY DEFAULT 'global',

@@ -1,4 +1,7 @@
-/** Idempotent DDL for IC Funds. Keep in sync with src/data/schema.sql */
+/**
+ * Reference DDL only. Do not execute on the request path.
+ * Schema source of truth: supabase/migrations + src/data/schema.sql
+ */
 
 export const SQL_ENSURE_IC_FUNDS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS ic_fund_accounts (
