@@ -64,6 +64,7 @@ export const postICFundVoucherSchema = z.object({
   amount: positiveFormAmountSchema,
   notes: z.string().max(2000).optional().default(''),
   book: z.enum(['AED', 'INR']).optional().default('AED'),
+  idempotencyKey: z.string().min(8).max(80).optional(),
 });
 
 export const icFundsDateRangeSchema = z.object({

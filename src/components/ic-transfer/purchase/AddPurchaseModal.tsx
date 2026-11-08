@@ -619,7 +619,7 @@ export default function AddPurchaseModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canSubmit) return;
+    if (!canSubmit || isSubmitting) return;
     setIsSubmitting(true);
 
     const locationId = warehouseId
@@ -659,13 +659,12 @@ export default function AddPurchaseModal({
           aedTotal: amounts.aedNetTotal,
         };
 
-    if (initialData) {
-      await updateICPurchase(initialData.id, payload);
-    } else {
-      await addICPurchase(payload);
-    }
+    const ok = initialData
+      ? await updateICPurchase(initialData.id, payload)
+      : await addICPurchase(payload);
 
     setIsSubmitting(false);
+    if (!ok) return;
     onClose();
   };
 

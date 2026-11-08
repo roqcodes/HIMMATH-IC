@@ -251,28 +251,41 @@ export async function postInrVoucherInTx(
   const voucherNo = Number(counter.rows[0]?.last_no) || 1;
   const id = `INFV-${crypto.randomUUID().slice(0, 10).toUpperCase()}`;
 
-  await client.query(
-    `INSERT INTO inr_fund_vouchers (
-       id, branch_id, voucher_no, voucher_type, voucher_date,
-       debit_account_id, credit_account_id, amount, notes,
-       created_by_name, reference_type, reference_id, status
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'active')`,
-    [
-      id,
-      params.branchId,
-      voucherNo,
-      voucherType,
-      params.voucherDate,
-      params.debitAccountId,
-      params.creditAccountId,
-      amount,
-      params.notes,
-      params.createdByName ?? SYNC_ACTOR,
-      params.referenceType ?? null,
-      params.referenceId ?? null,
-    ],
-  );
-  return id;
+  try {
+    await client.query(
+      `INSERT INTO inr_fund_vouchers (
+         id, branch_id, voucher_no, voucher_type, voucher_date,
+         debit_account_id, credit_account_id, amount, notes,
+         created_by_name, reference_type, reference_id, status
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'active')`,
+      [
+        id,
+        params.branchId,
+        voucherNo,
+        voucherType,
+        params.voucherDate,
+        params.debitAccountId,
+        params.creditAccountId,
+        amount,
+        params.notes,
+        params.createdByName ?? SYNC_ACTOR,
+        params.referenceType ?? null,
+        params.referenceId ?? null,
+      ],
+    );
+    return id;
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code !== '23505' || !params.referenceType || !params.referenceId) throw err;
+    const again = await client.query(
+      `SELECT id FROM inr_fund_vouchers
+       WHERE branch_id = $1 AND reference_type = $2 AND reference_id = $3 AND status = 'active'
+       LIMIT 1`,
+      [params.branchId, params.referenceType, params.referenceId],
+    );
+    if (again.rows.length > 0) return String(again.rows[0].id);
+    throw err;
+  }
 }
 
 export async function postInrJournalInTx(

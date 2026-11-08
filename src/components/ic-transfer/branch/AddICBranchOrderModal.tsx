@@ -240,16 +240,18 @@ export default function AddICBranchOrderModal({ open, onClose, initialData }: Pr
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (submitDisabled) return;
+    if (submitDisabled || isSubmitting) return;
     setIsSubmitting(true);
 
+    let ok = false;
     if (initialData && isEditMode) {
-      await resubmitICSale(initialData.id, contentPayload, currentSlug);
+      ok = await resubmitICSale(initialData.id, contentPayload, currentSlug);
     } else if (!initialData) {
-      await addICSale(payload);
+      ok = await addICSale(payload);
     }
 
     setIsSubmitting(false);
+    if (!ok) return;
     onClose();
   };
 

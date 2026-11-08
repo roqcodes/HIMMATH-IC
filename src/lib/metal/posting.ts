@@ -184,7 +184,9 @@ export async function syncMetalPurchaseLedgers(
   for (const line of lines) {
     const debitAccountId = roleId(line.debit);
     const creditAccountId = roleId(line.credit);
-    if (!debitAccountId || !creditAccountId) continue;
+    if (!debitAccountId || !creditAccountId) {
+      throw new Error(`Metal journal missing account for ${line.label} (${line.debit} → ${line.credit})`);
+    }
     const notes = `${line.label} ${purchaseId.slice(0, 8)}`;
     if (line.book === 'AED') {
       await postVoucherInTx(client, {
@@ -421,7 +423,9 @@ export async function syncMetalSaleLedgers(
   for (const line of lines) {
     const debitAccountId = roleId(line.debit);
     const creditAccountId = roleId(line.credit);
-    if (!debitAccountId || !creditAccountId) continue;
+    if (!debitAccountId || !creditAccountId) {
+      throw new Error(`Metal journal missing account for ${line.label} (${line.debit} → ${line.credit})`);
+    }
     const notes = `${line.label} ${saleId.slice(0, 8)}`;
     if (line.book === 'AED') {
       await postVoucherInTx(client, {

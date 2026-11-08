@@ -18,6 +18,9 @@ export const CAPITAL_REF_PAYOUT = 'capital_payout';
 
 /** System references that must not trigger capital allocation on manual vouchers. */
 export const CAPITAL_SKIP_ALLOCATION_REFERENCE_TYPES = new Set([
+  'ic_fund_journal',
+  'ic_fund_payment',
+  'ic_fund_receipt',
   'ic_sale_cogs',
   'ic_purchase_cost',
   'metal_cost',

@@ -94,6 +94,44 @@ function inrSumCreditSql(branchParam: string, dateClause: string): string {
  * Extra SELECT columns on ic_fund_accounts alias `a`.
  * $1 = branchId; optional $2 startDate; optional $3 endDate (see fetchAccountsWithPeriodBalances).
  */
+/** Period ledger columns via one voucher scan (branch-scoped CTE) — faster than correlated subqueries per account. */
+export function accountPeriodLedgerSqlWithAgg(
+  branchParam: string,
+  startParam: string,
+  endParam: string,
+  pendingBalanceExpr: string,
+): string {
+  const active = `COALESCE(v.status, 'active') = 'active'`;
+  return `WITH voucher_lines AS (
+      SELECT v.debit_account_id AS account_id, v.amount AS amt, v.voucher_date, 'D'::text AS side
+      FROM ic_fund_vouchers v
+      WHERE ${active} AND v.branch_id = ${branchParam}
+      UNION ALL
+      SELECT v.credit_account_id, v.amount, v.voucher_date, 'C'::text
+      FROM ic_fund_vouchers v
+      WHERE ${active} AND v.branch_id = ${branchParam}
+    ),
+    mov_agg AS (
+      SELECT account_id,
+        COALESCE(SUM(amt) FILTER (WHERE side = 'D' AND voucher_date < ${startParam}::date), 0)
+          - COALESCE(SUM(amt) FILTER (WHERE side = 'C' AND voucher_date < ${startParam}::date), 0) AS open_mov,
+        COALESCE(SUM(amt) FILTER (WHERE side = 'D' AND voucher_date >= ${startParam}::date AND voucher_date <= ${endParam}::date), 0) AS period_dr,
+        COALESCE(SUM(amt) FILTER (WHERE side = 'C' AND voucher_date >= ${startParam}::date AND voucher_date <= ${endParam}::date), 0) AS period_cr,
+        COALESCE(SUM(amt) FILTER (WHERE side = 'D' AND voucher_date <= ${endParam}::date), 0)
+          - COALESCE(SUM(amt) FILTER (WHERE side = 'C' AND voucher_date <= ${endParam}::date), 0) AS through_mov
+      FROM voucher_lines
+      GROUP BY account_id
+    )
+    SELECT a.id, a.name, a.account_type,
+      (a.opening_balance + COALESCE(m.open_mov, 0)) AS period_opening,
+      COALESCE(m.period_dr, 0) AS period_debit,
+      COALESCE(m.period_cr, 0) AS period_credit,
+      (a.opening_balance + COALESCE(m.through_mov, 0)) AS closing_balance,
+      ${pendingBalanceExpr} AS pending_balance
+    FROM ic_fund_accounts a
+    LEFT JOIN mov_agg m ON m.account_id = a.id`;
+}
+
 export function accountPeriodBalanceSelectSql(opts: {
   branchParam: string;
   startParam: string | null;

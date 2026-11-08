@@ -981,6 +981,13 @@ export async function dbAddICPurchaseAction(
     if (warehouseCheck) return { success: false, error: warehouseCheck.error };
     const supplierCheck = await assertBranchManagerPurchaseSupplier(parsed.counterpartyId, branchSlug);
     if (supplierCheck) return { success: false, error: supplierCheck.error };
+    if (
+      normalized.settlementMode === 'metal' &&
+      normalized.metalPaymentMethod === 'AED' &&
+      !String(normalized.aedAgentId ?? '').trim()
+    ) {
+      return { success: false, error: 'Select an AED agent for metal purchases paid in AED.' };
+    }
 
     const row = await withTransaction(async (client) => {
       const party = await loadCounterpartyLink(client, String(parsed.counterpartyId));
@@ -1351,7 +1358,7 @@ export async function dbAddICSaleAction(
                  AND s.id <> $2::uuid
                  ${sqlExcludeVoidIcSales('s')}
              ), 0) AS remaining_g
-           FROM ic_purchases p WHERE p.id = $1 LIMIT 1`,
+           FROM ic_purchases p WHERE p.id = $1 LIMIT 1 FOR UPDATE OF p`,
           [lotId, newSaleId],
         );
         if (lotRes.rows.length === 0) throw new Error('Metal purchase not found.');
@@ -1450,6 +1457,13 @@ export async function dbUpdateICPurchaseAction(
     };
 
     const normalized = resolveNormalizedPurchase(mergedForm, existingRow.settlement_mode);
+    if (
+      normalized.settlementMode === 'metal' &&
+      normalized.metalPaymentMethod === 'AED' &&
+      !String(normalized.aedAgentId ?? '').trim()
+    ) {
+      return { success: false, error: 'Select an AED agent for metal purchases paid in AED.' };
+    }
 
     const dbUpdates: Record<string, unknown> = {
       ...parsedUpdates,

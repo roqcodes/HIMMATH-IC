@@ -1,12 +1,23 @@
 /** Company / ledger base currency — all IC Funds voucher amounts are stored in this unit. */
 export const IC_FUNDS_BASE_CURRENCY = 'AED';
 
-/** Full precision for ledger math (UI shows up to 4 decimals). */
-export const LEDGER_DECIMAL_PLACES = 14;
+/** Stored / computed money precision (AED, INR ledger amounts). */
+export const LEDGER_MONEY_DECIMAL_PLACES = 4;
+
+/** FX / rate fields may use higher precision. */
+export const LEDGER_RATE_DECIMAL_PLACES = 14;
+
+/** @deprecated use LEDGER_MONEY_DECIMAL_PLACES */
+export const LEDGER_DECIMAL_PLACES = LEDGER_MONEY_DECIMAL_PLACES;
 
 export function roundLedgerAmount(value: number): number {
   if (!Number.isFinite(value)) return 0;
-  return Number(value.toFixed(LEDGER_DECIMAL_PLACES));
+  return Number(value.toFixed(LEDGER_MONEY_DECIMAL_PLACES));
+}
+
+export function roundLedgerRate(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Number(value.toFixed(LEDGER_RATE_DECIMAL_PLACES));
 }
 
 export type AccountCurrencyRow = {

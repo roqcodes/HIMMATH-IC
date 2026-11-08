@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS public.ic_counterparties (
     locality VARCHAR(255),
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
     balance NUMERIC(15, 2) NOT NULL DEFAULT 0,
-    opening_aed NUMERIC(15, 2) NOT NULL DEFAULT 0,
+    opening_aed NUMERIC(15, 4) NOT NULL DEFAULT 0,
     opening_inr NUMERIC(28, 14) NOT NULL DEFAULT 0,
     roles TEXT[] NOT NULL DEFAULT ARRAY['supplier', 'party']::TEXT[],
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS public.ic_warehouses (
     current_metal_g NUMERIC(15, 4) NOT NULL DEFAULT 0,
     opening_stock NUMERIC(15, 4) NOT NULL DEFAULT 0,
     opening_metal_g NUMERIC(15, 4) NOT NULL DEFAULT 0,
-    opening_aed NUMERIC(15, 2) NOT NULL DEFAULT 0,
+    opening_aed NUMERIC(15, 4) NOT NULL DEFAULT 0,
     opening_inr NUMERIC(28, 14) NOT NULL DEFAULT 0,
     send_delivery_proof_to_customer BOOLEAN NOT NULL DEFAULT true,
     branch_id VARCHAR(50) REFERENCES public.branches(id) ON DELETE CASCADE,
@@ -274,7 +274,7 @@ CREATE TABLE IF NOT EXISTS public.ic_fund_accounts (
     name VARCHAR(255) NOT NULL,
     account_type VARCHAR(20) NOT NULL CHECK (account_type IN ('bank', 'personal', 'income', 'profit', 'expense', 'd_expense', 'capital')),
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
-    opening_balance DECIMAL(15, 2) NOT NULL DEFAULT 0,
+    opening_balance NUMERIC(15, 4) NOT NULL DEFAULT 0,
     notes TEXT NOT NULL DEFAULT '',
     phone VARCHAR(50),
     source_type VARCHAR(30),
@@ -342,6 +342,11 @@ CREATE INDEX IF NOT EXISTS idx_ic_fund_vouchers_branch_status_credit
   ON public.ic_fund_vouchers (branch_id, status, credit_account_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_fund_vouchers_idempotency
     ON public.ic_fund_vouchers (idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_fund_vouchers_active_ref
+  ON public.ic_fund_vouchers (branch_id, reference_type, reference_id)
+  WHERE status IN ('active', 'pending')
+    AND reference_type IS NOT NULL
+    AND reference_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS public.audit_log (
     id BIGSERIAL PRIMARY KEY,
@@ -455,6 +460,15 @@ CREATE TABLE IF NOT EXISTS public.inr_fund_vouchers (
     reference_id VARCHAR(50),
     CONSTRAINT inr_fund_voucher_distinct_accounts CHECK (debit_account_id <> credit_account_id)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_inr_fund_vouchers_active_ref
+  ON public.inr_fund_vouchers (branch_id, reference_type, reference_id)
+  WHERE status = 'active'
+    AND reference_type IS NOT NULL
+    AND reference_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_inr_fund_vouchers_branch_status_debit
+  ON public.inr_fund_vouchers (branch_id, status, debit_account_id);
+CREATE INDEX IF NOT EXISTS idx_inr_fund_vouchers_branch_status_credit
+  ON public.inr_fund_vouchers (branch_id, status, credit_account_id);
 
 CREATE TABLE IF NOT EXISTS public.ic_capital_settings (
     id VARCHAR(20) PRIMARY KEY DEFAULT 'hq',
@@ -522,6 +536,9 @@ CREATE TABLE IF NOT EXISTS public.ic_capital_allocations (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_capital_alloc_voucher_investor
   ON public.ic_capital_allocations (source_voucher_id, source_book, investor_id, kind)
+  WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_ic_capital_alloc_branch_investor
+  ON public.ic_capital_allocations (branch_id, investor_id)
   WHERE status = 'active';
 
 -- ── RLS (after tables exist) ─────────────────────────────────────────

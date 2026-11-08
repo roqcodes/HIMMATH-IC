@@ -10,6 +10,7 @@ import { usePathname } from 'next/navigation';
 import { getSessionSlugFromPath, isAdminAsicPath, isAsicPortalPath } from '@/lib/asic/routing';
 import { ASICAppShellSkeleton } from '@/components/asic/ASICTableSkeleton';
 import { DealInvoiceProvider } from '@/components/ic-transfer/invoice/DealInvoiceContext';
+import OfflineBanner from '@/components/layout/OfflineBanner';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isInitialLoading, toasts } = useApp();
@@ -34,6 +35,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <div className="flex min-h-dvh bg-slate-50/50 dark:bg-[var(--theme-canvas)]">
         <BranchPageGuard />
         <div className="flex min-w-0 flex-1 flex-col">
+          <OfflineBanner />
           <div className={`sticky top-0 z-50 shrink-0 ${adminAsic ? 'md:hidden' : ''}`}>
             <Topbar />
             {!asic && <PortalSubNav />}

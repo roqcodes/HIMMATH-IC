@@ -19,17 +19,49 @@ import { useApp } from '@/context/AppContext';
 import { useWriteAccess } from '@/context/RbacWriteContext';
 import { ASICKPISkeleton, ASICTableSkeleton } from '@/components/asic/ASICTableSkeleton';
 import type { AsicKpiMetric } from '@/components/asic/AsicKpiStrip';
+import type { CapitalDashboard } from '@/lib/capital/position';
 
 type TabId = 'investors' | 'movements' | 'allocations';
+
+type CapitalDashData = CapitalDashboard & {
+  settings: {
+    openingAed: number;
+    openingInr: number;
+    openingInrPerAed: number;
+    managementInvestorId: string | null;
+  };
+};
 
 export default function CapitalScreen() {
   const { showToast } = useApp();
   const { canWrite, buttonProps } = useWriteAccess();
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<TabId>('investors');
-  const [data, setData] = useState<Awaited<ReturnType<typeof getCapitalDashboardAction>> extends { success: true; data: infer D } ? D : null>(null);
-  const [movements, setMovements] = useState<Awaited<ReturnType<typeof listCapitalMovementsAction>> extends { success: true; data: infer M } ? M : []>([]);
-  const [allocations, setAllocations] = useState<Awaited<ReturnType<typeof listCapitalAllocationsAction>> extends { success: true; data: infer A } ? A : []>([]);
+  const [data, setData] = useState<CapitalDashData | null>(null);
+  type CapitalMovementRow = {
+    id: string;
+    investorName: string;
+    movementType: string;
+    book: string;
+    lotDate: string;
+    amountNative: number;
+    inrPerAed: number;
+    aedEq: number;
+    notes: string;
+  };
+  type CapitalAllocationRow = {
+    id: string;
+    voucherDate: string;
+    sourceVoucherId: string;
+    book: string;
+    investorName: string;
+    kind: string;
+    eventAmount: number;
+    allocatedAmount: number;
+    shareBps: number;
+  };
+  const [movements, setMovements] = useState<CapitalMovementRow[]>([]);
+  const [allocations, setAllocations] = useState<CapitalAllocationRow[]>([]);
   const [banksAed, setBanksAed] = useState<Array<{ id: string; name: string }>>([]);
   const [banksInr, setBanksInr] = useState<Array<{ id: string; name: string }>>([]);
 
@@ -345,7 +377,7 @@ function CapitalModal({
   disabled,
 }: {
   kind: 'investor' | 'opening' | 'management' | 'deposit' | 'withdraw' | 'payout';
-  data: NonNullable<Awaited<ReturnType<typeof getCapitalDashboardAction>> extends { success: true; data: infer D } ? D : never>;
+  data: CapitalDashData;
   banksAed: Array<{ id: string; name: string }>;
   banksInr: Array<{ id: string; name: string }>;
   defaultDate: string;

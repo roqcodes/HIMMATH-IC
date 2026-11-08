@@ -785,7 +785,7 @@ export function computeAccountDetailKpis(
           label: 'Capital balance',
           value: fmtAmount(balance),
           hint: 'Investor equity (credit)',
-          tone: 'violet',
+          tone: 'indigo',
         },
       ];
     case 'profit':

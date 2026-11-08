@@ -113,7 +113,7 @@ export async function applyAedAccountOpening(
   accountId: string,
   openingBalance: number,
 ): Promise<void> {
-  const next = Number(Number(openingBalance).toFixed(2));
+  const next = roundLedgerAmount(Number(openingBalance) || 0);
   const current = await client.query(
     `SELECT opening_balance FROM ic_fund_accounts WHERE id = $1 LIMIT 1`,
     [accountId],
@@ -873,29 +873,44 @@ export async function postVoucherInTx(
   const voucherNo = Number(counter.rows[0]?.last_no) || 1;
   const id = `ICFV-${crypto.randomUUID().slice(0, 10).toUpperCase()}`;
 
-  await client.query(
-    `INSERT INTO ic_fund_vouchers (
-       id, branch_id, voucher_no, voucher_type, voucher_date,
-       debit_account_id, credit_account_id, amount, notes,
-       created_by_name, reference_type, reference_id, status
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-    [
-      id,
-      params.branchId,
-      voucherNo,
-      params.voucherType,
-      params.voucherDate,
-      params.debitAccountId,
-      params.creditAccountId,
-      amount,
-      params.notes,
-      SYNC_ACTOR,
-      params.referenceType,
-      params.referenceId,
-      voucherStatus,
-    ],
-  );
-  return id;
+  try {
+    await client.query(
+      `INSERT INTO ic_fund_vouchers (
+         id, branch_id, voucher_no, voucher_type, voucher_date,
+         debit_account_id, credit_account_id, amount, notes,
+         created_by_name, reference_type, reference_id, status
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [
+        id,
+        params.branchId,
+        voucherNo,
+        params.voucherType,
+        params.voucherDate,
+        params.debitAccountId,
+        params.creditAccountId,
+        amount,
+        params.notes,
+        SYNC_ACTOR,
+        params.referenceType,
+        params.referenceId,
+        voucherStatus,
+      ],
+    );
+    return id;
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code !== '23505') throw err;
+    const again = await client.query(
+      `SELECT id, amount, debit_account_id, credit_account_id, status
+       FROM ic_fund_vouchers
+       WHERE branch_id = $1 AND reference_type = $2 AND reference_id = $3 AND status IN ('active', 'pending')
+       ORDER BY CASE WHEN status = 'active' THEN 1 ELSE 0 END DESC
+       LIMIT 1`,
+      [params.branchId, params.referenceType, params.referenceId],
+    );
+    if (again.rows.length > 0) return String(again.rows[0].id);
+    throw err;
+  }
 }
 
 /** IC Transfer journals always post to the HQ cash book (receipts, payments, counterparties). */
@@ -999,6 +1014,7 @@ export async function syncICPurchaseToICFunds(purchaseId: string): Promise<void>
   try {
     await ensureHqIcFundsBranch();
     await withTransaction(async (client) => {
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`ic_purchase_sync:${purchaseId}`]);
       const purchaseRes = await client.query(`SELECT * FROM ic_purchases WHERE id = $1 LIMIT 1`, [purchaseId]);
       if (purchaseRes.rows.length === 0) return;
       const purchase = purchaseRes.rows[0];
@@ -1084,17 +1100,19 @@ export async function syncICPurchaseToICFunds(purchaseId: string): Promise<void>
 
 export async function removeICPurchaseFromICFunds(purchaseId: string): Promise<void> {
   try {
-    const branchId = await resolvePurchaseBranchId(db, purchaseId);
-    const purchaseRes = await db.query(
-      `SELECT settlement_mode FROM ic_purchases WHERE id = $1 LIMIT 1`,
-      [purchaseId],
-    );
-    if (isMetalSettlement(purchaseRes.rows[0]?.settlement_mode)) {
-      const { voidMetalPurchaseLedgers } = await import('@/lib/metal/posting');
-      await voidMetalPurchaseLedgers(db, branchId, purchaseId);
-    } else {
-      await voidVoucherByReference(db, branchId, 'ic_purchase', purchaseId);
-    }
+    await withTransaction(async client => {
+      const purchaseRes = await client.query(
+        `SELECT settlement_mode FROM ic_purchases WHERE id = $1 LIMIT 1`,
+        [purchaseId],
+      );
+      const branchId = await resolvePurchaseBranchId(client, purchaseId);
+      if (isMetalSettlement(purchaseRes.rows[0]?.settlement_mode)) {
+        const { voidMetalPurchaseLedgers } = await import('@/lib/metal/posting');
+        await voidMetalPurchaseLedgers(client, branchId, purchaseId);
+      } else {
+        await voidVoucherByReference(client, branchId, 'ic_purchase', purchaseId);
+      }
+    });
   } catch (err) {
     logger.error({ err, purchaseId }, 'Failed to remove IC purchase from IC Funds');
   }
@@ -1104,6 +1122,7 @@ export async function syncICSaleToICFunds(saleId: string): Promise<void> {
   try {
     await ensureHqIcFundsBranch();
     await withTransaction(async (client) => {
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`ic_sale_sync:${saleId}`]);
       const saleRes = await client.query(`SELECT * FROM ic_sales WHERE id = $1 LIMIT 1`, [saleId]);
       if (saleRes.rows.length === 0) return;
       const sale = saleRes.rows[0];
@@ -1161,16 +1180,18 @@ export async function syncICSaleToICFunds(saleId: string): Promise<void> {
 
 export async function removeICSaleFromICFunds(saleId: string): Promise<void> {
   try {
-    const saleRes = await query(`SELECT * FROM ic_sales WHERE id = $1 LIMIT 1`, [saleId]);
-    if (saleRes.rows.length === 0) return;
-    const branchId = await resolveSaleBranchId(db, saleRes.rows[0]);
-    if (isMetalSettlement(saleRes.rows[0].settlement_mode)) {
-      const { voidMetalSaleLedgers } = await import('@/lib/metal/posting');
-      await voidMetalSaleLedgers(db, branchId, saleId);
-    } else {
-      await voidVoucherByReference(db, branchId, 'ic_sale', saleId);
-      await voidSaleMarginVouchers(db, branchId, saleId);
-    }
+    await withTransaction(async client => {
+      const saleRes = await client.query(`SELECT * FROM ic_sales WHERE id = $1 LIMIT 1`, [saleId]);
+      if (saleRes.rows.length === 0) return;
+      const branchId = await resolveSaleBranchId(client, saleRes.rows[0]);
+      if (isMetalSettlement(saleRes.rows[0].settlement_mode)) {
+        const { voidMetalSaleLedgers } = await import('@/lib/metal/posting');
+        await voidMetalSaleLedgers(client, branchId, saleId);
+      } else {
+        await voidVoucherByReference(client, branchId, 'ic_sale', saleId);
+        await voidSaleMarginVouchers(client, branchId, saleId);
+      }
+    });
   } catch (err) {
     logger.error({ err, saleId }, 'Failed to remove IC sale from IC Funds');
   }

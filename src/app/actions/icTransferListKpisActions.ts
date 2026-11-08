@@ -28,7 +28,7 @@ export async function fetchIcTransferListKpisAction(
        COALESCE(SUM(CASE WHEN p.settlement_mode = 'metal' THEN p.metal_weight_g ELSE 0 END), 0) AS metal_g
      FROM ic_purchases p
      LEFT JOIN ic_warehouses w ON w.id = p.warehouse_id
-     WHERE p.created_at::date >= $1::date AND p.created_at::date <= $2::date
+     WHERE p.created_at >= $1::date AND p.created_at < ($2::date + interval '1 day')
      ${branchFilter}`,
     params,
   );
@@ -39,7 +39,7 @@ export async function fetchIcTransferListKpisAction(
        COALESCE(SUM(CASE WHEN s.settlement_mode = 'metal' AND s.order_status = 'completed' THEN s.metal_weight_g ELSE 0 END), 0) AS metal_g
      FROM ic_sales s
      LEFT JOIN ic_warehouses w ON w.id = s.warehouse_id
-     WHERE s.created_at::date >= $1::date AND s.created_at::date <= $2::date
+     WHERE s.created_at >= $1::date AND s.created_at < ($2::date + interval '1 day')
      ${branchFilter}`,
     params,
   );

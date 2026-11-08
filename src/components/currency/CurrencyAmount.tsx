@@ -12,7 +12,7 @@ export type CurrencyAmountProps = {
   className?: string;
   /** When set, render this instead of a formatted zero (e.g. em dash). */
   zeroDisplay?: React.ReactNode;
-  /** Fraction digits for AED (default 4 max). INR uses en-IN with 2 max. */
+  /** Fraction digits for AED (default 2 max). INR uses en-IN with 2 max. */
   maxFractionDigits?: number;
 };
 
@@ -37,7 +37,7 @@ function formatAedNumber(amount: number, showPlus: boolean, maxFractionDigits: n
 
 export function fmtLedgerAedPlain(n: number, showPlus = false): string {
   if (!Number.isFinite(n)) return `${AED_INDICATOR}0`;
-  return `${AED_INDICATOR}${formatAedNumber(n, showPlus, 4)}`;
+  return `${AED_INDICATOR}${formatAedNumber(n, showPlus, 2)}`;
 }
 
 export function fmtLedgerInrPlain(n: number, showPlus = false): string {
@@ -55,7 +55,7 @@ export default function CurrencyAmount({
   showPlus = false,
   className = '',
   zeroDisplay,
-  maxFractionDigits = 4,
+  maxFractionDigits = 2,
 }: CurrencyAmountProps) {
   const isZero = !Number.isFinite(amount) || Math.abs(amount) < 0.005;
   if (isZero && zeroDisplay !== undefined) {

@@ -805,7 +805,7 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canSubmit) return;
+    if (!canSubmit || isSubmitting) return;
     setIsSubmitting(true);
 
     const recordedCustomerName = selectedCounterparty?.name || customerName.trim();
@@ -851,16 +851,15 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
       imageUrl: imageUrl || undefined,
     };
 
-    if (initialData) {
-      await updateICSale(initialData.id, payload);
-    } else {
-      await addICSale(payload);
-    }
+    const ok = initialData
+      ? await updateICSale(initialData.id, payload)
+      : await addICSale(payload);
+
+    setIsSubmitting(false);
+    if (!ok) return;
 
     invalidateICTransferModalSnapshotCache();
     invalidateAvailableMetalLotsCache();
-
-    setIsSubmitting(false);
     onClose();
   };
 

@@ -155,7 +155,6 @@ export default function BooksScreen({
     const result = await trackLoading(() => getICWarehousePLReportAction({ branchId, startDate, endDate }));
     if (!result.success) {
       await showLoadError('BooksScreen.loadWarehousePl', result.error);
-      setWarehousePl(null);
     } else {
       setWarehousePl(result.data);
     }
@@ -190,7 +189,6 @@ export default function BooksScreen({
     const result = await trackLoading(() => getICFundReportBundleAction({ branchId, startDate, endDate }));
     if (!result.success) {
       await showLoadError('BooksScreen.loadBundle', result.error);
-      setBundle(null);
     } else {
       setBundle(result.data);
     }
@@ -210,7 +208,6 @@ export default function BooksScreen({
     );
     if (!result.success) {
       await showLoadError('BooksScreen.loadStatement', result.error);
-      setStatement(null);
     } else {
       setStatement(result.data);
     }

@@ -6,7 +6,7 @@ import { requireICFundsAccess } from '@/lib/icFunds/requireAccess';
 import { HQ_IC_FUNDS_BRANCH_ID } from '@/lib/icFunds/hqBranch';
 import { writeAuditLog } from '@/lib/audit';
 import { logger } from '@/lib/logger';
-import { roundLedgerAmount } from '@/lib/icFunds/currencyPolicy';
+import { roundLedgerAmount, roundLedgerRate } from '@/lib/icFunds/currencyPolicy';
 import {
   ensureCapitalInvestorAccounts,
   ensureHouseInvestor,
@@ -28,16 +28,15 @@ type ActionResult<T> = ActionOk<T> | ActionErr;
 
 type CapitalWriter = Extract<Awaited<ReturnType<typeof requireICFundsAccess>>, { ok: true }>;
 
-async function requireCapitalWrite(): Promise<ActionErr | (CapitalWriter & { ok: true })> {
+async function requireCapitalWrite(): Promise<ActionErr | CapitalWriter> {
   const access = await requireICFundsAccess(HQ_IC_FUNDS_BRANCH_ID, 'write');
   if (!access.ok) return { success: false, error: access.error };
-  return { ...access, ok: true as const };
+  return access;
 }
 
-async function requireCapitalRead(): Promise<ActionErr | { ok: true }> {
+async function requireCapitalRead(): Promise<ActionErr | undefined> {
   const access = await requireICFundsAccess(HQ_IC_FUNDS_BRANCH_ID, 'read');
   if (!access.ok) return { success: false, error: access.error };
-  return { ok: true };
 }
 
 async function firstBankAccountId(book: 'AED' | 'INR', override?: string): Promise<string> {
@@ -62,8 +61,8 @@ export async function getCapitalDashboardAction(): Promise<ActionResult<CapitalD
     managementInvestorId: string | null;
   };
 }>> {
-  const access = await requireCapitalRead();
-  if (!access.ok) return access;
+  const readDenied = await requireCapitalRead();
+  if (readDenied) return readDenied;
 
   try {
     await withTransaction(async client => {
@@ -98,7 +97,7 @@ export async function createCapitalInvestorAction(input: unknown): Promise<Actio
   const parsed = createCapitalInvestorSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: parsed.error.issues[0]?.message ?? 'Invalid input' };
   const access = await requireCapitalWrite();
-  if (!('ok' in access) || access.ok !== true) return access;
+  if ('success' in access) return access;
 
   const id = `ICINV-${crypto.randomUUID().slice(0, 10).toUpperCase()}`;
   try {
@@ -131,11 +130,14 @@ export async function setCapitalOpeningAction(input: unknown): Promise<ActionRes
   const parsed = setCapitalOpeningSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: parsed.error.issues[0]?.message ?? 'Invalid input' };
   const access = await requireCapitalWrite();
-  if (!('ok' in access) || access.ok !== true) return access;
+  if ('success' in access) return access;
 
   try {
     await withTransaction(async client => {
       const houseId = await ensureHouseInvestor(client, HQ_IC_FUNDS_BRANCH_ID);
+      const settingsLock = await client.query(
+        `SELECT opening_locked_at FROM ic_capital_settings WHERE id = 'hq' FOR UPDATE`,
+      );
       await client.query(
         `UPDATE ic_capital_settings
          SET opening_aed = $1, opening_inr = $2, opening_inr_per_aed = $3, updated_at = CURRENT_TIMESTAMP
@@ -143,9 +145,7 @@ export async function setCapitalOpeningAction(input: unknown): Promise<ActionRes
         [parsed.data.openingAed, parsed.data.openingInr, parsed.data.openingInrPerAed],
       );
 
-      const settings = await client.query(
-        `SELECT opening_locked_at FROM ic_capital_settings WHERE id = 'hq'`,
-      );
+      const settings = settingsLock;
       const locked = Boolean(settings.rows[0]?.opening_locked_at);
 
       const aedBank = await firstBankAccountId('AED', parsed.data.aedBankAccountId);
@@ -154,7 +154,7 @@ export async function setCapitalOpeningAction(input: unknown): Promise<ActionRes
       if (!locked) {
         const aedAmt = roundLedgerAmount(Number(parsed.data.openingAed));
         const inrAmt = roundLedgerAmount(Number(parsed.data.openingInr));
-        const rate = roundLedgerAmount(Number(parsed.data.openingInrPerAed));
+        const rate = roundLedgerRate(Number(parsed.data.openingInrPerAed));
 
         if (aedAmt > 0) {
           const lotId = `ICCL-${crypto.randomUUID().slice(0, 10).toUpperCase()}`;
@@ -227,7 +227,7 @@ export async function setManagementShareAction(input: unknown): Promise<ActionRe
   const parsed = setManagementShareSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: parsed.error.issues[0]?.message ?? 'Invalid input' };
   const access = await requireCapitalWrite();
-  if (!('ok' in access) || access.ok !== true) return access;
+  if ('success' in access) return access;
 
   const bps = Math.round(parsed.data.managementSharePct * 100);
   try {
@@ -249,7 +249,7 @@ export async function postCapitalMovementAction(input: unknown): Promise<ActionR
   const parsed = capitalMovementSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: parsed.error.issues[0]?.message ?? 'Invalid input' };
   const access = await requireCapitalWrite();
-  if (!('ok' in access) || access.ok !== true) return access;
+  if ('success' in access) return access;
 
   const inrPerAed = parsed.data.book === 'INR' ? Number(parsed.data.inrPerAed) : 1;
   if (parsed.data.book === 'INR' && (!inrPerAed || inrPerAed <= 0)) {
@@ -283,8 +283,8 @@ export async function postCapitalMovementAction(input: unknown): Promise<ActionR
 export async function listCapitalBankAccountsAction(
   book: 'AED' | 'INR',
 ): Promise<ActionResult<Array<{ id: string; name: string; balance: number }>>> {
-  const access = await requireCapitalRead();
-  if (!access.ok) return access;
+  const readDenied = await requireCapitalRead();
+  if (readDenied) return readDenied;
 
   const table = book === 'AED' ? 'ic_fund_accounts' : 'inr_fund_accounts';
   try {
@@ -343,8 +343,8 @@ export async function listCapitalAllocationsAction(limit = 150): Promise<
     }>
   >
 > {
-  const access = await requireCapitalRead();
-  if (!access.ok) return access;
+  const readDenied = await requireCapitalRead();
+  if (readDenied) return readDenied;
 
   const res = await query(
     `SELECT a.id, a.source_voucher_date, a.source_voucher_id, a.book, a.kind,
@@ -387,8 +387,8 @@ export async function listCapitalMovementsAction(limit = 100): Promise<
     }>
   >
 > {
-  const access = await requireCapitalRead();
-  if (!access.ok) return access;
+  const readDenied = await requireCapitalRead();
+  if (readDenied) return readDenied;
 
   const res = await query(
     `SELECT l.id, i.name AS investor_name, l.movement_type, l.book, l.lot_date,

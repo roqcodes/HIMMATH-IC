@@ -14,7 +14,6 @@ import { requireICFundsAccess } from '@/lib/icFunds/requireAccess';
 import { ensureHqIcFundsBranch } from '@/lib/icFunds/ensureHqBranch';
 import { HQ_IC_FUNDS_BRANCH_ID, HQ_IC_FUNDS_BRANCH_SLUG, isHqIcFundsBranch, isHqIcFundsBranchId } from '@/lib/icFunds/hqBranch';
 import { relinkAedAgentLedgerAccounts } from '@/lib/counterparties/aedAgentSync';
-import { healMissingDealPartyVouchers } from '@/lib/icFunds/icTransferFundSync';
 import {
   accountBalanceSql,
   accountMovementJoinSql,
@@ -24,6 +23,7 @@ import {
 } from '@/lib/icFunds/accountBalance';
 import {
   accountPeriodBalanceSelectSql,
+  accountPeriodLedgerSqlWithAgg,
   mapRowToPeriodLedger,
   toTrialBalanceRow,
   type AccountPeriodLedger,
@@ -293,11 +293,6 @@ async function fetchAccountsWithBalances(
   branchId: string,
   asOfDate?: string | null,
 ): Promise<ICFundAccount[]> {
-  try {
-    await healMissingDealPartyVouchers();
-  } catch (err) {
-    logger.warn({ err }, 'healMissingDealPartyVouchers skipped during account list');
-  }
   await relinkAedAgentLedgerAccounts();
   const joinOpts = asOfDate
     ? { asOfParam: '$2', branchParam: '$1' }
@@ -333,15 +328,20 @@ async function fetchAccountPeriodLedgers(
     : { branchParam: branchParam };
 
   const pendingJoin = accountPendingMovementJoinSql(pendingJoinOpts);
-  const periodCols = accountPeriodBalanceSelectSql({ branchParam, startParam, endParam });
 
+  const useAgg = startParam != null && endParam != null;
   const res = await query(
-    `SELECT a.id, a.name, a.account_type, ${periodCols},
-      ${accountPendingBalanceSql()} AS pending_balance
-     FROM ic_fund_accounts a
-     ${pendingJoin}
-     WHERE a.branch_id = $1
-     ORDER BY a.account_type, LOWER(a.name)`,
+    useAgg
+      ? `${accountPeriodLedgerSqlWithAgg(branchParam, startParam!, endParam!, accountPendingBalanceSql())}
+       ${pendingJoin}
+       WHERE a.branch_id = $1
+       ORDER BY a.account_type, LOWER(a.name)`
+      : `SELECT a.id, a.name, a.account_type, ${accountPeriodBalanceSelectSql({ branchParam, startParam, endParam })},
+        ${accountPendingBalanceSql()} AS pending_balance
+       FROM ic_fund_accounts a
+       ${pendingJoin}
+       WHERE a.branch_id = $1
+       ORDER BY a.account_type, LOWER(a.name)`,
     params,
   );
   return res.rows.map(r => mapRowToPeriodLedger(r as Record<string, unknown>));
@@ -353,7 +353,7 @@ async function listICFundVouchersForReport(params: {
   endDate?: string;
 }): Promise<{ vouchers: ICFundVoucher[]; truncated: boolean }> {
   const pageSize = VOUCHER_REPORT_MAX;
-  const maxRows = 50_000;
+  const maxRows = 8_000;
   let offset = 0;
   const all: ICFundVoucher[] = [];
   let truncated = false;
@@ -708,11 +708,6 @@ export async function listHQICFundAccountsAction(): Promise<ICFundAccount[]> {
   if (!user || user.role !== 'admin') return [];
   try {
     await ensureHqIcFundsBranch();
-    try {
-      await healMissingDealPartyVouchers();
-    } catch (err) {
-      logger.warn({ err }, 'healMissingDealPartyVouchers skipped during HQ account list');
-    }
     await relinkAedAgentLedgerAccounts();
     const res = await query(
       `${accountBalanceSelectSql({ branchParam: '$1' })} WHERE a.branch_id = $1 ORDER BY a.account_type, LOWER(a.name)`,
@@ -783,7 +778,7 @@ export async function createICFundAccountAction(
         ledgerBranchId,
         parsed.data.name.trim(),
         parsed.data.accountType,
-        Number(parsed.data.openingBalance.toFixed(2)),
+        roundLedgerAmount(Number(parsed.data.openingBalance) || 0),
         parsed.data.notes?.trim() ?? '',
         phone,
       ],
@@ -890,7 +885,9 @@ export async function updateICFundAccountAction(input: unknown): Promise<ActionR
     if (parsed.data.name !== undefined) push('name', parsed.data.name.trim());
     if (parsed.data.accountType !== undefined) push('account_type', parsed.data.accountType);
     if (parsed.data.status !== undefined) push('status', parsed.data.status);
-    if (parsed.data.openingBalance !== undefined) push('opening_balance', Number(parsed.data.openingBalance.toFixed(2)));
+    if (parsed.data.openingBalance !== undefined) {
+      push('opening_balance', roundLedgerAmount(Number(parsed.data.openingBalance) || 0));
+    }
     if (parsed.data.notes !== undefined) push('notes', parsed.data.notes.trim());
 
     if (parsed.data.phone !== undefined) {
@@ -1177,11 +1174,6 @@ export async function listCounterpartyDealVouchersAction(params: {
   }
   if (!accessOk) return [];
 
-  try {
-    await healMissingDealPartyVouchers(counterpartyId);
-  } catch (err) {
-    logger.warn({ err, counterpartyId }, 'healMissingDealPartyVouchers skipped during journal list');
-  }
   try {
     await relinkAedAgentLedgerAccounts();
   } catch (err) {
@@ -1485,11 +1477,6 @@ export async function getCounterpartyLedgerKpisAction(params: {
   if (!accessOk) return empty;
 
   try {
-    await healMissingDealPartyVouchers(counterpartyId);
-  } catch (err) {
-    logger.warn({ err, counterpartyId }, 'healMissingDealPartyVouchers skipped during KPI load');
-  }
-  try {
     await relinkAedAgentLedgerAccounts();
   } catch (err) {
     logger.warn({ err, counterpartyId }, 'relinkAedAgentLedgerAccounts skipped during KPI load');
@@ -1589,6 +1576,14 @@ export async function postICFundVoucherAction(input: unknown): Promise<ActionRes
 
   try {
     const id = await withTransaction(async (client) => {
+      if (parsed.data.idempotencyKey) {
+        const dup = await client.query(
+          `SELECT id FROM ic_fund_vouchers WHERE idempotency_key = $1 LIMIT 1`,
+          [parsed.data.idempotencyKey],
+        );
+        if (dup.rows.length > 0) return String(dup.rows[0].id);
+      }
+
       const accounts = await client.query(
         `SELECT id, account_type, status, branch_id, source_type, source_id
          FROM ic_fund_accounts
@@ -1648,8 +1643,8 @@ export async function postICFundVoucherAction(input: unknown): Promise<ActionRes
            id, branch_id, voucher_no, voucher_type, voucher_date,
            debit_account_id, credit_account_id, amount, notes,
            created_by, created_by_name, created_by_user_id,
-           reference_type, reference_id
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+           reference_type, reference_id, idempotency_key
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
         [
           voucherId,
           parsed.data.branchId,
@@ -1665,17 +1660,11 @@ export async function postICFundVoucherAction(input: unknown): Promise<ActionRes
           access.user.id ?? null,
           partyRef?.referenceType ?? null,
           partyRef?.referenceId ?? null,
+          parsed.data.idempotencyKey ?? null,
         ],
       );
       return voucherId;
     });
-
-    if (parsed.data.voucherType === 'journal') {
-      await withTransaction(async client => {
-        const { tryAllocateCapitalFromAedVoucher } = await import('@/lib/capital/voucherHook');
-        await tryAllocateCapitalFromAedVoucher(client, parsed.data.branchId, id);
-      });
-    }
 
     await writeAuditLog({
       actor: access.user,
@@ -1727,18 +1716,16 @@ export async function deleteICFundVoucherAction(
 
   if (ledgerBook === 'INR') {
     try {
-      const res = await query(
-        `UPDATE inr_fund_vouchers
-         SET status = 'void',
-             voided_at = CURRENT_TIMESTAMP
-         WHERE id = $1 AND branch_id = $2 AND status = 'active'
-         RETURNING id`,
-        [voucherId, voucherBranchId],
-      );
-      if (res.rows.length === 0) {
-        return { success: false, error: 'Voucher could not be voided' };
-      }
       await withTransaction(async client => {
+        const res = await client.query(
+          `UPDATE inr_fund_vouchers
+           SET status = 'void',
+               voided_at = CURRENT_TIMESTAMP
+           WHERE id = $1 AND branch_id = $2 AND status = 'active'
+           RETURNING id`,
+          [voucherId, voucherBranchId],
+        );
+        if (res.rows.length === 0) throw new Error('Voucher could not be voided');
         const { voidCapitalAllocationsForVoucher } = await import('@/lib/capital/allocation');
         await voidCapitalAllocationsForVoucher(client, voucherId, 'INR');
       });
@@ -1761,19 +1748,17 @@ export async function deleteICFundVoucherAction(
   }
 
   try {
-    const res = await query(
-      `UPDATE ic_fund_vouchers
-       SET status = 'void',
-           voided_at = CURRENT_TIMESTAMP,
-           voided_by_name = $3
-       WHERE id = $1 AND branch_id = $2 AND status = 'active'
-       RETURNING id`,
-      [voucherId, voucherBranchId, access.user.name ?? access.user.id ?? 'User'],
-    );
-    if (res.rows.length === 0) {
-      return { success: false, error: 'Voucher could not be voided' };
-    }
     await withTransaction(async client => {
+      const res = await client.query(
+        `UPDATE ic_fund_vouchers
+         SET status = 'void',
+             voided_at = CURRENT_TIMESTAMP,
+             voided_by_name = $3
+         WHERE id = $1 AND branch_id = $2 AND status = 'active'
+         RETURNING id`,
+        [voucherId, voucherBranchId, access.user.name ?? access.user.id ?? 'User'],
+      );
+      if (res.rows.length === 0) throw new Error('Voucher could not be voided');
       const { voidCapitalAllocationsForVoucher } = await import('@/lib/capital/allocation');
       await voidCapitalAllocationsForVoucher(client, voucherId, 'AED');
     });
@@ -1791,7 +1776,10 @@ export async function deleteICFundVoucherAction(
     return { success: true, data: { id: voucherId } };
   } catch (err) {
     logger.error({ err, voucherId, branchId }, 'Failed to void IC fund voucher');
-    return { success: false, error: 'Failed to void voucher' };
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Failed to void voucher',
+    };
   }
 }
 
@@ -2119,11 +2107,6 @@ export async function getICFundAccountDetailAction(params: {
   accountId: string;
 }): Promise<ActionResult<ICFundAccountDetail>> {
   try {
-    try {
-      await healMissingDealPartyVouchers();
-    } catch (err) {
-      logger.warn({ err, accountId: params.accountId }, 'healMissingDealPartyVouchers skipped during account detail');
-    }
     await relinkAedAgentLedgerAccounts();
     const accRes = await query(
       `${accountBalanceSelectSql({ accountParam: '$1' })} WHERE a.id = $1`,
@@ -2496,7 +2479,23 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
     const periodEndMs = asOfEnd?.getTime() ?? null;
 
     const branchFilter = isHqLedger ? '' : `AND (w.branch_id = $1 OR w.branch_id IS NULL)`;
-    const branchParams = isHqLedger ? [] : [branchId];
+    const endSql = endDate
+      ? isHqLedger
+        ? `AND p.created_at < ($1::date + interval '1 day')`
+        : `AND p.created_at < ($2::date + interval '1 day')`
+      : '';
+    const endSaleSql = endDate
+      ? isHqLedger
+        ? `AND s.created_at < ($1::date + interval '1 day')`
+        : `AND s.created_at < ($2::date + interval '1 day')`
+      : '';
+    const branchParams = isHqLedger
+      ? endDate
+        ? [endDate]
+        : []
+      : endDate
+        ? [branchId, endDate]
+        : [branchId];
 
     const purchasesRes = await query(
       `SELECT
@@ -2516,7 +2515,7 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
        FROM ic_purchases p
        JOIN ic_warehouses w ON w.id = p.warehouse_id
        LEFT JOIN ic_counterparties cp ON cp.id = p.counterparty_id
-       WHERE p.warehouse_id IS NOT NULL ${branchFilter}
+       WHERE p.warehouse_id IS NOT NULL ${branchFilter} ${endSql}
        ORDER BY p.created_at ASC, p.id ASC`,
       branchParams,
     );
@@ -2548,7 +2547,7 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
            'branch_rejected', 'admin_rejected', 'wh_rejected', 'da_rejected',
            'cancelled', 'cancellation_pending'
          )
-         ${branchFilter}
+         ${branchFilter} ${endSaleSql}
        ORDER BY sale_at ASC, s.created_at ASC, s.id ASC`,
       branchParams,
     );

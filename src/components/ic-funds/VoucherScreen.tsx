@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AccountPicker from '@/components/ic-funds/AccountPicker';
 import {
   deleteICFundVoucherAction,
@@ -83,6 +83,7 @@ export default function VoucherScreen({
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const cashBookEnabled = voucherType === 'payment' || voucherType === 'receipt';
   const [book, setBook] = useState<LedgerBook>('AED');
+  const saveIdempotencyKey = useRef<string | null>(null);
 
   const pageSize = VOUCHER_LIST_PAGE_SIZE;
 
@@ -191,6 +192,7 @@ export default function VoucherScreen({
   };
 
   const handleSave = async () => {
+    if (saving) return;
     if (!canWrite) return;
     if (!debitId || !creditId) {
       showToast('Select both accounts', 'error');
@@ -206,6 +208,9 @@ export default function VoucherScreen({
       return;
     }
     setSaving(true);
+    if (!saveIdempotencyKey.current) {
+      saveIdempotencyKey.current = crypto.randomUUID();
+    }
     try {
       const result = await trackLoading(() =>
         postICFundVoucherAction({
@@ -217,6 +222,7 @@ export default function VoucherScreen({
           amount: parsedAmount,
           notes,
           book: cashBookEnabled ? book : 'AED',
+          idempotencyKey: saveIdempotencyKey.current ?? undefined,
         }),
       );
       if (!result.success) {
@@ -224,6 +230,7 @@ export default function VoucherScreen({
         return;
       }
       showToast(`${IC_FUND_VOUCHER_LABELS[voucherType].slice(0, -1)} saved`, 'success');
+      saveIdempotencyKey.current = null;
       resetForm();
       await loadVouchers();
     } finally {
