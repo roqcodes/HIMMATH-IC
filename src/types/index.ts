@@ -645,6 +645,8 @@ export interface ICSupplier {
   status?: 'active' | 'inactive';
   /** supplier = purchases; party = sales; agent = UAE AED collection. */
   roles?: CounterpartyRole[];
+  openingAed?: number;
+  openingInr?: number;
   createdAt?: string;
 }
 
@@ -662,6 +664,10 @@ export interface ICWarehouse {
   currentStock?: number;
   /** Physical metal on hand (grams). Separate from IC unit stock. */
   currentMetalG?: number;
+  openingStock?: number;
+  openingMetalG?: number;
+  openingAed?: number;
+  openingInr?: number;
   /** When set, warehouse is owned by a branch portal (exclusive to that branch). */
   branchId?: string;
   /** When true, delivery proof goes straight to customer on agent completion. */
@@ -830,7 +836,8 @@ export type ICFundAccountType =
   | 'income'
   | 'profit'
   | 'expense'
-  | 'd_expense';
+  | 'd_expense'
+  | 'capital';
 export type ICFundAccountStatus = 'active' | 'inactive';
 export type ICFundVoucherType = 'payment' | 'receipt' | 'journal' | 'contra';
 export type ICFundVoucherStatus = 'active' | 'pending' | 'void';

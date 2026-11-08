@@ -103,6 +103,7 @@ describe('warehouse KPI fixture Zak buy + Ronak sell', () => {
 
   it('metal grams on hand are 0 after the full lot is sold', () => {
     assert.equal(computeWarehouseMetalGramsOnHand([zakBuy], [ronakSell], 'del'), 0);
+    assert.equal(computeWarehouseMetalGramsOnHand([zakBuy], [ronakSell], 'del', 12.5), 12.5);
     assert.equal(remainingCashMetalInrCost([zakBuy], [ronakSell], { through: '2026-11-05' }), 0);
   });
 

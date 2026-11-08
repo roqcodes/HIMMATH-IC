@@ -74,6 +74,8 @@ import {
   removeICPurchaseFundLedger,
 } from '@/lib/icTransfer/fundLedgerSync';
 import { syncICSupplierFundAccount, syncICWarehouseFundAccount } from '@/lib/icFunds/icTransferFundSync';
+import { parseAedInrOpenings, parseWarehouseOpenings, type AedInrOpenings, type WarehouseOpenings } from '@/lib/icFunds/entityOpenings';
+import { syncWarehouseIcStockColumn } from '@/lib/icTransfer/warehouseIcStock';
 import { resolveAedAgentIdForCounterpartyWithClient, syncCounterpartyAedAgent } from '@/lib/counterparties/aedAgentSync';
 import { normalizeCounterpartyRoles, type CounterpartyRole } from '@/lib/counterparties/roles';
 import { loadCounterpartyLink } from '@/lib/counterparties/db';
@@ -401,6 +403,7 @@ export async function dbAddICSupplierAction(
   branchId?: string | null,
   branchSlug?: string,
   roles?: CounterpartyRole[],
+  openings?: Partial<AedInrOpenings> | null,
 ): Promise<DbActionResult<ICSupplier>> {
   try {
     const parsed = addSupplierSchema.parse({
@@ -432,9 +435,10 @@ export async function dbAddICSupplierAction(
 
     const id = crypto.randomUUID();
     const rolesNormalized = normalizeCounterpartyRoles(parsed.roles);
+    const opening = parseAedInrOpenings(openings);
     const res = await query(
-      `INSERT INTO ic_counterparties (id, name, code, phone, commission, region_id, email, address, country, subdivision, locality, branch_id, status, roles)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'active', $13) RETURNING *`,
+      `INSERT INTO ic_counterparties (id, name, code, phone, commission, region_id, email, address, country, subdivision, locality, branch_id, status, roles, opening_aed, opening_inr)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'active', $13, $14, $15) RETURNING *`,
       [
         id,
         parsed.name,
@@ -449,6 +453,8 @@ export async function dbAddICSupplierAction(
         parsed.locality?.trim() || null,
         parsed.branchId || null,
         rolesNormalized,
+        opening.openingAed,
+        opening.openingInr,
       ],
     );
     await syncCounterpartyAedAgent({ query }, {
@@ -480,6 +486,7 @@ export async function dbUpdateICSupplierAction(
   locality?: string,
   branchSlug?: string,
   roles?: CounterpartyRole[],
+  openings?: Partial<AedInrOpenings> | null,
 ): Promise<DbActionResult<ICSupplier>> {
   try {
     const parsed = updateSupplierSchema.parse({
@@ -500,24 +507,45 @@ export async function dbUpdateICSupplierAction(
     if (ownershipCheck) return { success: false, error: ownershipCheck.error };
 
     const rolesNormalized = normalizeCounterpartyRoles(parsed.roles);
+    const opening = openings ? parseAedInrOpenings(openings) : null;
 
     const res = await query(
-      `UPDATE ic_counterparties SET name=$1, code=$2, phone=$3, commission=$4, region_id=$5, email=$6, address=$7, country=$8, subdivision=$9, locality=$10, status=$11, roles=$12 WHERE id=$13 RETURNING *`,
-      [
-        parsed.name,
-        parsed.code,
-        parsed.phone || null,
-        parsed.commission || 0,
-        parsed.regionId || null,
-        parsed.email || null,
-        parsed.address || null,
-        parsed.country?.trim() || null,
-        parsed.subdivision?.trim() || null,
-        parsed.locality?.trim() || null,
-        'active',
-        rolesNormalized,
-        parsed.id,
-      ],
+      opening
+        ? `UPDATE ic_counterparties SET name=$1, code=$2, phone=$3, commission=$4, region_id=$5, email=$6, address=$7, country=$8, subdivision=$9, locality=$10, status=$11, roles=$12, opening_aed=$14, opening_inr=$15 WHERE id=$13 RETURNING *`
+        : `UPDATE ic_counterparties SET name=$1, code=$2, phone=$3, commission=$4, region_id=$5, email=$6, address=$7, country=$8, subdivision=$9, locality=$10, status=$11, roles=$12 WHERE id=$13 RETURNING *`,
+      opening
+        ? [
+            parsed.name,
+            parsed.code,
+            parsed.phone || null,
+            parsed.commission || 0,
+            parsed.regionId || null,
+            parsed.email || null,
+            parsed.address || null,
+            parsed.country?.trim() || null,
+            parsed.subdivision?.trim() || null,
+            parsed.locality?.trim() || null,
+            'active',
+            rolesNormalized,
+            parsed.id,
+            opening.openingAed,
+            opening.openingInr,
+          ]
+        : [
+            parsed.name,
+            parsed.code,
+            parsed.phone || null,
+            parsed.commission || 0,
+            parsed.regionId || null,
+            parsed.email || null,
+            parsed.address || null,
+            parsed.country?.trim() || null,
+            parsed.subdivision?.trim() || null,
+            parsed.locality?.trim() || null,
+            'active',
+            rolesNormalized,
+            parsed.id,
+          ],
     );
     if (res.rowCount === 0) return { success: false, error: 'Counterparty not found' };
     await syncCounterpartyAedAgent({ query }, {
@@ -562,6 +590,7 @@ export async function dbAddICWarehouseAction(
   indiaCity?: string,
   sendDeliveryProofToCustomer: boolean = true,
   branchId?: string | null,
+  openings?: Partial<WarehouseOpenings> | null,
 ): Promise<DbActionResult<ICWarehouse>> {
   try {
     const parsed = addWarehouseSchema.parse({
@@ -577,12 +606,14 @@ export async function dbAddICWarehouseAction(
       sendDeliveryProofToCustomer,
       branchId,
     });
+    const opening = parseWarehouseOpenings(openings);
     const id = crypto.randomUUID();
     const res = await query(
       `INSERT INTO ic_warehouses (
          id, name, code, phone, commission, region_id, email, address, india_state, india_city,
-         send_delivery_proof_to_customer, branch_id
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+         send_delivery_proof_to_customer, branch_id,
+         opening_stock, opening_metal_g, opening_aed, opening_inr, current_stock, current_metal_g
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $13, $14) RETURNING *`,
       [
         id,
         parsed.name,
@@ -596,6 +627,10 @@ export async function dbAddICWarehouseAction(
         parsed.indiaCity?.trim() || null,
         parsed.sendDeliveryProofToCustomer ?? true,
         parsed.branchId || null,
+        opening.openingStock,
+        opening.openingMetalG,
+        opening.openingAed,
+        opening.openingInr,
       ],
     );
     await syncICWarehouseFundAccount(id);
@@ -620,6 +655,7 @@ export async function dbUpdateICWarehouseAction(
   indiaState?: string,
   indiaCity?: string,
   sendDeliveryProofToCustomer: boolean = true,
+  openings?: Partial<WarehouseOpenings> | null,
 ): Promise<DbActionResult<ICWarehouse>> {
   try {
     const parsed = updateWarehouseSchema.parse({
@@ -635,28 +671,61 @@ export async function dbUpdateICWarehouseAction(
       indiaCity,
       sendDeliveryProofToCustomer,
     });
+    const opening = openings ? parseWarehouseOpenings(openings) : null;
     const res = await query(
-      `UPDATE ic_warehouses
-       SET name=$1, code=$2, phone=$3, commission=$4, region_id=$5, email=$6, address=$7,
-           india_state=$8, india_city=$9, send_delivery_proof_to_customer=$10
-       WHERE id=$11 RETURNING *`,
-      [
-        parsed.name,
-        parsed.code,
-        parsed.phone || null,
-        parsed.commission || 0,
-        parsed.regionId || null,
-        parsed.email || null,
-        parsed.address || null,
-        parsed.indiaState?.trim() || null,
-        parsed.indiaCity?.trim() || null,
-        parsed.sendDeliveryProofToCustomer ?? true,
-        parsed.id,
-      ],
+      opening
+        ? `UPDATE ic_warehouses
+           SET name=$1, code=$2, phone=$3, commission=$4, region_id=$5, email=$6, address=$7,
+               india_state=$8, india_city=$9, send_delivery_proof_to_customer=$10,
+               opening_stock=$12, opening_metal_g=$13, opening_aed=$14, opening_inr=$15
+           WHERE id=$11 RETURNING *`
+        : `UPDATE ic_warehouses
+           SET name=$1, code=$2, phone=$3, commission=$4, region_id=$5, email=$6, address=$7,
+               india_state=$8, india_city=$9, send_delivery_proof_to_customer=$10
+           WHERE id=$11 RETURNING *`,
+      opening
+        ? [
+            parsed.name,
+            parsed.code,
+            parsed.phone || null,
+            parsed.commission || 0,
+            parsed.regionId || null,
+            parsed.email || null,
+            parsed.address || null,
+            parsed.indiaState?.trim() || null,
+            parsed.indiaCity?.trim() || null,
+            parsed.sendDeliveryProofToCustomer ?? true,
+            parsed.id,
+            opening.openingStock,
+            opening.openingMetalG,
+            opening.openingAed,
+            opening.openingInr,
+          ]
+        : [
+            parsed.name,
+            parsed.code,
+            parsed.phone || null,
+            parsed.commission || 0,
+            parsed.regionId || null,
+            parsed.email || null,
+            parsed.address || null,
+            parsed.indiaState?.trim() || null,
+            parsed.indiaCity?.trim() || null,
+            parsed.sendDeliveryProofToCustomer ?? true,
+            parsed.id,
+          ],
     );
     if (res.rowCount === 0) return { success: false, error: 'Warehouse not found' };
+    if (opening) {
+      await withTransaction(async client => {
+        await syncWarehouseIcStockColumn(client, parsed.id);
+      });
+    }
     await syncICWarehouseFundAccount(parsed.id);
-    return { success: true, data: mapICWarehouseRow(res.rows[0]) };
+    const latest = opening
+      ? await query(`SELECT * FROM ic_warehouses WHERE id = $1 LIMIT 1`, [parsed.id])
+      : res;
+    return { success: true, data: mapICWarehouseRow(latest.rows[0]) };
   } catch (error: unknown) {
     const conflict = entityCodeConflictMessage(error);
     if (conflict) return { success: false, error: conflict };

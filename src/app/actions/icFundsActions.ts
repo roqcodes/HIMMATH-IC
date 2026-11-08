@@ -14,6 +14,7 @@ import { requireICFundsAccess } from '@/lib/icFunds/requireAccess';
 import { ensureHqIcFundsBranch } from '@/lib/icFunds/ensureHqBranch';
 import { HQ_IC_FUNDS_BRANCH_ID, HQ_IC_FUNDS_BRANCH_SLUG, isHqIcFundsBranch, isHqIcFundsBranchId } from '@/lib/icFunds/hqBranch';
 import { relinkAedAgentLedgerAccounts } from '@/lib/counterparties/aedAgentSync';
+import { healMissingDealPartyVouchers } from '@/lib/icFunds/icTransferFundSync';
 import {
   accountBalanceSql,
   accountMovementJoinSql,
@@ -68,6 +69,7 @@ import { INR_PER_UNIT } from '@/lib/icTransfer/rateCalculations';
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
 import { validateVoucherAccounts } from '@/lib/icFunds/voucherRules';
 import { validateVoucherCurrencyPolicy, roundLedgerAmount } from '@/lib/icFunds/currencyPolicy';
+import { ensureInrCashTill, postInrVoucherInTx } from '@/lib/ledgers/inr/inrFundSync';
 import {
   buildVoucherListFilter,
   clampVoucherListLimit,
@@ -78,6 +80,8 @@ import {
   VOUCHER_LIST_SELECT_COLUMNS,
   VOUCHER_LIST_SELECT_SQL,
   VOUCHER_REPORT_MAX,
+  INR_VOUCHER_LIST_SELECT_COLUMNS,
+  INR_VOUCHER_FROM_SQL as INR_VOUCHER_FROM_SQL_SHARED,
 } from '@/lib/icFunds/voucherQueries';
 import { ActionError } from '@/lib/errors/actionError';
 import {
@@ -199,6 +203,33 @@ function mapVoucher(row: Record<string, unknown>): ICFundVoucher {
   };
 }
 
+const PARTY_ACCOUNT_SOURCE_TYPES = new Set(['ic_counterparty', 'ic_supplier', 'ic_customer']);
+
+function accountingVoucherPartyRef(
+  voucherType: string,
+  debit: Record<string, unknown>,
+  credit: Record<string, unknown>,
+): { referenceType: string; referenceId: string } | null {
+  const preferred = voucherType === 'receipt' ? [credit] : voucherType === 'payment' ? [debit] : [debit, credit];
+  for (const acc of preferred) {
+    const sourceType = String(acc.source_type ?? '');
+    const sourceId = String(acc.source_id ?? '').trim();
+    if (!sourceId || !PARTY_ACCOUNT_SOURCE_TYPES.has(sourceType)) continue;
+    if (sourceId.startsWith('aed_agent:')) continue;
+    const referenceType =
+      voucherType === 'payment'
+        ? 'ic_fund_payment'
+        : voucherType === 'receipt'
+          ? 'ic_fund_receipt'
+          : voucherType === 'journal'
+            ? 'ic_fund_journal'
+            : null;
+    if (!referenceType) return null;
+    return { referenceType, referenceId: sourceId };
+  }
+  return null;
+}
+
 function accountBalanceSelectSql(opts?: {
   asOfParam?: string | null;
   branchParam?: string | null;
@@ -262,6 +293,11 @@ async function fetchAccountsWithBalances(
   branchId: string,
   asOfDate?: string | null,
 ): Promise<ICFundAccount[]> {
+  try {
+    await healMissingDealPartyVouchers();
+  } catch (err) {
+    logger.warn({ err }, 'healMissingDealPartyVouchers skipped during account list');
+  }
   await relinkAedAgentLedgerAccounts();
   const joinOpts = asOfDate
     ? { asOfParam: '$2', branchParam: '$1' }
@@ -415,6 +451,7 @@ export async function getICFundVoucherPageAction(params: {
   limit?: number;
   offset?: number;
   includeStats?: boolean;
+  book?: 'AED' | 'INR';
 }): Promise<
   ActionResult<{
     vouchers: ICFundVoucher[];
@@ -430,18 +467,30 @@ export async function getICFundVoucherPageAction(params: {
   const includeStats = Boolean(params.includeStats);
 
   try {
-    const { clauses, values, nextIdx } = buildVoucherListFilter(params);
+    const book = params.book === 'INR' ? 'INR' : 'AED';
+    if (book === 'INR') {
+      await withTransaction(async client => {
+        await ensureInrCashTill(client, HQ_IC_FUNDS_BRANCH_ID);
+      });
+    }
+    const fromSql = book === 'INR' ? INR_VOUCHER_FROM_SQL_SHARED : VOUCHER_FROM_SQL;
+    const listColumns = book === 'INR' ? INR_VOUCHER_LIST_SELECT_COLUMNS : VOUCHER_LIST_SELECT_COLUMNS;
+    const statsBareFrom =
+      book === 'INR' ? 'FROM inr_fund_vouchers v' : 'FROM ic_fund_vouchers v';
+    const { clauses, values, nextIdx } = buildVoucherListFilter(
+      book === 'INR' ? { ...params, branchId: HQ_IC_FUNDS_BRANCH_ID } : params,
+    );
     const listSql = {
-      text: `SELECT ${VOUCHER_LIST_SELECT_COLUMNS},
+      text: `SELECT ${listColumns}, '${book}'::text AS book,
          COUNT(*) OVER()::int AS _total_count
-       ${VOUCHER_FROM_SQL}
+       ${fromSql}
        WHERE ${clauses.join(' AND ')}
        ORDER BY v.voucher_date DESC, v.voucher_no DESC, v.created_at DESC
        LIMIT $${nextIdx} OFFSET $${nextIdx + 1}`,
       values: [...values, limit, offset],
     };
 
-    const statsFromSql = params.search?.trim() ? VOUCHER_FROM_SQL : 'FROM ic_fund_vouchers v';
+    const statsFromSql = params.search?.trim() ? fromSql : statsBareFrom;
     const statsSql = includeStats
       ? {
           text: `SELECT
@@ -594,10 +643,37 @@ export async function listICFundAccountsAction(branchId: string): Promise<ICFund
 }
 
 /** Fast account list for voucher pickers — skips voucher balance aggregation. */
-export async function listICFundAccountsLiteAction(branchId: string): Promise<ICFundAccount[]> {
+export async function listICFundAccountsLiteAction(
+  branchId: string,
+  book: 'AED' | 'INR' = 'AED',
+): Promise<ICFundAccount[]> {
   const access = await requireICFundsAccess(branchId, 'read');
   if (!access.ok) return [];
   try {
+    if (book === 'INR') {
+      await withTransaction(async client => {
+        await ensureInrCashTill(client, HQ_IC_FUNDS_BRANCH_ID);
+      });
+      const res = await query(
+        `SELECT a.id, a.branch_id, a.name, a.account_type, a.status, a.opening_balance,
+                a.notes, a.created_at, a.source_type, a.source_id,
+                NULL::text AS phone,
+                NULL::text AS customer_email,
+                NULL::text AS customer_phone,
+                NULL::uuid AS customer_auth_user_id,
+                b.name AS branch_name, b.slug AS branch_slug,
+                a.opening_balance AS balance,
+                0::numeric AS pending_balance
+         FROM inr_fund_accounts a
+         LEFT JOIN branches b ON b.id = a.branch_id
+         WHERE a.branch_id = $1
+           AND a.account_type IN ('bank', 'personal', 'income', 'profit', 'expense', 'd_expense')
+         ORDER BY a.account_type, LOWER(a.name)`,
+        [HQ_IC_FUNDS_BRANCH_ID],
+      );
+      return res.rows.map(r => mapAccount(r as Record<string, unknown>));
+    }
+
     const res = await query(
       `SELECT a.id, a.branch_id, a.name, a.account_type, a.status, a.opening_balance,
               a.notes, a.created_at, a.source_type, a.source_id, a.phone,
@@ -622,7 +698,7 @@ export async function listICFundAccountsLiteAction(branchId: string): Promise<IC
     );
     return res.rows.map(r => mapAccount(r as Record<string, unknown>));
   } catch (err) {
-    logger.error({ err, branchId }, 'Failed to list lite IC fund accounts');
+    logger.error({ err, branchId, book }, 'Failed to list lite IC fund accounts');
     return [];
   }
 }
@@ -632,6 +708,11 @@ export async function listHQICFundAccountsAction(): Promise<ICFundAccount[]> {
   if (!user || user.role !== 'admin') return [];
   try {
     await ensureHqIcFundsBranch();
+    try {
+      await healMissingDealPartyVouchers();
+    } catch (err) {
+      logger.warn({ err }, 'healMissingDealPartyVouchers skipped during HQ account list');
+    }
     await relinkAedAgentLedgerAccounts();
     const res = await query(
       `${accountBalanceSelectSql({ branchParam: '$1' })} WHERE a.branch_id = $1 ORDER BY a.account_type, LOWER(a.name)`,
@@ -1028,13 +1109,17 @@ export async function listWarehouseDealVouchersAction(params: {
 }
 
 const COUNTERPARTY_AED_SALE_REFERENCE_TYPES = ['ic_sale', 'ic_sale_cogs', 'ic_sale_profit', 'metal_sale_aed'] as const;
-const COUNTERPARTY_INR_PURCHASE_REFERENCE_TYPES = ['metal_purchase', 'lab_test_purchase'] as const;
-const COUNTERPARTY_INR_SALE_REFERENCE_TYPES = [
-  'metal_sale_cogs',
-  'metal_sale_profit',
-  'metal_sale_receipt',
-  'lab_test_sale',
+const COUNTERPARTY_ACCOUNTING_REFERENCE_TYPES = [
+  'ic_fund_payment',
+  'ic_fund_receipt',
+  'ic_fund_journal',
 ] as const;
+
+const INR_VOUCHER_FROM_SQL = `
+FROM inr_fund_vouchers v
+JOIN inr_fund_accounts da ON da.id = v.debit_account_id
+JOIN inr_fund_accounts ca ON ca.id = v.credit_account_id
+`;
 
 const INR_VOUCHER_DETAIL_SELECT_SQL = `
 SELECT
@@ -1061,9 +1146,7 @@ SELECT
   v.reference_type,
   v.reference_id,
   'INR'::text AS book
-FROM inr_fund_vouchers v
-JOIN inr_fund_accounts da ON da.id = v.debit_account_id
-JOIN inr_fund_accounts ca ON ca.id = v.credit_account_id
+${INR_VOUCHER_FROM_SQL}
 `;
 
 /** IC Funds (AED) + INR metal journals for this counterparty. */
@@ -1094,7 +1177,16 @@ export async function listCounterpartyDealVouchersAction(params: {
   }
   if (!accessOk) return [];
 
-  await relinkAedAgentLedgerAccounts();
+  try {
+    await healMissingDealPartyVouchers(counterpartyId);
+  } catch (err) {
+    logger.warn({ err, counterpartyId }, 'healMissingDealPartyVouchers skipped during journal list');
+  }
+  try {
+    await relinkAedAgentLedgerAccounts();
+  } catch (err) {
+    logger.warn({ err, counterpartyId }, 'relinkAedAgentLedgerAccounts skipped during journal list');
+  }
 
   const limit = clampVoucherListLimit(params.limit ?? 500);
   const startDate = params.startDate?.trim() || null;
@@ -1113,10 +1205,12 @@ export async function listCounterpartyDealVouchersAction(params: {
       WHERE aa.id = s.aed_agent_id AND aa.counterparty_id = $1::uuid
     )`;
   const dealIdSql = (alias: string) => `CAST(${alias}.id AS text) = CAST(v.reference_id AS text)`;
-  const onPartyAccounts = `($7::varchar[] IS NOT NULL AND (v.debit_account_id = ANY($7::varchar[]) OR v.credit_account_id = ANY($7::varchar[])))`;
+  const onPartyAccounts = `($6::varchar[] IS NOT NULL AND (v.debit_account_id = ANY($6::varchar[]) OR v.credit_account_id = ANY($6::varchar[])))`;
+  const onAccountingRef = `(v.reference_type = ANY($7::text[]) AND v.reference_id = $1)`;
 
   const aedWhere = `(
       ${onPartyAccounts}
+      OR ${onAccountingRef}
       OR (v.reference_type = 'ic_purchase' AND EXISTS (
         SELECT 1 FROM ic_purchases p
         WHERE ${dealIdSql('p')} AND p.counterparty_id = $1::uuid
@@ -1142,8 +1236,6 @@ export async function listCounterpartyDealVouchersAction(params: {
         ${dealDateSql('s')}
       ))
     )`;
-
-  const inrWhere = onPartyAccounts;
 
   try {
     const [aedAccounts, inrAccounts] = await Promise.all([
@@ -1172,26 +1264,28 @@ export async function listCounterpartyDealVouchersAction(params: {
           startDate,
           endDate,
           limit,
-          [...COUNTERPARTY_AED_SALE_REFERENCE_TYPES],
           aedAccountIds.length ? aedAccountIds : null,
+          [...COUNTERPARTY_ACCOUNTING_REFERENCE_TYPES],
         ],
       ),
       query(
         `${INR_VOUCHER_DETAIL_SELECT_SQL}
-         WHERE ${inrWhere}
-           AND ($3::date IS NULL OR v.voucher_date >= $3::date)
-           AND ($4::date IS NULL OR v.voucher_date <= $4::date)
+         WHERE (
+           ($4::varchar[] IS NOT NULL AND (v.debit_account_id = ANY($4::varchar[]) OR v.credit_account_id = ANY($4::varchar[])))
+           OR (v.reference_type = ANY($5::text[]) AND v.reference_id = $1)
+         )
+           AND ($2::date IS NULL OR v.voucher_date >= $2::date)
+           AND ($3::date IS NULL OR v.voucher_date <= $3::date)
            AND v.status IS DISTINCT FROM 'void'
          ORDER BY v.voucher_date DESC, v.voucher_no DESC, v.created_at DESC
-         LIMIT $5`,
+         LIMIT $6`,
         [
           counterpartyId,
-          [...COUNTERPARTY_INR_PURCHASE_REFERENCE_TYPES],
           startDate,
           endDate,
-          limit,
-          [...COUNTERPARTY_INR_SALE_REFERENCE_TYPES],
           inrAccountIds.length ? inrAccountIds : null,
+          [...COUNTERPARTY_ACCOUNTING_REFERENCE_TYPES],
+          limit,
         ],
       ),
     ]);
@@ -1390,7 +1484,16 @@ export async function getCounterpartyLedgerKpisAction(params: {
   }
   if (!accessOk) return empty;
 
-  await relinkAedAgentLedgerAccounts();
+  try {
+    await healMissingDealPartyVouchers(counterpartyId);
+  } catch (err) {
+    logger.warn({ err, counterpartyId }, 'healMissingDealPartyVouchers skipped during KPI load');
+  }
+  try {
+    await relinkAedAgentLedgerAccounts();
+  } catch (err) {
+    logger.warn({ err, counterpartyId }, 'relinkAedAgentLedgerAccounts skipped during KPI load');
+  }
 
   const startDate = params.startDate?.trim() || null;
   const endDate = params.endDate?.trim() || null;
@@ -1417,10 +1520,77 @@ export async function postICFundVoucherAction(input: unknown): Promise<ActionRes
   const amount = roundLedgerAmount(Number(parsed.data.amount));
   if (amount <= 0) return { success: false, error: 'Amount must be greater than zero' };
 
+  if (parsed.data.book === 'INR') {
+    if (parsed.data.voucherType !== 'payment' && parsed.data.voucherType !== 'receipt') {
+      return { success: false, error: 'INR book supports payments and receipts only.' };
+    }
+    try {
+      const id = await withTransaction(async client => {
+        await ensureInrCashTill(client, HQ_IC_FUNDS_BRANCH_ID);
+        const accounts = await client.query(
+          `SELECT id, account_type, status, branch_id, source_type, source_id
+           FROM inr_fund_accounts
+           WHERE id = ANY($1::varchar[]) AND branch_id = $2
+           ORDER BY id
+           FOR UPDATE`,
+          [[parsed.data.debitAccountId, parsed.data.creditAccountId], HQ_IC_FUNDS_BRANCH_ID],
+        );
+        if (accounts.rows.length !== 2) {
+          throw new Error('One or both accounts were not found');
+        }
+        const debit = accounts.rows.find(r => String(r.id) === parsed.data.debitAccountId);
+        const credit = accounts.rows.find(r => String(r.id) === parsed.data.creditAccountId);
+        if (!debit || !credit) throw new Error('One or both accounts were not found');
+        if (debit.status !== 'active' || credit.status !== 'active') {
+          throw new Error('Inactive accounts cannot be used');
+        }
+        const ruleError = validateVoucherAccounts({
+          voucherType: parsed.data.voucherType,
+          debitType: debit.account_type as ICFundAccountType,
+          creditType: credit.account_type as ICFundAccountType,
+          debitId: parsed.data.debitAccountId,
+          creditId: parsed.data.creditAccountId,
+        });
+        if (ruleError) throw new Error(ruleError);
+        const partyRef = accountingVoucherPartyRef(parsed.data.voucherType, debit, credit);
+        const voucherId = await postInrVoucherInTx(client, {
+          branchId: HQ_IC_FUNDS_BRANCH_ID,
+          voucherType: parsed.data.voucherType,
+          voucherDate: parsed.data.voucherDate,
+          debitAccountId: parsed.data.debitAccountId,
+          creditAccountId: parsed.data.creditAccountId,
+          amount,
+          notes: parsed.data.notes?.trim() ?? '',
+          createdByName: access.user.name ?? access.user.id ?? null,
+          referenceType: partyRef?.referenceType ?? null,
+          referenceId: partyRef?.referenceId ?? null,
+        });
+        if (!voucherId) throw new Error('Failed to save voucher');
+        return voucherId;
+      });
+      await writeAuditLog({
+        actor: access.user,
+        action: 'create',
+        entityType: 'inr_fund_voucher',
+        entityId: id,
+        branchId: HQ_IC_FUNDS_BRANCH_ID,
+        after: { voucherType: parsed.data.voucherType, amount, book: 'INR' },
+      });
+      revalidatePath('/admin/counterparties');
+      revalidatePath('/admin/payments');
+      revalidatePath('/admin/receipts');
+      const res = await query(`${INR_VOUCHER_DETAIL_SELECT_SQL} WHERE v.id = $1`, [id]);
+      return { success: true, data: mapVoucher(res.rows[0] as Record<string, unknown>) };
+    } catch (err) {
+      logger.error({ err }, 'Failed to post INR fund voucher');
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to save voucher' };
+    }
+  }
+
   try {
     const id = await withTransaction(async (client) => {
       const accounts = await client.query(
-        `SELECT id, account_type, status, branch_id
+        `SELECT id, account_type, status, branch_id, source_type, source_id
          FROM ic_fund_accounts
          WHERE id = ANY($1::varchar[]) AND branch_id = $2
          ORDER BY id
@@ -1442,8 +1612,8 @@ export async function postICFundVoucherAction(input: unknown): Promise<ActionRes
 
       const ruleError = validateVoucherAccounts({
         voucherType: parsed.data.voucherType,
-        debitType: debit.account_type,
-        creditType: credit.account_type,
+        debitType: debit.account_type as ICFundAccountType,
+        creditType: credit.account_type as ICFundAccountType,
         debitId: parsed.data.debitAccountId,
         creditId: parsed.data.creditAccountId,
       });
@@ -1471,13 +1641,15 @@ export async function postICFundVoucherAction(input: unknown): Promise<ActionRes
       );
       const voucherNo = Number(counter.rows[0]?.last_no) || 1;
       const voucherId = `ICFV-${crypto.randomUUID().slice(0, 10).toUpperCase()}`;
+      const partyRef = accountingVoucherPartyRef(parsed.data.voucherType, debit, credit);
 
       await client.query(
         `INSERT INTO ic_fund_vouchers (
            id, branch_id, voucher_no, voucher_type, voucher_date,
            debit_account_id, credit_account_id, amount, notes,
-           created_by, created_by_name, created_by_user_id
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+           created_by, created_by_name, created_by_user_id,
+           reference_type, reference_id
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
         [
           voucherId,
           parsed.data.branchId,
@@ -1491,10 +1663,19 @@ export async function postICFundVoucherAction(input: unknown): Promise<ActionRes
           access.user.id ?? null,
           access.user.name ?? null,
           access.user.id ?? null,
+          partyRef?.referenceType ?? null,
+          partyRef?.referenceId ?? null,
         ],
       );
       return voucherId;
     });
+
+    if (parsed.data.voucherType === 'journal') {
+      await withTransaction(async client => {
+        const { tryAllocateCapitalFromAedVoucher } = await import('@/lib/capital/voucherHook');
+        await tryAllocateCapitalFromAedVoucher(client, parsed.data.branchId, id);
+      });
+    }
 
     await writeAuditLog({
       actor: access.user,
@@ -1505,6 +1686,9 @@ export async function postICFundVoucherAction(input: unknown): Promise<ActionRes
       after: { voucherType: parsed.data.voucherType, amount },
     });
 
+    revalidatePath('/admin/counterparties');
+    revalidatePath('/admin/payments');
+    revalidatePath('/admin/receipts');
     const res = await query(`${VOUCHER_DETAIL_SELECT_SQL} WHERE v.id = $1`, [id]);
     return { success: true, data: mapVoucher(res.rows[0] as Record<string, unknown>) };
   } catch (err) {
@@ -1513,12 +1697,68 @@ export async function postICFundVoucherAction(input: unknown): Promise<ActionRes
   }
 }
 
+function ledgerBookForVoucherId(voucherId: string): 'AED' | 'INR' {
+  return voucherId.startsWith('INFV-') ? 'INR' : 'AED';
+}
+
 export async function deleteICFundVoucherAction(
   branchId: string,
   voucherId: string,
+  _book: 'AED' | 'INR' = 'AED',
 ): Promise<ActionResult<{ id: string }>> {
-  const access = await requireICFundsAccess(branchId, 'write');
+  const ledgerBook = ledgerBookForVoucherId(voucherId);
+  const voucherTable = ledgerBook === 'INR' ? 'inr_fund_vouchers' : 'ic_fund_vouchers';
+
+  const lookup = await query(
+    `SELECT branch_id, status FROM ${voucherTable} WHERE id = $1 LIMIT 1`,
+    [voucherId],
+  );
+  if (lookup.rows.length === 0) {
+    return { success: false, error: 'Voucher not found' };
+  }
+  const voucherBranchId = String(lookup.rows[0].branch_id);
+  const voucherStatus = String(lookup.rows[0].status ?? 'active');
+  if (voucherStatus === 'void') {
+    return { success: false, error: 'Voucher is already void' };
+  }
+
+  const access = await requireICFundsAccess(voucherBranchId, 'write');
   if (!access.ok) return { success: false, error: access.error };
+
+  if (ledgerBook === 'INR') {
+    try {
+      const res = await query(
+        `UPDATE inr_fund_vouchers
+         SET status = 'void',
+             voided_at = CURRENT_TIMESTAMP
+         WHERE id = $1 AND branch_id = $2 AND status = 'active'
+         RETURNING id`,
+        [voucherId, voucherBranchId],
+      );
+      if (res.rows.length === 0) {
+        return { success: false, error: 'Voucher could not be voided' };
+      }
+      await withTransaction(async client => {
+        const { voidCapitalAllocationsForVoucher } = await import('@/lib/capital/allocation');
+        await voidCapitalAllocationsForVoucher(client, voucherId, 'INR');
+      });
+      await writeAuditLog({
+        actor: access.user,
+        action: 'void',
+        entityType: 'inr_fund_voucher',
+        entityId: voucherId,
+        branchId: voucherBranchId,
+      });
+      revalidatePath('/admin/counterparties');
+      revalidatePath('/admin/payments');
+      revalidatePath('/admin/receipts');
+      revalidatePath('/admin/capital');
+      return { success: true, data: { id: voucherId } };
+    } catch (err) {
+      logger.error({ err, voucherId }, 'Failed to void INR fund voucher');
+      return { success: false, error: 'Failed to void voucher' };
+    }
+  }
 
   try {
     const res = await query(
@@ -1528,26 +1768,29 @@ export async function deleteICFundVoucherAction(
            voided_by_name = $3
        WHERE id = $1 AND branch_id = $2 AND status = 'active'
        RETURNING id`,
-      [voucherId, branchId, access.user.name ?? access.user.id ?? 'User'],
+      [voucherId, voucherBranchId, access.user.name ?? access.user.id ?? 'User'],
     );
     if (res.rows.length === 0) {
-      const exists = await query(
-        `SELECT status FROM ic_fund_vouchers WHERE id = $1 AND branch_id = $2`,
-        [voucherId, branchId],
-      );
-      if (exists.rows.length === 0) return { success: false, error: 'Voucher not found' };
-      return { success: false, error: 'Voucher is already void' };
+      return { success: false, error: 'Voucher could not be voided' };
     }
+    await withTransaction(async client => {
+      const { voidCapitalAllocationsForVoucher } = await import('@/lib/capital/allocation');
+      await voidCapitalAllocationsForVoucher(client, voucherId, 'AED');
+    });
     await writeAuditLog({
       actor: access.user,
       action: 'void',
       entityType: 'ic_fund_voucher',
       entityId: voucherId,
-      branchId,
+      branchId: voucherBranchId,
     });
+    revalidatePath('/admin/counterparties');
+    revalidatePath('/admin/payments');
+    revalidatePath('/admin/receipts');
+    revalidatePath('/admin/capital');
     return { success: true, data: { id: voucherId } };
   } catch (err) {
-    logger.error({ err, voucherId }, 'Failed to void IC fund voucher');
+    logger.error({ err, voucherId, branchId }, 'Failed to void IC fund voucher');
     return { success: false, error: 'Failed to void voucher' };
   }
 }
@@ -1876,6 +2119,11 @@ export async function getICFundAccountDetailAction(params: {
   accountId: string;
 }): Promise<ActionResult<ICFundAccountDetail>> {
   try {
+    try {
+      await healMissingDealPartyVouchers();
+    } catch (err) {
+      logger.warn({ err, accountId: params.accountId }, 'healMissingDealPartyVouchers skipped during account detail');
+    }
     await relinkAedAgentLedgerAccounts();
     const accRes = await query(
       `${accountBalanceSelectSql({ accountParam: '$1' })} WHERE a.id = $1`,

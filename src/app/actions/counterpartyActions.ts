@@ -11,6 +11,7 @@ import { COUNTERPARTY_SELECT } from '@/lib/counterparties/mapper';
 import { mapICCounterpartyRow } from '@/lib/counterparties/mapper';
 import { normalizeCounterpartyRoles, type CounterpartyRole } from '@/lib/counterparties/roles';
 import { syncCounterpartyAedAgent } from '@/lib/counterparties/aedAgentSync';
+import { parseAedInrOpenings } from '@/lib/icFunds/entityOpenings';
 
 function revalidateCounterpartyPaths(slug: string) {
   revalidatePath(`/${slug}/counterparties`);
@@ -57,6 +58,8 @@ export async function saveCounterpartyAction(
     locality?: string;
     code?: string | null;
     roles?: CounterpartyRole[];
+    openingAed?: number;
+    openingInr?: number;
   },
 ) {
   try {
@@ -74,28 +77,56 @@ export async function saveCounterpartyAction(
     const parsedCode = codeResult.data;
     const status = data.status === 'inactive' ? 'inactive' : 'active';
     const roles = normalizeCounterpartyRoles(data.roles);
+    const hasOpenings = data.openingAed !== undefined || data.openingInr !== undefined;
+    const opening = hasOpenings
+      ? parseAedInrOpenings({ openingAed: data.openingAed, openingInr: data.openingInr })
+      : null;
 
     if (data.id) {
       const res = await query(
-        `UPDATE ic_counterparties
-         SET name = $1, code = $2, phone = $3, email = $4, address = $5, country = $6,
-             subdivision = $7, locality = $8, status = $9, roles = $10
-         WHERE id = $11 AND branch_id = $12
-         RETURNING *`,
-        [
-          data.name.trim(),
-          parsedCode,
-          data.phone?.trim() || null,
-          data.email?.trim() || null,
-          data.address?.trim() || null,
-          country,
-          data.subdivision?.trim() || null,
-          data.locality?.trim() || null,
-          status,
-          roles,
-          data.id,
-          branchId,
-        ],
+        opening
+          ? `UPDATE ic_counterparties
+             SET name = $1, code = $2, phone = $3, email = $4, address = $5, country = $6,
+                 subdivision = $7, locality = $8, status = $9, roles = $10,
+                 opening_aed = $13, opening_inr = $14
+             WHERE id = $11 AND branch_id = $12
+             RETURNING *`
+          : `UPDATE ic_counterparties
+             SET name = $1, code = $2, phone = $3, email = $4, address = $5, country = $6,
+                 subdivision = $7, locality = $8, status = $9, roles = $10
+             WHERE id = $11 AND branch_id = $12
+             RETURNING *`,
+        opening
+          ? [
+              data.name.trim(),
+              parsedCode,
+              data.phone?.trim() || null,
+              data.email?.trim() || null,
+              data.address?.trim() || null,
+              country,
+              data.subdivision?.trim() || null,
+              data.locality?.trim() || null,
+              status,
+              roles,
+              data.id,
+              branchId,
+              opening.openingAed,
+              opening.openingInr,
+            ]
+          : [
+              data.name.trim(),
+              parsedCode,
+              data.phone?.trim() || null,
+              data.email?.trim() || null,
+              data.address?.trim() || null,
+              country,
+              data.subdivision?.trim() || null,
+              data.locality?.trim() || null,
+              status,
+              roles,
+              data.id,
+              branchId,
+            ],
       );
       if (res.rowCount === 0) return { success: false, error: 'Counterparty not found' };
       await syncCounterpartyAedAgent({ query }, {
@@ -111,8 +142,9 @@ export async function saveCounterpartyAction(
     const id = crypto.randomUUID();
     await query(
       `INSERT INTO ic_counterparties (
-         id, branch_id, name, code, phone, email, address, country, subdivision, locality, status, roles
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+         id, branch_id, name, code, phone, email, address, country, subdivision, locality, status, roles,
+         opening_aed, opening_inr
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
       [
         id,
         branchId,
@@ -126,6 +158,8 @@ export async function saveCounterpartyAction(
         data.locality?.trim() || null,
         status,
         roles,
+        (opening ?? parseAedInrOpenings(null)).openingAed,
+        (opening ?? parseAedInrOpenings(null)).openingInr,
       ],
     );
     await syncCounterpartyAedAgent({ query }, {

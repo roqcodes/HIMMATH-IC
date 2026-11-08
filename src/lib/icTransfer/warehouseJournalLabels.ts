@@ -5,12 +5,34 @@ function isMetal(mode: string | undefined | null): boolean {
   return mode === 'metal';
 }
 
+function accountingEntryLabel(voucherType?: string | null, referenceType?: string | null): string | null {
+  if (
+    referenceType === 'ic_fund_payment' ||
+    referenceType === 'ic_fund_receipt' ||
+    referenceType === 'ic_fund_journal' ||
+    !referenceType
+  ) {
+    if (voucherType === 'payment') return 'Payment';
+    if (voucherType === 'receipt') return 'Receipt';
+    if (voucherType === 'contra') return 'Contra';
+    if (voucherType === 'journal' && (!referenceType || referenceType === 'ic_fund_journal')) {
+      return 'Journal';
+    }
+    if (referenceType === 'ic_fund_payment') return 'Payment';
+    if (referenceType === 'ic_fund_receipt') return 'Receipt';
+  }
+  return null;
+}
+
 /** Human label for warehouse-linked IC Funds entries (purchase, sale, COGS, profit). */
 export function warehouseJournalEntryLabel(
-  voucher: Pick<ICFundVoucher, 'referenceType' | 'referenceId'>,
+  voucher: Pick<ICFundVoucher, 'referenceType' | 'referenceId' | 'voucherType'>,
   purchases: ICPurchase[],
   sales: ICSale[],
 ): string {
+  const accounting = accountingEntryLabel(voucher.voucherType, voucher.referenceType);
+  if (accounting) return accounting;
+
   const ref = voucher.referenceType;
   const id = voucher.referenceId;
 
@@ -40,7 +62,7 @@ export function warehouseJournalEntryLabel(
     case 'ic_sale_profit':
       return metal ? 'Metal profit' : 'IC profit';
     default:
-      return ref || '—';
+      return accountingEntryLabel(voucher.voucherType, ref) || ref || '—';
   }
 }
 
@@ -51,6 +73,13 @@ export function warehouseJournalDealRef(
 ): string {
   const id = voucher.referenceId;
   if (!id) return '—';
+  if (
+    voucher.referenceType === 'ic_fund_payment' ||
+    voucher.referenceType === 'ic_fund_receipt' ||
+    voucher.referenceType === 'ic_fund_journal'
+  ) {
+    return '—';
+  }
 
   if (voucher.referenceType === 'ic_purchase' || voucher.referenceType === 'metal_purchase' || voucher.referenceType === 'metal_purchase_aed' || voucher.referenceType === 'lab_test_purchase') {
     const p = purchases.find(x => x.id === id);

@@ -127,7 +127,7 @@ export function buildBalanceSheetPresentation(
           section: 'liability',
         });
       }
-    } else if (a.accountType === 'profit') {
+    } else if (a.accountType === 'profit' || a.accountType === 'capital') {
       const reserve = -closing;
       if (Math.abs(reserve) > 0.005) {
         equity.push({
@@ -194,6 +194,7 @@ export function trialBalanceGroup(accountType: ICFundAccountType): TrialBalanceG
     case 'expense':
       return 'expenses';
     case 'profit':
+    case 'capital':
       return 'equity';
     default:
       return 'other';

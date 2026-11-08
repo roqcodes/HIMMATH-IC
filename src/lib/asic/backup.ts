@@ -85,7 +85,7 @@ export const BACKUP_TABLES: readonly BackupTableDef[] = [
     pk: ['id'],
     columns: [
       'id', 'branch_id', 'name', 'code', 'phone', 'email', 'address', 'commission', 'region_id',
-      'country', 'subdivision', 'locality', 'status', 'balance', 'created_at',
+      'country', 'subdivision', 'locality', 'status', 'balance', 'opening_aed', 'opening_inr', 'created_at',
     ],
   },
   {
@@ -115,6 +115,7 @@ export const BACKUP_TABLES: readonly BackupTableDef[] = [
     pk: ['id'],
     columns: [
       'id', 'name', 'phone', 'commission', 'region_id', 'email', 'address', 'current_stock',
+      'current_metal_g', 'opening_stock', 'opening_metal_g', 'opening_aed', 'opening_inr',
       'send_delivery_proof_to_customer', 'branch_id', 'created_at',
     ],
   },

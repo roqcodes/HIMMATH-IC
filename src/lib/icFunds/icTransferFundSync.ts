@@ -108,6 +108,32 @@ async function insertIgnoringUnique(
   }
 }
 
+export async function applyAedAccountOpening(
+  client: DbClient,
+  accountId: string,
+  openingBalance: number,
+): Promise<void> {
+  const next = Number(Number(openingBalance).toFixed(2));
+  const current = await client.query(
+    `SELECT opening_balance FROM ic_fund_accounts WHERE id = $1 LIMIT 1`,
+    [accountId],
+  );
+  if (current.rows.length === 0) return;
+  const prev = Number(current.rows[0].opening_balance) || 0;
+  if (prev === next) return;
+
+  const used = await client.query(
+    `SELECT 1 FROM ic_fund_vouchers
+     WHERE debit_account_id = $1 OR credit_account_id = $1
+     LIMIT 1`,
+    [accountId],
+  );
+  if (used.rows.length > 0) {
+    throw new Error('Opening balance is locked after entries exist. Post a journal adjustment instead.');
+  }
+  await client.query(`UPDATE ic_fund_accounts SET opening_balance = $2 WHERE id = $1`, [accountId, next]);
+}
+
 export async function ensureLinkedAccount(
   client: DbClient,
   params: {
@@ -609,7 +635,7 @@ async function postSaleMarginVouchers(
   const profitNotesSuffix = `${margin.deliveredUnits} u @ ${margin.saleRate.toFixed(4)} (avg cost ${avgLabel})`;
 
   if (margin.grossProfit > 0) {
-    await postVoucherInTx(client, {
+    const profitVoucherId = await postVoucherInTx(client, {
       branchId,
       voucherType: 'journal',
       voucherDate,
@@ -621,8 +647,12 @@ async function postSaleMarginVouchers(
       referenceId: saleRef,
       voucherStatus: 'active',
     });
+    if (profitVoucherId) {
+      const { tryAllocateCapitalFromAedVoucher } = await import('@/lib/capital/voucherHook');
+      await tryAllocateCapitalFromAedVoucher(client, branchId, profitVoucherId);
+    }
   } else if (margin.grossProfit < 0) {
-    await postVoucherInTx(client, {
+    const profitVoucherId = await postVoucherInTx(client, {
       branchId,
       voucherType: 'journal',
       voucherDate,
@@ -634,6 +664,10 @@ async function postSaleMarginVouchers(
       referenceId: saleRef,
       voucherStatus: 'active',
     });
+    if (profitVoucherId) {
+      const { tryAllocateCapitalFromAedVoucher } = await import('@/lib/capital/voucherHook');
+      await tryAllocateCapitalFromAedVoucher(client, branchId, profitVoucherId);
+    }
   } else {
     await voidVoucherByReference(client, branchId, 'ic_sale_profit', saleRef);
   }
@@ -655,12 +689,71 @@ async function repairCompletedCashSaleMarginsForWarehouse(
     [warehouseId],
   );
   for (const row of res.rows) {
+    await postCashIcSalePartyVoucher(client, row, branchId);
     await postSaleMarginVouchers(client, row, branchId);
   }
 }
 
 function isMetalSettlement(mode: unknown): boolean {
   return String(mode || '') === 'metal';
+}
+
+async function postCashIcSalePartyVoucher(
+  client: DbClient,
+  sale: Record<string, unknown>,
+  branchId: string,
+): Promise<void> {
+  const saleId = String(sale.id);
+  const orderStatus = String(sale.order_status || '');
+  const amount = (Number(sale.aed_amount) || 0) + (Number(sale.service_charge) || 0);
+  if (amount <= 0) {
+    await voidVoucherByReference(client, branchId, 'ic_sale', saleId);
+    return;
+  }
+  if (!SALE_GHOST_STATUSES.has(orderStatus) && orderStatus !== 'completed') {
+    await voidVoucherByReference(client, branchId, 'ic_sale', saleId);
+    return;
+  }
+
+  const customerName = String(sale.order_customer_name || sale.customer_name || 'IC Customer').trim();
+  const counterpartyId = sale.counterparty_id ? String(sale.counterparty_id) : null;
+  const customerAccountId = counterpartyId
+    ? await ensureLinkedAccount(client, {
+        branchId,
+        sourceType: 'ic_counterparty',
+        sourceId: counterpartyId,
+        name: customerName,
+      })
+    : await ensureLinkedAccount(client, {
+        branchId,
+        sourceType: 'ic_counterparty',
+        sourceId: `name:${customerName.toLowerCase()}`,
+        name: customerName,
+      });
+  const incomeAccountId = await ensureSystemAccount(
+    client,
+    branchId,
+    'IC Sales',
+    'income',
+    'ic_transfer_sales',
+  );
+  if (!customerAccountId || !incomeAccountId) {
+    throw new Error('Could not resolve IC Funds accounts for sale');
+  }
+
+  const voucherStatus = orderStatus === 'completed' ? 'active' : 'pending';
+  await postVoucherInTx(client, {
+    branchId,
+    voucherType: 'journal',
+    voucherDate: isoDate(sale.status_updated_at || sale.created_at),
+    debitAccountId: customerAccountId,
+    creditAccountId: incomeAccountId,
+    amount,
+    notes: `${voucherStatus === 'active' ? 'Sold IC' : 'IC sale pending'} ${saleId.slice(0, 8)}`,
+    referenceType: 'ic_sale',
+    voucherStatus,
+    referenceId: saleId,
+  });
 }
 
 async function ensureInventoryAccount(
@@ -680,6 +773,15 @@ export async function voidVoucherByReference(
   referenceType: string,
   referenceId: string,
 ): Promise<void> {
+  const { voidCapitalAllocationsForVoucher } = await import('@/lib/capital/allocation');
+  const existing = await client.query(
+    `SELECT id FROM ic_fund_vouchers
+     WHERE branch_id = $1 AND reference_type = $2 AND reference_id = $3 AND status IN ('active', 'pending')`,
+    [branchId, referenceType, referenceId],
+  );
+  for (const row of existing.rows) {
+    await voidCapitalAllocationsForVoucher(client, String(row.id), 'AED');
+  }
   await client.query(
     `UPDATE ic_fund_vouchers
      SET status = 'void',
@@ -796,9 +898,8 @@ export async function postVoucherInTx(
   return id;
 }
 
-/** IC Transfer journals post to source branch when set, otherwise HQ ledger. */
-function resolveIcFundsLedgerBranchId(explicitBranchId?: string | null): string {
-  if (explicitBranchId) return String(explicitBranchId);
+/** IC Transfer journals always post to the HQ cash book (receipts, payments, counterparties). */
+function resolveIcFundsLedgerBranchId(_explicitBranchId?: string | null): string {
   return HQ_IC_FUNDS_BRANCH_ID;
 }
 
@@ -815,62 +916,43 @@ async function resolvePurchaseBranchId(client: DbClient, purchaseId: string): Pr
   return resolveIcFundsLedgerBranchId(branchId ? String(branchId) : null);
 }
 
-async function resolveSaleBranchId(client: DbClient, sale: Record<string, unknown>): Promise<string> {
-  const customerName = String(sale.customer_name || '');
-  const branchMatch = await client.query(
-    `SELECT id FROM branches WHERE LOWER(TRIM(name)) = LOWER(TRIM($1)) LIMIT 1`,
-    [customerName],
-  );
-  if (branchMatch.rows.length > 0) return String(branchMatch.rows[0].id);
-
-  if (sale.warehouse_id) {
-    const warehouseRes = await client.query(
-      `SELECT branch_id FROM ic_warehouses WHERE id = $1 LIMIT 1`,
-      [sale.warehouse_id],
-    );
-    if (warehouseRes.rows[0]?.branch_id) {
-      return String(warehouseRes.rows[0].branch_id);
-    }
-  }
-
-  if (sale.counterparty_id) {
-    const customerRes = await client.query(
-      `SELECT branch_id FROM ic_counterparties WHERE id = $1 LIMIT 1`,
-      [sale.counterparty_id],
-    );
-    if (customerRes.rows[0]?.branch_id) {
-      return String(customerRes.rows[0].branch_id);
-    }
-  }
-
-  return HQ_IC_FUNDS_BRANCH_ID;
-}
-
-async function resolveDefaultBranchId(client: DbClient): Promise<string> {
-  const res = await client.query(`SELECT id FROM branches ORDER BY id ASC LIMIT 1`);
-  if (res.rows.length > 0) return String(res.rows[0].id);
+async function resolveSaleBranchId(_client: DbClient, _sale: Record<string, unknown>): Promise<string> {
   return HQ_IC_FUNDS_BRANCH_ID;
 }
 
 export async function syncICCounterpartyFundAccount(counterpartyId: string): Promise<void> {
   try {
     const res = await query(
-      `SELECT id, name, phone, email, branch_id FROM ic_counterparties WHERE id = $1 LIMIT 1`,
+      `SELECT id, name, phone, email, branch_id, opening_aed, opening_inr
+       FROM ic_counterparties WHERE id = $1 LIMIT 1`,
       [counterpartyId],
     );
     if (res.rows.length === 0) return;
     const row = res.rows[0];
-    const branchId = row.branch_id ? String(row.branch_id) : await resolveDefaultBranchId(db);
-    if (!branchId) return;
-    await ensureLinkedAccount(db, {
-      branchId,
+    const aedAccountId = await ensureLinkedAccount(db, {
+      branchId: HQ_IC_FUNDS_BRANCH_ID,
       sourceType: 'ic_counterparty',
       sourceId: counterpartyId,
       name: String(row.name),
       phone: row.phone ? String(row.phone) : null,
     });
+    if (aedAccountId) {
+      await applyAedAccountOpening(db, aedAccountId, Number(row.opening_aed) || 0);
+    }
+    const { ensureInrLinkedAccount, applyInrAccountOpening } = await import('@/lib/ledgers/inr/inrFundSync');
+    const inrAccountId = await ensureInrLinkedAccount(
+      db,
+      HQ_IC_FUNDS_BRANCH_ID,
+      'ic_counterparty',
+      counterpartyId,
+      String(row.name),
+    );
+    if (inrAccountId) {
+      await applyInrAccountOpening(db, inrAccountId, Number(row.opening_inr) || 0);
+    }
   } catch (err) {
     logger.error({ err, counterpartyId }, 'Failed to sync IC counterparty fund account');
+    throw err;
   }
 }
 
@@ -881,22 +963,35 @@ export async function syncICSupplierFundAccount(counterpartyId: string): Promise
 export async function syncICWarehouseFundAccount(warehouseId: string): Promise<void> {
   try {
     const res = await query(
-      `SELECT id, name, phone, branch_id FROM ic_warehouses WHERE id = $1 LIMIT 1`,
+      `SELECT id, name, phone, branch_id, opening_aed, opening_inr FROM ic_warehouses WHERE id = $1 LIMIT 1`,
       [warehouseId],
     );
     if (res.rows.length === 0) return;
     const row = res.rows[0];
-    const branchId = row.branch_id ? String(row.branch_id) : await resolveDefaultBranchId(db);
-    if (!branchId) return;
-    await ensureLinkedAccount(db, {
-      branchId,
+    const aedAccountId = await ensureLinkedAccount(db, {
+      branchId: HQ_IC_FUNDS_BRANCH_ID,
       sourceType: 'ic_warehouse',
       sourceId: warehouseId,
       name: String(row.name),
       phone: row.phone ? String(row.phone) : null,
     });
+    if (aedAccountId) {
+      await applyAedAccountOpening(db, aedAccountId, Number(row.opening_aed) || 0);
+    }
+    const { ensureInrLinkedAccount, applyInrAccountOpening } = await import('@/lib/ledgers/inr/inrFundSync');
+    const inrAccountId = await ensureInrLinkedAccount(
+      db,
+      HQ_IC_FUNDS_BRANCH_ID,
+      'ic_warehouse',
+      warehouseId,
+      `Warehouse: ${String(row.name)}`,
+    );
+    if (inrAccountId) {
+      await applyInrAccountOpening(db, inrAccountId, Number(row.opening_inr) || 0);
+    }
   } catch (err) {
     logger.error({ err, warehouseId }, 'Failed to sync IC warehouse fund account');
+    throw err;
   }
 }
 
@@ -1045,53 +1140,7 @@ export async function syncICSaleToICFunds(saleId: string): Promise<void> {
         return;
       }
 
-      const customerName =
-        String(sale.order_customer_name || sale.customer_name || 'IC Customer').trim();
-
-      const counterpartyId = sale.counterparty_id ? String(sale.counterparty_id) : null;
-
-      const customerAccountId = counterpartyId
-        ? await ensureLinkedAccount(client, {
-            branchId,
-            sourceType: 'ic_counterparty',
-            sourceId: counterpartyId,
-            name: customerName,
-          })
-        : await ensureLinkedAccount(client, {
-            branchId,
-            sourceType: 'ic_counterparty',
-            sourceId: `name:${customerName.toLowerCase()}`,
-            name: customerName,
-          });
-
-      const incomeAccountId = await ensureSystemAccount(
-        client,
-        branchId,
-        'IC Sales',
-        'income',
-        'ic_transfer_sales',
-      );
-
-      if (!customerAccountId || !incomeAccountId) {
-        throw new Error('Could not resolve IC Funds accounts for sale');
-      }
-
-      const voucherStatus = orderStatus === 'completed' ? 'active' : 'pending';
-      const notesPrefix =
-        voucherStatus === 'active' ? 'Sold IC' : 'IC sale pending';
-
-      await postVoucherInTx(client, {
-        branchId,
-        voucherType: 'journal',
-        voucherDate: isoDate(sale.status_updated_at || sale.created_at),
-        debitAccountId: customerAccountId,
-        creditAccountId: incomeAccountId,
-        amount,
-        notes: `${notesPrefix} ${saleId.slice(0, 8)}`,
-        referenceType: 'ic_sale',
-        voucherStatus,
-        referenceId: saleId,
-      });
+      await postCashIcSalePartyVoucher(client, sale, branchId);
 
       if (orderStatus === 'completed') {
         const warehouseId = sale.warehouse_id ? String(sale.warehouse_id) : null;
@@ -1124,6 +1173,70 @@ export async function removeICSaleFromICFunds(saleId: string): Promise<void> {
     }
   } catch (err) {
     logger.error({ err, saleId }, 'Failed to remove IC sale from IC Funds');
+  }
+}
+
+const healLocks = new Map<string, Promise<void>>();
+
+/** Repost cash IC sale/purchase party vouchers that never landed (timeouts, deferred sync). */
+export async function healMissingDealPartyVouchers(counterpartyId?: string): Promise<void> {
+  const key = counterpartyId?.trim() || '*';
+  const existing = healLocks.get(key);
+  if (existing) {
+    await existing;
+    return;
+  }
+  const run = runHealMissingDealPartyVouchers(counterpartyId).finally(() => {
+    healLocks.delete(key);
+  });
+  healLocks.set(key, run);
+  await run;
+}
+
+async function runHealMissingDealPartyVouchers(counterpartyId?: string): Promise<void> {
+  const id = counterpartyId?.trim() || null;
+  const params = id ? [id] : [];
+  const saleFilter = id ? 'AND s.counterparty_id = $1::uuid' : '';
+  const sales = await query(
+    `SELECT s.id FROM ic_sales s
+     WHERE COALESCE(s.settlement_mode, 'cash') <> 'metal'
+       AND s.order_status IN ('completed', 'accepted', 'wh_processing', 'delivery_pending_admin')
+       ${saleFilter}
+       AND NOT EXISTS (
+         SELECT 1 FROM ic_fund_vouchers v
+         WHERE v.reference_type = 'ic_sale'
+           AND CAST(v.reference_id AS text) = CAST(s.id AS text)
+           AND COALESCE(v.status, 'active') <> 'void'
+       )`,
+    params,
+  );
+  for (const row of sales.rows) {
+    try {
+      await syncICSaleToICFunds(String(row.id));
+    } catch (err) {
+      logger.warn({ err, saleId: row.id }, 'Failed to heal missing IC sale ledger');
+    }
+  }
+
+  const purchaseFilter = id ? 'AND p.counterparty_id = $1::uuid' : '';
+  const purchases = await query(
+    `SELECT p.id FROM ic_purchases p
+     WHERE COALESCE(p.settlement_mode, 'cash') <> 'metal'
+       ${purchaseFilter}
+       AND NOT EXISTS (
+         SELECT 1 FROM ic_fund_vouchers v
+         WHERE v.reference_type = 'ic_purchase'
+           AND CAST(v.reference_id AS text) = CAST(p.id AS text)
+           AND COALESCE(v.status, 'active') <> 'void'
+       )`,
+    params,
+  );
+  for (const row of purchases.rows) {
+    try {
+      await syncICPurchaseToICFunds(String(row.id));
+    } catch (err) {
+      logger.warn({ err, purchaseId: row.id }, 'Failed to heal missing IC purchase ledger');
+    }
   }
 }
 

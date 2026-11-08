@@ -70,6 +70,8 @@ CREATE TABLE IF NOT EXISTS public.ic_counterparties (
     locality VARCHAR(255),
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
     balance NUMERIC(15, 2) NOT NULL DEFAULT 0,
+    opening_aed NUMERIC(15, 2) NOT NULL DEFAULT 0,
+    opening_inr NUMERIC(28, 14) NOT NULL DEFAULT 0,
     roles TEXT[] NOT NULL DEFAULT ARRAY['supplier', 'party']::TEXT[],
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
@@ -91,6 +93,10 @@ CREATE TABLE IF NOT EXISTS public.ic_warehouses (
     india_city VARCHAR(100),
     current_stock NUMERIC(15, 4) NOT NULL DEFAULT 0,
     current_metal_g NUMERIC(15, 4) NOT NULL DEFAULT 0,
+    opening_stock NUMERIC(15, 4) NOT NULL DEFAULT 0,
+    opening_metal_g NUMERIC(15, 4) NOT NULL DEFAULT 0,
+    opening_aed NUMERIC(15, 2) NOT NULL DEFAULT 0,
+    opening_inr NUMERIC(28, 14) NOT NULL DEFAULT 0,
     send_delivery_proof_to_customer BOOLEAN NOT NULL DEFAULT true,
     branch_id VARCHAR(50) REFERENCES public.branches(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
@@ -266,7 +272,7 @@ CREATE TABLE IF NOT EXISTS public.ic_fund_accounts (
     id VARCHAR(50) PRIMARY KEY,
     branch_id VARCHAR(50) NOT NULL REFERENCES public.branches(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
-    account_type VARCHAR(20) NOT NULL CHECK (account_type IN ('bank', 'personal', 'income', 'profit', 'expense', 'd_expense')),
+    account_type VARCHAR(20) NOT NULL CHECK (account_type IN ('bank', 'personal', 'income', 'profit', 'expense', 'd_expense', 'capital')),
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
     opening_balance DECIMAL(15, 2) NOT NULL DEFAULT 0,
     notes TEXT NOT NULL DEFAULT '',
@@ -417,7 +423,7 @@ CREATE TABLE IF NOT EXISTS public.inr_fund_accounts (
     id VARCHAR(50) PRIMARY KEY,
     branch_id VARCHAR(50) NOT NULL REFERENCES public.branches(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
-    account_type VARCHAR(20) NOT NULL CHECK (account_type IN ('personal', 'income', 'profit', 'expense', 'inventory')),
+    account_type VARCHAR(20) NOT NULL CHECK (account_type IN ('bank', 'personal', 'income', 'profit', 'expense', 'inventory', 'd_expense', 'capital')),
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
     opening_balance DECIMAL(28, 14) NOT NULL DEFAULT 0,
     notes TEXT NOT NULL DEFAULT '',
@@ -435,7 +441,7 @@ CREATE TABLE IF NOT EXISTS public.inr_fund_vouchers (
     id VARCHAR(50) PRIMARY KEY,
     branch_id VARCHAR(50) NOT NULL REFERENCES public.branches(id) ON DELETE CASCADE,
     voucher_no INTEGER NOT NULL,
-    voucher_type VARCHAR(20) NOT NULL CHECK (voucher_type IN ('journal')),
+    voucher_type VARCHAR(20) NOT NULL CHECK (voucher_type IN ('payment', 'receipt', 'journal', 'contra')),
     voucher_date DATE NOT NULL,
     debit_account_id VARCHAR(50) NOT NULL REFERENCES public.inr_fund_accounts(id) ON DELETE RESTRICT,
     credit_account_id VARCHAR(50) NOT NULL REFERENCES public.inr_fund_accounts(id) ON DELETE RESTRICT,
@@ -449,6 +455,74 @@ CREATE TABLE IF NOT EXISTS public.inr_fund_vouchers (
     reference_id VARCHAR(50),
     CONSTRAINT inr_fund_voucher_distinct_accounts CHECK (debit_account_id <> credit_account_id)
 );
+
+CREATE TABLE IF NOT EXISTS public.ic_capital_settings (
+    id VARCHAR(20) PRIMARY KEY DEFAULT 'hq',
+    branch_id VARCHAR(50) NOT NULL REFERENCES public.branches(id) ON DELETE CASCADE DEFAULT 'branch_hq',
+    opening_aed DECIMAL(28, 14) NOT NULL DEFAULT 0,
+    opening_inr DECIMAL(28, 14) NOT NULL DEFAULT 0,
+    opening_inr_per_aed DECIMAL(28, 14) NOT NULL DEFAULT 0,
+    management_share_bps INTEGER NOT NULL DEFAULT 0 CHECK (management_share_bps >= 0 AND management_share_bps <= 10000),
+    management_investor_id VARCHAR(50),
+    opening_locked_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+INSERT INTO public.ic_capital_settings (id, branch_id)
+VALUES ('hq', 'branch_hq')
+ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS public.ic_capital_investors (
+    id VARCHAR(50) PRIMARY KEY,
+    branch_id VARCHAR(50) NOT NULL REFERENCES public.branches(id) ON DELETE CASCADE DEFAULT 'branch_hq',
+    name VARCHAR(255) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+    is_house BOOLEAN NOT NULL DEFAULT false,
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_capital_investors_house
+  ON public.ic_capital_investors (branch_id)
+  WHERE is_house = true;
+
+CREATE TABLE IF NOT EXISTS public.ic_capital_lots (
+    id VARCHAR(50) PRIMARY KEY,
+    branch_id VARCHAR(50) NOT NULL REFERENCES public.branches(id) ON DELETE CASCADE,
+    investor_id VARCHAR(50) NOT NULL REFERENCES public.ic_capital_investors(id) ON DELETE RESTRICT,
+    movement_type VARCHAR(20) NOT NULL CHECK (movement_type IN ('opening', 'deposit', 'withdraw', 'payout')),
+    book VARCHAR(3) NOT NULL CHECK (book IN ('AED', 'INR')),
+    lot_date DATE NOT NULL,
+    amount_native DECIMAL(28, 14) NOT NULL,
+    inr_per_aed DECIMAL(28, 14) NOT NULL DEFAULT 1 CHECK (inr_per_aed > 0),
+    aed_eq DECIMAL(28, 14) NOT NULL,
+    bank_account_id VARCHAR(50),
+    voucher_id VARCHAR(50) NOT NULL,
+    voucher_book VARCHAR(3) NOT NULL CHECK (voucher_book IN ('AED', 'INR')),
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'void'))
+);
+CREATE INDEX IF NOT EXISTS idx_ic_capital_lots_branch_date
+  ON public.ic_capital_lots (branch_id, lot_date, created_at);
+
+CREATE TABLE IF NOT EXISTS public.ic_capital_allocations (
+    id VARCHAR(50) PRIMARY KEY,
+    branch_id VARCHAR(50) NOT NULL REFERENCES public.branches(id) ON DELETE CASCADE,
+    source_voucher_id VARCHAR(50) NOT NULL,
+    source_book VARCHAR(3) NOT NULL CHECK (source_book IN ('AED', 'INR')),
+    source_voucher_date DATE NOT NULL,
+    investor_id VARCHAR(50) NOT NULL REFERENCES public.ic_capital_investors(id) ON DELETE RESTRICT,
+    kind VARCHAR(20) NOT NULL CHECK (kind IN ('profit', 'expense', 'management', 'payout')),
+    event_amount DECIMAL(28, 14) NOT NULL,
+    allocated_amount DECIMAL(28, 14) NOT NULL,
+    book VARCHAR(3) NOT NULL CHECK (book IN ('AED', 'INR')),
+    management_bps_snapshot INTEGER NOT NULL DEFAULT 0,
+    capital_share_bps_snapshot INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'void'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_capital_alloc_voucher_investor
+  ON public.ic_capital_allocations (source_voucher_id, source_book, investor_id, kind)
+  WHERE status = 'active';
 
 -- ── RLS (after tables exist) ─────────────────────────────────────────
 ALTER TABLE public.ic_aed_agents ENABLE ROW LEVEL SECURITY;
@@ -473,6 +547,10 @@ ALTER TABLE public.ic_fund_voucher_counters ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.asic_backups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ic_capital_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ic_capital_investors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ic_capital_lots ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ic_capital_allocations ENABLE ROW LEVEL SECURITY;
 
 CREATE OR REPLACE FUNCTION public.current_profile_role()
 RETURNS TEXT
@@ -545,6 +623,26 @@ DROP POLICY IF EXISTS asic_backups_hq ON public.asic_backups;
 CREATE POLICY asic_backups_hq ON public.asic_backups FOR ALL USING (
   public.current_profile_role() IN ('admin', 'auditor')
 ) WITH CHECK (public.current_profile_role() = 'admin');
+
+DROP POLICY IF EXISTS asic_capital_settings ON public.ic_capital_settings;
+CREATE POLICY asic_capital_settings ON public.ic_capital_settings FOR ALL USING (
+  public.current_profile_role() IN ('admin', 'auditor')
+) WITH CHECK (public.current_profile_role() = 'admin');
+
+DROP POLICY IF EXISTS asic_capital_investors ON public.ic_capital_investors;
+CREATE POLICY asic_capital_investors ON public.ic_capital_investors FOR ALL USING (
+  public.current_profile_role() IN ('admin', 'auditor')
+) WITH CHECK (public.current_profile_role() IN ('admin', 'auditor'));
+
+DROP POLICY IF EXISTS asic_capital_lots ON public.ic_capital_lots;
+CREATE POLICY asic_capital_lots ON public.ic_capital_lots FOR ALL USING (
+  public.current_profile_role() IN ('admin', 'auditor')
+) WITH CHECK (public.current_profile_role() IN ('admin', 'auditor'));
+
+DROP POLICY IF EXISTS asic_capital_allocations ON public.ic_capital_allocations;
+CREATE POLICY asic_capital_allocations ON public.ic_capital_allocations FOR ALL USING (
+  public.current_profile_role() IN ('admin', 'auditor')
+) WITH CHECK (public.current_profile_role() IN ('admin', 'auditor'));
 
 DROP POLICY IF EXISTS asic_warehouses_branch ON public.ic_warehouses;
 CREATE POLICY asic_warehouses_branch ON public.ic_warehouses FOR ALL USING (

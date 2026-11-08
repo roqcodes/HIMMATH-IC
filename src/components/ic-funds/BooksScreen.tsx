@@ -47,6 +47,7 @@ import CashBankBookReport from '@/components/ic-funds/reports/CashBankBookReport
 import SettlementTradeReport, {
   type SettlementTradeReportVariant,
 } from '@/components/ic-funds/reports/SettlementTradeReport';
+import CapitalRegisterReport from '@/components/ic-funds/reports/CapitalRegisterReport';
 import { icFundsReportPath, type ICFundsReportId } from '@/lib/icFunds/nav';
 import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
 import { computeBooksKpis } from '@/lib/icFunds/kpiMetrics';
@@ -1108,6 +1109,9 @@ export default function BooksScreen({
               {accountTable(filteredPayables, 'No payable balances match these filters.')}
             </div>
           </div>
+        ) : null}
+        {reportView === 'capital-register' ? (
+          <CapitalRegisterReport />
         ) : null}
         {bundle && reportView === 'profit-loss' && bundle.plStatement ? (
           <ProfitLossReport

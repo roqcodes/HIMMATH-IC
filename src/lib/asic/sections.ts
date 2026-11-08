@@ -12,6 +12,7 @@ export type AsicSectionId =
   | 'receipts'
   | 'contra'
   | 'journal'
+  | 'capital'
   | 'pl'
   | 'accounts'
   | 'entities'
@@ -40,6 +41,7 @@ export const STAFF_MANAGED_SECTIONS: AsicSectionId[] = [
   'receipts',
   'contra',
   'journal',
+  'capital',
   'pl',
   'entities',
   'reports',

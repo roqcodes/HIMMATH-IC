@@ -5,6 +5,7 @@ export const IC_FUND_ACCOUNT_TYPES = [
   'profit',
   'expense',
   'd_expense',
+  'capital',
 ] as const;
 
 export type ICFundAccountType = (typeof IC_FUND_ACCOUNT_TYPES)[number];
@@ -28,6 +29,7 @@ export const IC_FUND_ACCOUNT_TYPE_OPTIONS: ReadonlyArray<{
   { value: 'profit', label: 'Profit', hint: 'Parked profit / equity, not income' },
   { value: 'expense', label: 'Expense', hint: 'Operating overhead' },
   { value: 'd_expense', label: 'D-Expense', hint: 'Direct deal / collection cost' },
+  { value: 'capital', label: 'Capital', hint: 'Investor equity (Capital module)' },
 ];
 
 export const IC_FUND_VOUCHER_LABELS: Record<ICFundVoucherType, string> = {

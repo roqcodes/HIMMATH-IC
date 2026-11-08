@@ -18,7 +18,8 @@ export type ICFundsReportId =
   | 'receivables'
   | 'trial-balance'
   | 'fund-trades'
-  | 'metal-trades';
+  | 'metal-trades'
+  | 'capital-register';
 
 export type ICFundsNavItem = {
   id: ICFundsSectionId;
@@ -46,6 +47,7 @@ export const IC_FUNDS_REPORTS: ReadonlyArray<{ id: ICFundsReportId; label: strin
   { id: 'trial-balance', label: 'Trial balance' },
   { id: 'fund-trades', label: 'Fund register' },
   { id: 'metal-trades', label: 'Metal register' },
+  { id: 'capital-register', label: 'Capital & allocations' },
 ];
 
 const SECTION_IDS = new Set(IC_FUNDS_NAV.map(item => item.id));

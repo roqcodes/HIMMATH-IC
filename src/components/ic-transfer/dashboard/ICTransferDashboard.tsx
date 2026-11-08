@@ -332,7 +332,7 @@ export default function ICTransferDashboard() {
     const metalOnHand = icWarehouses
       .filter(w => allowedWarehouseIds.has(w.id))
       .reduce(
-        (sum, w) => sum + computeWarehouseMetalGramsOnHand(icPurchases, scopedSales, w.id),
+        (sum, w) => sum + computeWarehouseMetalGramsOnHand(icPurchases, scopedSales, w.id, w.openingMetalG),
         0,
       );
     const metalPurchasedG = sumMetalWeightG(filteredPurchases);

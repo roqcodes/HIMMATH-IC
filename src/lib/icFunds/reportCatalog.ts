@@ -89,6 +89,11 @@ export const REPORT_CATALOG_GROUPS: ReadonlyArray<{
         title: 'Metal register (purchase & sale)',
         description: 'Cash metal in INR, or metal settled with an AED agent — pick a tab.',
       },
+      {
+        id: 'capital-register',
+        title: 'Capital & profit allocations',
+        description: 'Investor cap table movements and profit-share snapshots tied to ledger vouchers.',
+      },
     ],
   },
   {

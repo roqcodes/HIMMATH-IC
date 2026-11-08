@@ -27,6 +27,7 @@ const ANY: ReadonlySet<ICFundAccountType> = new Set([
   'profit',
   'expense',
   'd_expense',
+  'capital',
 ]);
 
 /** Bank tills and AED personal accounts that may receive an agent remittance batch leg. */

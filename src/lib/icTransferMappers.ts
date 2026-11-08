@@ -40,6 +40,10 @@ export function mapICWarehouseRow(row: any): ICWarehouse {
     branchId: row.branch_id ?? undefined,
     currentStock: row.current_stock != null ? parseFloat(row.current_stock) : 0,
     currentMetalG: row.current_metal_g != null ? parseFloat(row.current_metal_g) : 0,
+    openingStock: row.opening_stock != null ? parseFloat(row.opening_stock) : 0,
+    openingMetalG: row.opening_metal_g != null ? parseFloat(row.opening_metal_g) : 0,
+    openingAed: row.opening_aed != null ? parseFloat(row.opening_aed) : 0,
+    openingInr: row.opening_inr != null ? parseFloat(row.opening_inr) : 0,
     sendDeliveryProofToCustomer: row.send_delivery_proof_to_customer !== false,
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : undefined,
   };

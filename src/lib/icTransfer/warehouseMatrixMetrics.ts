@@ -140,13 +140,14 @@ function isMetalMode(mode: string | undefined): boolean {
   return mode === 'metal';
 }
 
-/** Metal grams from deals: purchases minus completed sales (DB column is a cache). */
+/** Metal grams from deals: opening + purchases minus completed sales (DB column is a cache). */
 export function computeWarehouseMetalGramsOnHand(
   purchases: ICPurchase[],
   sales: ICSale[],
   warehouseId: string,
+  openingMetalG = 0,
 ): number {
-  let grams = 0;
+  let grams = Number(openingMetalG) || 0;
   for (const p of purchases) {
     if (p.warehouseId !== warehouseId || !isMetalMode(p.settlementMode)) continue;
     grams += Number(p.metalWeightG) || 0;
@@ -185,14 +186,24 @@ function computeRow(
     warehouseId: warehouse.id,
   });
 
-  const currentStock = computeWarehouseIcUnitsOnHand(warehousePurchases, warehouseSales, warehouse.id);
+  const currentStock = computeWarehouseIcUnitsOnHand(
+    warehousePurchases,
+    warehouseSales,
+    warehouse.id,
+    warehouse.openingStock,
+  );
 
   return {
     warehouseId: warehouse.id,
     warehouseName: warehouse.name,
     regionName,
     currentStock,
-    currentMetalG: computeWarehouseMetalGramsOnHand(warehousePurchases, warehouseSales, warehouse.id),
+    currentMetalG: computeWarehouseMetalGramsOnHand(
+      warehousePurchases,
+      warehouseSales,
+      warehouse.id,
+      warehouse.openingMetalG,
+    ),
     cashPurchases: countPurchases(inRangePurchases, false),
     metalPurchases: countPurchases(inRangePurchases, true),
     cashSales: countSales(inRangeSales, false),
@@ -241,7 +252,7 @@ export function computeWarehouseAvailableUnits(
   purchases: ICPurchase[],
   sales: ICSale[],
 ): number {
-  return computeWarehouseIcUnitsOnHand(purchases, sales, warehouse.id);
+  return computeWarehouseIcUnitsOnHand(purchases, sales, warehouse.id, warehouse.openingStock);
 }
 
 export function computeWarehouseMatrix(options: {

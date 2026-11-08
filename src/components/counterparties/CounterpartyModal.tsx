@@ -8,6 +8,7 @@ import ModalTwoColumnLayout from '@/components/ui/ModalTwoColumnLayout';
 import { asicBtnOutline, asicBtnPrimary, asicInput } from '@/components/asic/ui';
 import { useApp } from '@/context/AppContext';
 import { saveCounterpartyAction } from '@/app/actions/counterpartyActions';
+import { parseFormAmount } from '@/lib/parseFormAmount';
 import type { ICSupplier } from '@/types';
 import {
   COUNTERPARTY_ROLES,
@@ -47,6 +48,8 @@ export default function CounterpartyModal({
   const [state, setState] = useState('');
   const [status, setStatus] = useState<'active' | 'inactive'>('active');
   const [roles, setRoles] = useState<CounterpartyRole[]>([...DEFAULT_COUNTERPARTY_ROLES]);
+  const [openingAed, setOpeningAed] = useState('0');
+  const [openingInr, setOpeningInr] = useState('0');
   const [isSaving, setIsSaving] = useState(false);
 
   const toggleRole = (role: CounterpartyRole) => {
@@ -71,6 +74,8 @@ export default function CounterpartyModal({
       setState(counterparty.subdivision || '');
       setStatus(counterparty.status === 'inactive' ? 'inactive' : 'active');
       setRoles(normalizeCounterpartyRoles(counterparty.roles));
+      setOpeningAed(String(counterparty.openingAed ?? 0));
+      setOpeningInr(String(counterparty.openingInr ?? 0));
     } else {
       setName('');
       setCode('');
@@ -81,6 +86,8 @@ export default function CounterpartyModal({
       setState('');
       setStatus('active');
       setRoles([...DEFAULT_COUNTERPARTY_ROLES]);
+      setOpeningAed('0');
+      setOpeningInr('0');
     }
   }, [open, counterparty]);
 
@@ -93,6 +100,14 @@ export default function CounterpartyModal({
     const cityTrim = city.trim();
     const stateTrim = state.trim();
     const regionId = counterparty?.regionId || '';
+    const aed = parseFormAmount(openingAed);
+    const inr = parseFormAmount(openingInr);
+    if (aed === null || inr === null) {
+      alert('Enter valid opening balances');
+      setIsSaving(false);
+      return;
+    }
+    const openings = { openingAed: aed, openingInr: inr };
 
     let ok = false;
     if (branchSlug) {
@@ -107,6 +122,8 @@ export default function CounterpartyModal({
         locality: cityTrim || undefined,
         status,
         roles,
+        openingAed: aed,
+        openingInr: inr,
       });
       ok = res.success;
       if (!ok && res.error) alert(res.error);
@@ -124,6 +141,7 @@ export default function CounterpartyModal({
         stateTrim,
         cityTrim,
         roles,
+        openings,
       );
     } else {
       ok = await addICSupplier(
@@ -139,6 +157,7 @@ export default function CounterpartyModal({
         cityTrim,
         branchId,
         roles,
+        openings,
       );
     }
     setIsSaving(false);
@@ -197,23 +216,48 @@ export default function CounterpartyModal({
           </ModalFormSection>
         }
         right={
-          <ModalFormSection title="Contact & address">
-            <AsicFormField label="Phone" className={fieldClass}>
-              <input className={asicInput} value={phone} onChange={e => setPhone(e.target.value)} />
-            </AsicFormField>
-            <AsicFormField label="Email" className={fieldClass}>
-              <input className={asicInput} type="email" value={email} onChange={e => setEmail(e.target.value)} />
-            </AsicFormField>
-            <AsicFormField label="Street" className={fieldClass}>
-              <input className={asicInput} value={street} onChange={e => setStreet(e.target.value)} placeholder="Building, street, area" />
-            </AsicFormField>
-            <AsicFormField label="City" className={fieldClass}>
-              <input className={asicInput} value={city} onChange={e => setCity(e.target.value)} />
-            </AsicFormField>
-            <AsicFormField label="State" className={fieldClass}>
-              <input className={asicInput} value={state} onChange={e => setState(e.target.value)} />
-            </AsicFormField>
-          </ModalFormSection>
+          <>
+            <ModalFormSection title="Contact & address">
+              <AsicFormField label="Phone" className={fieldClass}>
+                <input className={asicInput} value={phone} onChange={e => setPhone(e.target.value)} />
+              </AsicFormField>
+              <AsicFormField label="Email" className={fieldClass}>
+                <input className={asicInput} type="email" value={email} onChange={e => setEmail(e.target.value)} />
+              </AsicFormField>
+              <AsicFormField label="Street" className={fieldClass}>
+                <input className={asicInput} value={street} onChange={e => setStreet(e.target.value)} placeholder="Building, street, area" />
+              </AsicFormField>
+              <AsicFormField label="City" className={fieldClass}>
+                <input className={asicInput} value={city} onChange={e => setCity(e.target.value)} />
+              </AsicFormField>
+              <AsicFormField label="State" className={fieldClass}>
+                <input className={asicInput} value={state} onChange={e => setState(e.target.value)} />
+              </AsicFormField>
+            </ModalFormSection>
+            <ModalFormSection
+              title="Opening balances"
+              description="Starting AED and INR ledger balances. Locked after entries exist."
+            >
+              <AsicFormField label="Opening AED" htmlFor="cp-opening-aed" className={fieldClass}>
+                <input
+                  id="cp-opening-aed"
+                  className={`${asicInput} tabular-nums`}
+                  inputMode="decimal"
+                  value={openingAed}
+                  onChange={e => setOpeningAed(e.target.value)}
+                />
+              </AsicFormField>
+              <AsicFormField label="Opening INR" htmlFor="cp-opening-inr" className={fieldClass}>
+                <input
+                  id="cp-opening-inr"
+                  className={`${asicInput} tabular-nums`}
+                  inputMode="decimal"
+                  value={openingInr}
+                  onChange={e => setOpeningInr(e.target.value)}
+                />
+              </AsicFormField>
+            </ModalFormSection>
+          </>
         }
       />
     </Modal>

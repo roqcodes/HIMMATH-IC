@@ -290,7 +290,14 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
   const warehouseAvailable =
     warehouseId
       ? (warehouseAvailableById[warehouseId] ??
-        computeWarehouseIcUnitsOnHand(icPurchases, icSales, warehouseId))
+        computeWarehouseIcUnitsOnHand(
+          icPurchases,
+          icSales,
+          warehouseId,
+          allowedWarehouses.find(w => w.id === warehouseId)?.openingStock ??
+            icWarehouses.find(w => w.id === warehouseId)?.openingStock ??
+            0,
+        ))
       : null;
   const warehouseMetalG =
     warehouseId

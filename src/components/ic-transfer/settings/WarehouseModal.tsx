@@ -7,6 +7,7 @@ import ModalFormSection from '@/components/ui/ModalFormSection';
 import ModalTwoColumnLayout from '@/components/ui/ModalTwoColumnLayout';
 import { asicBtnOutline, asicBtnPrimary, asicInput } from '@/components/asic/ui';
 import { useApp } from '@/context/AppContext';
+import { parseFormAmount } from '@/lib/parseFormAmount';
 import type { ICWarehouse } from '@/types';
 
 type Props = {
@@ -30,6 +31,10 @@ export default function WarehouseModal({ open, warehouse, branchId, onClose, onS
   const [street, setStreet] = useState('');
   const [city, setCity] = useState('');
   const [state, setState] = useState('');
+  const [openingMetalG, setOpeningMetalG] = useState('0');
+  const [openingAed, setOpeningAed] = useState('0');
+  const [openingInr, setOpeningInr] = useState('0');
+  const [openingStock, setOpeningStock] = useState('0');
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -42,6 +47,10 @@ export default function WarehouseModal({ open, warehouse, branchId, onClose, onS
       setStreet(warehouse.address || '');
       setCity(warehouse.indiaCity || '');
       setState(warehouse.indiaState || '');
+      setOpeningMetalG(String(warehouse.openingMetalG ?? 0));
+      setOpeningAed(String(warehouse.openingAed ?? 0));
+      setOpeningInr(String(warehouse.openingInr ?? 0));
+      setOpeningStock(String(warehouse.openingStock ?? 0));
     } else {
       setName('');
       setCode('');
@@ -50,6 +59,10 @@ export default function WarehouseModal({ open, warehouse, branchId, onClose, onS
       setStreet('');
       setCity('');
       setState('');
+      setOpeningMetalG('0');
+      setOpeningAed('0');
+      setOpeningInr('0');
+      setOpeningStock('0');
     }
   }, [open, warehouse]);
 
@@ -63,6 +76,26 @@ export default function WarehouseModal({ open, warehouse, branchId, onClose, onS
     const cityTrim = city.trim();
     const stateTrim = state.trim();
     const sendDeliveryProofToCustomer = warehouse ? warehouse.sendDeliveryProofToCustomer !== false : true;
+    const metalG = parseFormAmount(openingMetalG);
+    const aed = parseFormAmount(openingAed);
+    const inr = parseFormAmount(openingInr);
+    const stock = parseFormAmount(openingStock);
+    if (metalG === null || aed === null || inr === null || stock === null) {
+      alert('Enter valid opening balances');
+      setIsSaving(false);
+      return;
+    }
+    if (metalG < 0 || stock < 0) {
+      alert('Opening metal and IC units cannot be negative');
+      setIsSaving(false);
+      return;
+    }
+    const openings = {
+      openingMetalG: metalG,
+      openingAed: aed,
+      openingInr: inr,
+      openingStock: stock,
+    };
 
     let ok = false;
     if (isEdit && warehouse) {
@@ -78,6 +111,7 @@ export default function WarehouseModal({ open, warehouse, branchId, onClose, onS
         stateTrim,
         cityTrim,
         sendDeliveryProofToCustomer,
+        openings,
       );
     } else {
       ok = await addICWarehouse(
@@ -92,6 +126,7 @@ export default function WarehouseModal({ open, warehouse, branchId, onClose, onS
         cityTrim,
         sendDeliveryProofToCustomer,
         branchId ?? null,
+        openings,
       );
     }
 
@@ -174,33 +209,81 @@ export default function WarehouseModal({ open, warehouse, branchId, onClose, onS
           </ModalFormSection>
         }
         right={
-          <ModalFormSection title="Address" description="Optional.">
-            <AsicFormField label="Street" htmlFor="warehouse-street" className={fieldClass}>
-              <input
-                id="warehouse-street"
-                className={asicInput}
-                placeholder="Building, street, area"
-                value={street}
-                onChange={e => setStreet(e.target.value)}
-              />
-            </AsicFormField>
-            <AsicFormField label="City" htmlFor="warehouse-city" className={fieldClass}>
-              <input
-                id="warehouse-city"
-                className={asicInput}
-                value={city}
-                onChange={e => setCity(e.target.value)}
-              />
-            </AsicFormField>
-            <AsicFormField label="State" htmlFor="warehouse-state" className={fieldClass}>
-              <input
-                id="warehouse-state"
-                className={asicInput}
-                value={state}
-                onChange={e => setState(e.target.value)}
-              />
-            </AsicFormField>
-          </ModalFormSection>
+          <>
+            <ModalFormSection title="Address" description="Optional.">
+              <AsicFormField label="Street" htmlFor="warehouse-street" className={fieldClass}>
+                <input
+                  id="warehouse-street"
+                  className={asicInput}
+                  placeholder="Building, street, area"
+                  value={street}
+                  onChange={e => setStreet(e.target.value)}
+                />
+              </AsicFormField>
+              <AsicFormField label="City" htmlFor="warehouse-city" className={fieldClass}>
+                <input
+                  id="warehouse-city"
+                  className={asicInput}
+                  value={city}
+                  onChange={e => setCity(e.target.value)}
+                />
+              </AsicFormField>
+              <AsicFormField label="State" htmlFor="warehouse-state" className={fieldClass}>
+                <input
+                  id="warehouse-state"
+                  className={asicInput}
+                  value={state}
+                  onChange={e => setState(e.target.value)}
+                />
+              </AsicFormField>
+            </ModalFormSection>
+            <ModalFormSection
+              title="Opening balances"
+              description="Starting metal, cash books, and IC units. AED/INR lock after ledger entries exist."
+            >
+              <AsicFormField label="Opening metal (g)" htmlFor="warehouse-opening-metal" className={fieldClass}>
+                <input
+                  id="warehouse-opening-metal"
+                  className={`${asicInput} tabular-nums`}
+                  inputMode="decimal"
+                  value={openingMetalG}
+                  onChange={e => setOpeningMetalG(e.target.value)}
+                />
+              </AsicFormField>
+              <AsicFormField label="Opening AED" htmlFor="warehouse-opening-aed" className={fieldClass}>
+                <input
+                  id="warehouse-opening-aed"
+                  className={`${asicInput} tabular-nums`}
+                  inputMode="decimal"
+                  value={openingAed}
+                  onChange={e => setOpeningAed(e.target.value)}
+                />
+              </AsicFormField>
+              <AsicFormField label="Opening INR" htmlFor="warehouse-opening-inr" className={fieldClass}>
+                <input
+                  id="warehouse-opening-inr"
+                  className={`${asicInput} tabular-nums`}
+                  inputMode="decimal"
+                  value={openingInr}
+                  onChange={e => setOpeningInr(e.target.value)}
+                />
+              </AsicFormField>
+              <AsicFormField
+                label="Opening IC units"
+                htmlFor="warehouse-opening-stock"
+                className={fieldClass}
+                hint="On-hand IC balance before recorded deals."
+              >
+                <input
+                  id="warehouse-opening-stock"
+                  className={`${asicInput} tabular-nums`}
+                  inputMode="decimal"
+                  value={openingStock}
+                  onChange={e => setOpeningStock(e.target.value)}
+                />
+              </AsicFormField>
+            </ModalFormSection>
+          </>
         }
       />
     </Modal>

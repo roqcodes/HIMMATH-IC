@@ -79,11 +79,35 @@ export async function resolveAedAgentIdForCounterparty(
   return resolveAedAgentIdForCounterpartyWithClient({ query }, counterpartyId);
 }
 
+let relinkDone = false;
+let relinkInflight: Promise<void> | null = null;
+
 /**
  * Point historic `aed_agent:{uuid}` fund accounts (and their vouchers) at the
  * agent counterparty so KPIs, journals, and Books match the party page.
+ * Skip when no shadow accounts remain — never run this DDL-heavy remap on every read.
  */
 export async function relinkAedAgentLedgerAccounts(client: DbClient = { query }): Promise<void> {
+  if (relinkDone) return;
+  if (!relinkInflight) {
+    relinkInflight = runRelinkAedAgentLedgerAccounts(client).finally(() => {
+      relinkInflight = null;
+    });
+  }
+  await relinkInflight;
+}
+
+async function runRelinkAedAgentLedgerAccounts(client: DbClient): Promise<void> {
+  const pending = await client.query(
+    `SELECT 1 FROM ic_fund_accounts
+     WHERE source_type = 'ic_counterparty' AND source_id LIKE 'aed_agent:%'
+     LIMIT 1`,
+  );
+  if (pending.rows.length === 0) {
+    relinkDone = true;
+    return;
+  }
+
   await client.query(
     `UPDATE ic_fund_vouchers v
      SET debit_account_id = cp.id
@@ -183,4 +207,5 @@ export async function relinkAedAgentLedgerAccounts(client: DbClient = { query })
          WHERE v.debit_account_id = a.id OR v.credit_account_id = a.id
        )`,
   );
+  relinkDone = true;
 }

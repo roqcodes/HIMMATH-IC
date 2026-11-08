@@ -196,27 +196,30 @@ export function computeAccountsKpis(
 export function computeVoucherKpis(
   stats: ICFundVoucherRangeStats,
   voucherType: ICFundVoucherType,
+  book: 'AED' | 'INR' = 'AED',
 ): AsicKpiMetric[] {
   const labels = VOUCHER_TOTAL_LABELS[voucherType];
+  const amountNode = book === 'INR' ? ledgerInrNode : ledgerAedNode;
+  const fmtPlain = book === 'INR' ? fmtLedgerInr : fmtLedgerAed;
   const pendingMetric: AsicKpiMetric =
     stats.pending > 0
       ? {
           label: 'Awaiting approval',
-          value: ledgerAedNode(stats.pendingTotal),
+          value: amountNode(stats.pendingTotal),
           hint: `${stats.pending} pending ${stats.pending === 1 ? 'entry' : 'entries'}`,
           tone: 'amber',
         }
       : {
           label: 'Largest entry',
-          value: stats.largest > 0 ? ledgerAedNode(stats.largest) : '—',
-          valueTitle: stats.largest > 0 ? fmtLedgerAed(stats.largest) : undefined,
+          value: stats.largest > 0 ? amountNode(stats.largest) : '—',
+          valueTitle: stats.largest > 0 ? fmtPlain(stats.largest) : undefined,
           hint: 'Biggest posted amount',
         };
 
   return [
     {
       label: labels.total,
-      value: ledgerAedNode(stats.total),
+      value: amountNode(stats.total),
       hint: labels.totalHint,
       tone: 'emerald',
     },
@@ -774,6 +777,15 @@ export function computeAccountDetailKpis(
           value: topCounterparty ? fmtAmount(topCounterparty.amount) : '—',
           hint: topCounterparty?.name ?? 'No counterparty activity',
           tone: 'indigo',
+        },
+      ];
+    case 'capital':
+      return [
+        {
+          label: 'Capital balance',
+          value: fmtAmount(balance),
+          hint: 'Investor equity (credit)',
+          tone: 'violet',
         },
       ];
     case 'profit':

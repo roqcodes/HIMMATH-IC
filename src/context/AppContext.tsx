@@ -26,6 +26,7 @@ import {
   ICWarehouseTransaction,
 } from '@/types';
 import type { CounterpartyRole } from '@/lib/counterparties/roles';
+import type { AedInrOpenings, WarehouseOpenings } from '@/lib/icFunds/entityOpenings';
 import { getCurrentUserAction, logoutAction } from '@/app/actions/auth';
 import { fetchAsicInitialDataAction, fetchAsicTransactionalDataAction } from '@/app/actions/asicDataActions';
 import { parseAsicPath } from '@/lib/asic/routing';
@@ -132,6 +133,7 @@ interface AppContextType extends AppState {
     locality: string,
     branchId?: string | null,
     roles?: CounterpartyRole[],
+    openings?: Partial<AedInrOpenings> | null,
   ) => Promise<boolean>;
   updateICSupplier: (
     id: string,
@@ -146,6 +148,7 @@ interface AppContextType extends AppState {
     subdivision: string,
     locality: string,
     roles?: CounterpartyRole[],
+    openings?: Partial<AedInrOpenings> | null,
   ) => Promise<boolean>;
   deleteICSupplier: (id: string) => Promise<boolean>;
   addICWarehouse: (
@@ -160,6 +163,7 @@ interface AppContextType extends AppState {
     indiaCity: string,
     sendDeliveryProofToCustomer?: boolean,
     branchId?: string | null,
+    openings?: Partial<WarehouseOpenings> | null,
   ) => Promise<boolean>;
   updateICWarehouse: (
     id: string,
@@ -173,6 +177,7 @@ interface AppContextType extends AppState {
     indiaState: string,
     indiaCity: string,
     sendDeliveryProofToCustomer?: boolean,
+    openings?: Partial<WarehouseOpenings> | null,
   ) => Promise<boolean>;
   deleteICWarehouse: (id: string) => Promise<boolean>;
   addICRateGroup: (
@@ -526,6 +531,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     locality: string,
     branchId?: string | null,
     roles?: CounterpartyRole[],
+    openings?: Partial<AedInrOpenings> | null,
   ) => {
     try {
       const res = await dbAddICSupplierAction(
@@ -542,6 +548,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         branchId,
         branchId ? currentSlug ?? undefined : undefined,
         roles,
+        openings,
       );
       if (res.success && res.data) {
         setState(s => ({ ...s, icSuppliers: [...s.icSuppliers, res.data!] }));
@@ -569,6 +576,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     subdivision: string,
     locality: string,
     roles?: CounterpartyRole[],
+    openings?: Partial<AedInrOpenings> | null,
   ) => {
     try {
       const res = await dbUpdateICSupplierAction(
@@ -585,6 +593,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         locality,
         currentSlug ?? undefined,
         roles,
+        openings,
       );
       if (res.success && res.data) {
         setState(s => ({ ...s, icSuppliers: s.icSuppliers.map(sup => sup.id === id ? res.data! : sup) }));
@@ -627,6 +636,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     indiaCity: string,
     sendDeliveryProofToCustomer: boolean = true,
     branchId?: string | null,
+    openings?: Partial<WarehouseOpenings> | null,
   ) => {
     try {
       const res = await dbAddICWarehouseAction(
@@ -641,6 +651,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         indiaCity,
         sendDeliveryProofToCustomer,
         branchId,
+        openings,
       );
       if (res.success && res.data) {
         setState(s => ({ ...s, icWarehouses: [...s.icWarehouses, res.data!] }));
@@ -667,6 +678,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     indiaState: string,
     indiaCity: string,
     sendDeliveryProofToCustomer: boolean = true,
+    openings?: Partial<WarehouseOpenings> | null,
   ) => {
     try {
       const res = await dbUpdateICWarehouseAction(
@@ -681,6 +693,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         indiaState,
         indiaCity,
         sendDeliveryProofToCustomer,
+        openings,
       );
       if (res.success && res.data) {
         setState(s => ({ ...s, icWarehouses: s.icWarehouses.map(w => w.id === id ? res.data! : w) }));

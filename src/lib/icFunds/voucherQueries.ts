@@ -41,6 +41,34 @@ JOIN ic_fund_accounts da ON da.id = v.debit_account_id
 JOIN ic_fund_accounts ca ON ca.id = v.credit_account_id
 `;
 
+/** INR voucher list shape — aliases missing IC Funds user columns for shared mappers. */
+export const INR_VOUCHER_LIST_SELECT_COLUMNS = `
+  v.id,
+  v.branch_id,
+  v.voucher_no,
+  v.voucher_type,
+  v.voucher_date,
+  v.debit_account_id,
+  v.credit_account_id,
+  v.amount,
+  v.notes,
+  NULL::text AS created_by,
+  v.created_by_name,
+  NULL::text AS created_by_user_id,
+  v.created_at,
+  v.status,
+  da.name AS debit_account_name,
+  da.account_type AS debit_account_type,
+  ca.name AS credit_account_name,
+  ca.account_type AS credit_account_type
+`;
+
+export const INR_VOUCHER_FROM_SQL = `
+FROM inr_fund_vouchers v
+JOIN inr_fund_accounts da ON da.id = v.debit_account_id
+JOIN inr_fund_accounts ca ON ca.id = v.credit_account_id
+`;
+
 export const VOUCHER_LIST_SELECT_SQL = `
 SELECT ${VOUCHER_LIST_SELECT_COLUMNS}
 ${VOUCHER_FROM_SQL}

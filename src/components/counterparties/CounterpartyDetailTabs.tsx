@@ -119,7 +119,10 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
     [icSales, counterpartyId, range],
   );
 
-  const activity = useMemo(() => mergeCounterpartyActivity(purchases, sales), [purchases, sales]);
+  const activity = useMemo(
+    () => mergeCounterpartyActivity(purchases, sales, journals),
+    [purchases, sales, journals],
+  );
 
   const loadJournals = useCallback(async () => {
     setJournalsLoading(true);
@@ -140,13 +143,8 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
   useEffect(() => {
     setJournalsLoaded(false);
     setJournals([]);
-  }, [counterpartyId, range.startDate, range.endDate]);
-
-  useEffect(() => {
-    if (tab === 'journals' && !journalsLoaded && !journalsLoading) {
-      void loadJournals();
-    }
-  }, [tab, journalsLoaded, journalsLoading, loadJournals]);
+    void loadJournals();
+  }, [loadJournals]);
 
   const tabs = useMemo(
     () => [
@@ -300,8 +298,64 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
     );
   };
 
+  const renderVoucherRow = (v: ICFundVoucher) => {
+    const typeLabel =
+      v.voucherType === 'payment' ? 'Payment' : v.voucherType === 'receipt' ? 'Receipt' : 'Journal';
+    const typeClass =
+      v.voucherType === 'payment'
+        ? 'bg-rose-50 text-rose-800'
+        : v.voucherType === 'receipt'
+          ? 'bg-amber-50 text-amber-800'
+          : 'bg-slate-100 text-slate-700';
+    const amountAed = v.book === 'INR' ? '—' : formatDealTableAed(v.amount);
+    const amountInr = v.book === 'INR' ? formatDealTableInr(v.amount) : '—';
+    const dateIso = v.createdAt || v.voucherDate;
+
+    return (
+      <tr
+        key={v.id}
+        onClick={() => setViewJournal(v)}
+        className="cursor-pointer border-b border-slate-100 transition-colors hover:bg-slate-50/80"
+      >
+        <td className={icTdClass('left')}>
+          <DateCell iso={dateIso} />
+        </td>
+        <td className={icTdClass('left')}>
+          <span className={`rounded-md px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${typeClass}`}>
+            {typeLabel}
+          </span>
+        </td>
+        <td className={icTdClass('left')}>
+          <span className="font-mono text-xs text-slate-500">#{v.voucherNo}</span>
+        </td>
+        <td className={icTdClass('left')}>
+          <span className="text-xs text-slate-400">—</span>
+        </td>
+        <td className={icTdClass('left')}>
+          <span className="text-xs font-medium text-slate-700">{v.book === 'INR' ? 'INR' : 'AED'}</span>
+        </td>
+        <td className={icTdClass('right')}>
+          <span className="text-slate-400">—</span>
+        </td>
+        <td className={icTdClass('right')}>
+          <span className="font-mono tabular-nums text-indigo-900">{amountInr}</span>
+        </td>
+        <td className={icTdClass('right')}>
+          <span className="font-mono font-medium tabular-nums text-slate-900">{amountAed}</span>
+        </td>
+        <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
+          <ICTransferViewIconButton onClick={() => setViewJournal(v)} />
+        </td>
+      </tr>
+    );
+  };
+
   const renderActivityRow = (row: CounterpartyActivityRow) =>
-    row.kind === 'purchase' ? renderPurchaseRow(row.purchase, true) : renderSaleRow(row.sale, true);
+    row.kind === 'purchase'
+      ? renderPurchaseRow(row.purchase, true)
+      : row.kind === 'sale'
+        ? renderSaleRow(row.sale, true)
+        : renderVoucherRow(row.voucher);
 
   const journalTable = (
     <div className={icfTableWrap}>
@@ -408,7 +462,7 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
 
         {tab === 'all' ? (
           <ICTransferDataTableShell
-            title="Purchases & sales"
+            title="Purchases, sales & settlements"
             search={search}
             onSearchChange={setSearch}
             searchPlaceholder="Search activity…"
@@ -416,8 +470,8 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
             sortField="Date"
             sortOrder="desc"
             onSort={() => {}}
-            isEmpty={activity.length === 0}
-            emptyMessage="No purchases or sales for this counterparty in the selected period."
+            isEmpty={activity.length === 0 && !journalsLoading}
+            emptyMessage="No purchases, sales, payments, or receipts for this counterparty in the selected period."
           >
             {activity.map(renderActivityRow)}
           </ICTransferDataTableShell>

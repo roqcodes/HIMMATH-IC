@@ -9,7 +9,7 @@ export type ICCounterparty = ICSupplier & {
 
 export const COUNTERPARTY_SELECT =
   `id, name, code, phone, commission, region_id, email, address, country, subdivision, locality,
-   branch_id, status, roles, created_at`;
+   branch_id, status, roles, opening_aed, opening_inr, created_at`;
 
 export function mapICCounterpartyRow(row: Record<string, unknown>): ICCounterparty {
   return {
@@ -27,6 +27,8 @@ export function mapICCounterpartyRow(row: Record<string, unknown>): ICCounterpar
     branchId: row.branch_id ? String(row.branch_id) : undefined,
     status: row.status === 'inactive' ? 'inactive' : 'active',
     roles: normalizeCounterpartyRoles(row.roles),
+    openingAed: row.opening_aed != null ? Number(row.opening_aed) : 0,
+    openingInr: row.opening_inr != null ? Number(row.opening_inr) : 0,
     createdAt: row.created_at ? new Date(String(row.created_at)).toISOString() : undefined,
   };
 }

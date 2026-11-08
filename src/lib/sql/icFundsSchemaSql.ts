@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS ic_fund_accounts (
     id VARCHAR(50) PRIMARY KEY,
     branch_id VARCHAR(50) NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
-    account_type VARCHAR(20) NOT NULL CHECK (account_type IN ('bank', 'personal', 'income', 'profit', 'expense', 'd_expense')),
+    account_type VARCHAR(20) NOT NULL CHECK (account_type IN ('bank', 'personal', 'income', 'profit', 'expense', 'd_expense', 'capital')),
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
     opening_balance DECIMAL(15, 2) NOT NULL DEFAULT 0,
     notes TEXT NOT NULL DEFAULT '',

@@ -437,7 +437,7 @@ export async function syncMetalSaleLedgers(
       });
       continue;
     }
-    await postInrJournalInTx(client, {
+    const inrVoucherId = await postInrJournalInTx(client, {
       branchId,
       voucherDate,
       debitAccountId,
@@ -447,6 +447,10 @@ export async function syncMetalSaleLedgers(
       referenceType: line.referenceType,
       referenceId: saleId,
     });
+    if (inrVoucherId && line.referenceType === 'metal_sale_profit') {
+      const { tryAllocateCapitalFromInrVoucher } = await import('@/lib/capital/voucherHook');
+      await tryAllocateCapitalFromInrVoucher(client, branchId, inrVoucherId);
+    }
   }
 }
 

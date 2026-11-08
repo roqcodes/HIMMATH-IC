@@ -15,6 +15,7 @@ export const STAFF_SECTION_LABELS: Record<AsicSectionId, string> = {
   receipts: 'Receipts',
   contra: 'Contra',
   journal: 'Journal',
+  capital: 'Capital',
   pl: 'Profit & Loss',
   accounts: 'Entities',
   entities: 'Entities',
@@ -50,6 +51,7 @@ export const ADMIN_STAFF_PERMISSION_SECTIONS: AsicSectionId[] = [
   'receipts',
   'contra',
   'journal',
+  'capital',
   'pl',
   'entities',
   'reports',
@@ -92,7 +94,7 @@ const ADMIN_STAFF_PERMISSION_GROUPS: StaffPermissionGroup[] = [
   {
     id: 'finance',
     label: 'Finance & funds',
-    sections: ['payments', 'receipts', 'contra', 'journal', 'pl', 'entities', 'ic-finance'],
+    sections: ['payments', 'receipts', 'contra', 'journal', 'capital', 'pl', 'entities', 'ic-finance'],
   },
   {
     id: 'master',
@@ -128,6 +130,7 @@ const SECTION_TO_LEGACY_KEYS: Partial<Record<AsicSectionId, BranchPageId[]>> = {
   receipts: ['ic-funds'],
   contra: ['ic-funds'],
   journal: ['ic-funds'],
+  capital: ['ic-funds'],
   pl: ['ic-funds'],
   accounts: ['ic-funds'],
   entities: ['ic-funds'],

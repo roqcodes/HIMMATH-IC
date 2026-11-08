@@ -62,7 +62,7 @@ export async function ensureInrSystemAccount(
   client: DbClient,
   branchId: string,
   name: string,
-  accountType: 'personal' | 'income' | 'profit' | 'expense' | 'inventory',
+  accountType: 'bank' | 'personal' | 'income' | 'profit' | 'expense' | 'inventory' | 'd_expense' | 'capital',
   sourceId: string,
 ): Promise<string> {
   const existing = await client.query(
@@ -104,40 +104,76 @@ export async function ensureInrSystemAccount(
   throw new Error('Could not create INR system account');
 }
 
-export async function ensureInrCounterpartyAccount(
+export async function applyInrAccountOpening(
+  client: DbClient,
+  accountId: string,
+  openingBalance: number,
+): Promise<void> {
+  const next = roundLedgerAmount(Number(openingBalance) || 0);
+  const current = await client.query(
+    `SELECT opening_balance FROM inr_fund_accounts WHERE id = $1 LIMIT 1`,
+    [accountId],
+  );
+  if (current.rows.length === 0) return;
+  const prev = roundLedgerAmount(Number(current.rows[0].opening_balance) || 0);
+  if (prev === next) return;
+
+  const used = await client.query(
+    `SELECT 1 FROM inr_fund_vouchers
+     WHERE debit_account_id = $1 OR credit_account_id = $1
+     LIMIT 1`,
+    [accountId],
+  );
+  if (used.rows.length > 0) {
+    throw new Error('Opening balance is locked after entries exist. Post a journal adjustment instead.');
+  }
+  await client.query(`UPDATE inr_fund_accounts SET opening_balance = $2 WHERE id = $1`, [accountId, next]);
+}
+
+export async function ensureInrLinkedAccount(
   client: DbClient,
   branchId: string,
-  counterpartyId: string,
+  sourceType: 'ic_counterparty' | 'ic_warehouse',
+  sourceIdRaw: string,
   name: string,
 ): Promise<string | null> {
   if (!name.trim()) return null;
-  const sourceId = counterpartyId.slice(0, 50);
+  const sourceId = sourceIdRaw.slice(0, 50);
   const existing = await client.query(
     `SELECT id FROM inr_fund_accounts
-     WHERE branch_id = $1 AND source_type = 'ic_counterparty' AND source_id = $2
+     WHERE branch_id = $1 AND source_type = $2 AND source_id = $3
      LIMIT 1`,
-    [branchId, sourceId],
+    [branchId, sourceType, sourceId],
   );
   if (existing.rows.length > 0) return String(existing.rows[0].id);
 
   const id = `INFA-${crypto.randomUUID().slice(0, 10).toUpperCase()}`;
   const inserted = await insertInrIgnoringUnique(
     client,
-    'inr_cp_acct',
+    'inr_src_acct',
     `INSERT INTO inr_fund_accounts (
        id, branch_id, name, account_type, opening_balance, notes, source_type, source_id
-     ) VALUES ($1,$2,$3,'personal',0,'','ic_counterparty',$4)`,
-    [id, branchId, name.trim(), sourceId],
+     ) VALUES ($1,$2,$3,'personal',0,'',$4,$5)`,
+    [id, branchId, name.trim(), sourceType, sourceId],
   );
   if (inserted) return id;
 
   const again = await client.query(
     `SELECT id FROM inr_fund_accounts
-     WHERE branch_id = $1 AND source_type = 'ic_counterparty' AND source_id = $2
+     WHERE branch_id = $1 AND source_type = $2 AND source_id = $3
      LIMIT 1`,
-    [branchId, sourceId],
+    [branchId, sourceType, sourceId],
   );
   return again.rows.length > 0 ? String(again.rows[0].id) : null;
+}
+
+export async function ensureInrCounterpartyAccount(
+  client: DbClient,
+  branchId: string,
+  counterpartyId: string,
+  name: string,
+): Promise<string | null> {
+  return ensureInrLinkedAccount(client, branchId, 'ic_counterparty', counterpartyId, name);
 }
 
 export async function voidInrVoucherByReference(
@@ -146,6 +182,15 @@ export async function voidInrVoucherByReference(
   referenceType: string,
   referenceId: string,
 ): Promise<void> {
+  const { voidCapitalAllocationsForVoucher } = await import('@/lib/capital/allocation');
+  const existing = await client.query(
+    `SELECT id FROM inr_fund_vouchers
+     WHERE branch_id = $1 AND reference_type = $2 AND reference_id = $3 AND status = 'active'`,
+    [branchId, referenceType, referenceId],
+  );
+  for (const row of existing.rows) {
+    await voidCapitalAllocationsForVoucher(client, String(row.id), 'INR');
+  }
   await client.query(
     `UPDATE inr_fund_vouchers
      SET status = 'void', voided_at = CURRENT_TIMESTAMP
@@ -154,30 +199,39 @@ export async function voidInrVoucherByReference(
   );
 }
 
-export async function postInrJournalInTx(
+export async function ensureInrCashTill(client: DbClient, branchId: string): Promise<string> {
+  return ensureInrSystemAccount(client, branchId, 'Cash INR', 'bank', 'inr_cash');
+}
+
+export async function postInrVoucherInTx(
   client: DbClient,
   params: {
     branchId: string;
+    voucherType?: 'payment' | 'receipt' | 'journal' | 'contra';
     voucherDate: string;
     debitAccountId: string;
     creditAccountId: string;
     amount: number;
     notes: string;
-    referenceType: string;
-    referenceId: string;
+    referenceType?: string | null;
+    referenceId?: string | null;
+    createdByName?: string | null;
   },
 ): Promise<string | null> {
   const amount = roundLedgerAmount(Number(params.amount));
   if (amount <= 0) return null;
+  const voucherType = params.voucherType ?? 'journal';
 
-  const existing = await client.query(
-    `SELECT id FROM inr_fund_vouchers
-     WHERE branch_id = $1 AND reference_type = $2 AND reference_id = $3 AND status = 'active'
-     LIMIT 1`,
-    [params.branchId, params.referenceType, params.referenceId],
-  );
-  if (existing.rows.length > 0) {
-    await voidInrVoucherByReference(client, params.branchId, params.referenceType, params.referenceId);
+  if (voucherType === 'journal' && params.referenceType && params.referenceId) {
+    const existing = await client.query(
+      `SELECT id FROM inr_fund_vouchers
+       WHERE branch_id = $1 AND reference_type = $2 AND reference_id = $3 AND status = 'active'
+       LIMIT 1`,
+      [params.branchId, params.referenceType, params.referenceId],
+    );
+    if (existing.rows.length > 0) {
+      await voidInrVoucherByReference(client, params.branchId, params.referenceType, params.referenceId);
+    }
   }
 
   const accounts = await lockInrAccounts(
@@ -202,25 +256,44 @@ export async function postInrJournalInTx(
        id, branch_id, voucher_no, voucher_type, voucher_date,
        debit_account_id, credit_account_id, amount, notes,
        created_by_name, reference_type, reference_id, status
-     ) VALUES ($1,$2,$3,'journal',$4,$5,$6,$7,$8,$9,$10,$11,'active')`,
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'active')`,
     [
       id,
       params.branchId,
       voucherNo,
+      voucherType,
       params.voucherDate,
       params.debitAccountId,
       params.creditAccountId,
       amount,
       params.notes,
-      SYNC_ACTOR,
-      params.referenceType,
-      params.referenceId,
+      params.createdByName ?? SYNC_ACTOR,
+      params.referenceType ?? null,
+      params.referenceId ?? null,
     ],
   );
   return id;
 }
 
-export function resolveInrLedgerBranchId(explicitBranchId?: string | null): string {
-  if (explicitBranchId) return String(explicitBranchId);
+export async function postInrJournalInTx(
+  client: DbClient,
+  params: {
+    branchId: string;
+    voucherDate: string;
+    debitAccountId: string;
+    creditAccountId: string;
+    amount: number;
+    notes: string;
+    referenceType: string;
+    referenceId: string;
+  },
+): Promise<string | null> {
+  return postInrVoucherInTx(client, {
+    ...params,
+    voucherType: 'journal',
+  });
+}
+
+export function resolveInrLedgerBranchId(_explicitBranchId?: string | null): string {
   return HQ_IC_FUNDS_BRANCH_ID;
 }

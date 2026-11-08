@@ -13,7 +13,7 @@ import { VOUCHER_LIST_PAGE_SIZE } from '@/lib/icFunds/voucherQueries';
 import { ActionError, logClientActionError } from '@/lib/errors/actionError';
 import { trackLoading } from '@/lib/loadingBar';
 import { allowedAccountTypesForVoucher, voucherFieldLabels } from '@/lib/icFunds/voucherRules';
-import { fmtICDate, fmtLedgerAed, icfLedgerColumnLabel, FmtLedgerAed } from '@/lib/icFunds/format';
+import { fmtICDate, icfLedgerColumnLabel, FmtLedgerAmount } from '@/lib/icFunds/format';
 import { parseFormAmount } from '@/lib/parseFormAmount';
 import { validateVoucherCurrencyPolicy } from '@/lib/icFunds/currencyPolicy';
 import { icfBtnGhost, icfBtnPrimary, icfCard, icfInput, icfLabel, icfTable, icfTableWrap, icfTd, icfTh, icfThAlign, icfTheadRow } from '@/components/ic-funds/ui';
@@ -28,6 +28,18 @@ import { useWriteAccess } from '@/context/RbacWriteContext';
 import { useApp } from '@/context/AppContext';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import type { ICFundAccount, ICFundVoucher } from '@/types';
+
+type LedgerBook = 'AED' | 'INR';
+
+const BOOK_STORAGE_KEY = 'asic_ic_funds_voucher_book';
+
+function bookToggleClass(active: boolean) {
+  return `inline-flex h-8 min-w-[3.25rem] items-center justify-center rounded-md px-3 text-xs font-semibold transition-colors ${
+    active
+      ? 'bg-red-600 text-white shadow-sm shadow-red-600/25'
+      : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-red-50 hover:text-red-700 hover:ring-red-200'
+  }`;
+}
 
 export default function VoucherScreen({
   branchId,
@@ -69,6 +81,8 @@ export default function VoucherScreen({
   const [notes, setNotes] = useState('');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const cashBookEnabled = voucherType === 'payment' || voucherType === 'receipt';
+  const [book, setBook] = useState<LedgerBook>('AED');
 
   const pageSize = VOUCHER_LIST_PAGE_SIZE;
 
@@ -94,19 +108,37 @@ export default function VoucherScreen({
   }, [search]);
 
   useEffect(() => {
+    if (!cashBookEnabled) {
+      setBook('AED');
+      return;
+    }
+    try {
+      const stored = sessionStorage.getItem(BOOK_STORAGE_KEY);
+      if (stored === 'INR' || stored === 'AED') setBook(stored);
+    } catch {
+      /* ignore */
+    }
+  }, [cashBookEnabled]);
+
+  useEffect(() => {
     setOffset(0);
-  }, [branchId, voucherType, startDate, endDate, debouncedSearch]);
+  }, [branchId, voucherType, startDate, endDate, debouncedSearch, book]);
+
+  useEffect(() => {
+    setDebitId('');
+    setCreditId('');
+  }, [book, voucherType, branchId]);
 
   useEffect(() => {
     let cancelled = false;
     void trackLoading(async () => {
-      const lite = await listICFundAccountsLiteAction(branchId);
+      const lite = await listICFundAccountsLiteAction(branchId, cashBookEnabled ? book : 'AED');
       if (!cancelled) setAccounts(lite);
     });
     return () => {
       cancelled = true;
     };
-  }, [branchId]);
+  }, [branchId, book, cashBookEnabled]);
 
   const loadVouchers = useCallback(async () => {
     setTableLoading(true);
@@ -121,6 +153,7 @@ export default function VoucherScreen({
           limit: pageSize,
           offset,
           includeStats: offset === 0,
+          book: cashBookEnabled ? book : 'AED',
         }),
       );
       if (!result.success) {
@@ -143,7 +176,7 @@ export default function VoucherScreen({
     } finally {
       setTableLoading(false);
     }
-  }, [alert, branchId, voucherType, startDate, endDate, debouncedSearch, offset, pageSize]);
+  }, [alert, branchId, voucherType, startDate, endDate, debouncedSearch, offset, pageSize, book, cashBookEnabled]);
 
   useEffect(() => {
     void loadVouchers();
@@ -183,6 +216,7 @@ export default function VoucherScreen({
           creditAccountId: creditId,
           amount: parsedAmount,
           notes,
+          book: cashBookEnabled ? book : 'AED',
         }),
       );
       if (!result.success) {
@@ -203,7 +237,8 @@ export default function VoucherScreen({
       message: 'The entry stays in the audit log but is excluded from balances and reports.',
     });
     if (!ok) return;
-    const result = await trackLoading(() => deleteICFundVoucherAction(branchId, voucher.id));
+    const voucherBook = voucher.id.startsWith('INFV-') ? 'INR' : 'AED';
+    const result = await trackLoading(() => deleteICFundVoucherAction(branchId, voucher.id, voucherBook));
     if (!result.success) {
       showToast(result.error, 'error');
       return;
@@ -222,8 +257,8 @@ export default function VoucherScreen({
   const currencyBlockReason =
     debitAccount && creditAccount
       ? validateVoucherCurrencyPolicy(
-          { account_type: debitAccount.accountType, currency: 'AED' },
-          { account_type: creditAccount.accountType, currency: 'AED' },
+          { account_type: debitAccount.accountType, currency: book },
+          { account_type: creditAccount.accountType, currency: book },
         )
       : null;
 
@@ -239,7 +274,26 @@ export default function VoucherScreen({
   const canSaveEntry =
     Boolean(debitId && creditId && voucherDate && !currencyBlockReason && !amountBlockReason);
 
-  const kpiMetrics = useMemo(() => computeVoucherKpis(kpi, voucherType), [kpi, voucherType]);
+  const kpiMetrics = useMemo(
+    () => computeVoucherKpis(kpi, voucherType, cashBookEnabled ? book : 'AED'),
+    [kpi, voucherType, book, cashBookEnabled],
+  );
+
+  const selectBook = (next: LedgerBook) => {
+    setBook(next);
+    try {
+      sessionStorage.setItem(BOOK_STORAGE_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const accountCell = (accountId: string, name: string) =>
+    cashBookEnabled && book === 'INR' ? (
+      <span>{name}</span>
+    ) : (
+      <ICFundAccountLink slug={slug} accountId={accountId} name={name} accounts={accounts} />
+    );
   const pageStart = total === 0 ? 0 : offset + 1;
   const pageEnd = Math.min(offset + VOUCHER_LIST_PAGE_SIZE, total);
 
@@ -250,8 +304,18 @@ export default function VoucherScreen({
       <AsicKpiStrip metrics={kpiMetrics} />
 
       <div className={icfCard}>
-        <div className="border-b border-slate-200 px-3 py-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-3 py-2">
           <p className="text-sm font-medium text-slate-900">New entry</p>
+          {cashBookEnabled ? (
+            <div className="flex items-center gap-1" role="group" aria-label="Settlement currency">
+              <button type="button" className={bookToggleClass(book === 'AED')} onClick={() => selectBook('AED')}>
+                AED
+              </button>
+              <button type="button" className={bookToggleClass(book === 'INR')} onClick={() => selectBook('INR')}>
+                INR
+              </button>
+            </div>
+          ) : null}
         </div>
         <div className="grid grid-cols-1 gap-2 overflow-visible p-3 sm:grid-cols-2 lg:grid-cols-12 lg:items-end">
           <div className="sm:col-span-1 lg:col-span-2">
@@ -279,7 +343,9 @@ export default function VoucherScreen({
             />
           </div>
           <div className="sm:col-span-1 lg:col-span-1">
-            <label className={icfLabel} htmlFor={`${voucherType}-amount`}>Amount (AED)</label>
+            <label className={icfLabel} htmlFor={`${voucherType}-amount`}>
+              Amount ({cashBookEnabled ? book : 'AED'})
+            </label>
             <input
               id={`${voucherType}-amount`}
               className={`${icfInput} font-mono tabular-nums`}
@@ -332,6 +398,16 @@ export default function VoucherScreen({
                 placeholder="Account, notes, #"
               />
             </div>
+            {cashBookEnabled ? (
+              <div className="flex items-center gap-1 pb-0.5" role="group" aria-label="List settlement currency">
+                <button type="button" className={bookToggleClass(book === 'AED')} onClick={() => selectBook('AED')}>
+                  AED
+                </button>
+                <button type="button" className={bookToggleClass(book === 'INR')} onClick={() => selectBook('INR')}>
+                  INR
+                </button>
+              </div>
+            ) : null}
             <span className="pb-1 text-[11px] text-slate-500">
               {total > 0 ? `${pageStart}–${pageEnd} of ${total}` : `${visible.length} entries`}
             </span>
@@ -355,7 +431,9 @@ export default function VoucherScreen({
                   <th className={icfTh}>{voucherType === 'contra' ? 'From bank' : 'Account'}</th>
                 </>
               )}
-              <th className={icfThAlign('right')}>{icfLedgerColumnLabel.amount}</th>
+              <th className={icfThAlign('right')}>
+                {cashBookEnabled && book === 'INR' ? 'Amount (INR)' : icfLedgerColumnLabel.amount}
+              </th>
               <th className={icfTh}>User</th>
               <th className={icfTh}>Notes</th>
               <th className={icfTh} />
@@ -388,76 +466,30 @@ export default function VoucherScreen({
                     <td className={`${icfTd} tabular-nums`}>{fmtICDate(row.voucherDate)}</td>
                     {voucherType === 'journal' ? (
                       <>
-                        <td className={icfTd}>
-                          <ICFundAccountLink
-                            slug={slug}
-                            accountId={row.debitAccountId}
-                            name={row.debitAccountName}
-                            accounts={accounts}
-                          />
-                        </td>
-                        <td className={icfTd}>
-                          <ICFundAccountLink
-                            slug={slug}
-                            accountId={row.creditAccountId}
-                            name={row.creditAccountName}
-                            accounts={accounts}
-                          />
-                        </td>
+                        <td className={icfTd}>{accountCell(row.debitAccountId, row.debitAccountName)}</td>
+                        <td className={icfTd}>{accountCell(row.creditAccountId, row.creditAccountName)}</td>
                       </>
                     ) : (
                       <>
                         <td className={icfTd}>
-                          {voucherType === 'contra' ? (
-                            <ICFundAccountLink
-                              slug={slug}
-                              accountId={row.debitAccountId}
-                              name={row.debitAccountName}
-                              accounts={accounts}
-                            />
-                          ) : bankCol === 'debit' ? (
-                            <ICFundAccountLink
-                              slug={slug}
-                              accountId={row.debitAccountId}
-                              name={cashOrBank}
-                              accounts={accounts}
-                            />
-                          ) : (
-                            <ICFundAccountLink
-                              slug={slug}
-                              accountId={row.creditAccountId}
-                              name={cashOrBank}
-                              accounts={accounts}
-                            />
-                          )}
+                          {voucherType === 'contra'
+                            ? accountCell(row.debitAccountId, row.debitAccountName)
+                            : bankCol === 'debit'
+                              ? accountCell(row.debitAccountId, cashOrBank)
+                              : accountCell(row.creditAccountId, cashOrBank)}
                         </td>
                         <td className={icfTd}>
-                          {voucherType === 'contra' ? (
-                            <ICFundAccountLink
-                              slug={slug}
-                              accountId={row.creditAccountId}
-                              name={row.creditAccountName}
-                              accounts={accounts}
-                            />
-                          ) : partyCol === 'debit' ? (
-                            <ICFundAccountLink
-                              slug={slug}
-                              accountId={row.debitAccountId}
-                              name={party}
-                              accounts={accounts}
-                            />
-                          ) : (
-                            <ICFundAccountLink
-                              slug={slug}
-                              accountId={row.creditAccountId}
-                              name={party}
-                              accounts={accounts}
-                            />
-                          )}
+                          {voucherType === 'contra'
+                            ? accountCell(row.creditAccountId, row.creditAccountName)
+                            : partyCol === 'debit'
+                              ? accountCell(row.debitAccountId, party)
+                              : accountCell(row.creditAccountId, party)}
                         </td>
                       </>
                     )}
-                    <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={row.amount} /></td>
+                    <td className={`${icfTd} text-right font-mono tabular-nums`}>
+                      <FmtLedgerAmount amount={row.amount} book={cashBookEnabled ? book : 'AED'} />
+                    </td>
                     <td className={icfTd}><VoucherUserCell voucher={row} /></td>
                     <td className={`${icfTd} max-w-[14rem] truncate text-slate-500`}>{row.notes || '—'}</td>
                     <td className={`${icfTd} text-right`}>
