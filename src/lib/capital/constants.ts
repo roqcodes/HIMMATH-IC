@@ -25,6 +25,8 @@ export const CAPITAL_SKIP_ALLOCATION_REFERENCE_TYPES = new Set([
   'ic_purchase_cost',
   'metal_cost',
   'metal_sale_cogs',
+  'metal_fx_profit',
+  'currency_exchange',
   'capital_opening',
   'capital_deposit',
   'capital_withdraw',

@@ -75,12 +75,39 @@ export function inrAccountMovementJoinSql(opts?: {
   return accountMovementJoinAlias('m', `COALESCE(v.status, 'active') = 'active'`, 'inr_fund_vouchers', opts);
 }
 
+export function inrAccountPendingMovementJoinSql(opts?: {
+  asOfParam?: string | null;
+  branchParam?: string | null;
+  accountParam?: string | null;
+}): string {
+  return accountMovementJoinAlias('pm', `COALESCE(v.status, 'active') = 'pending'`, 'inr_fund_vouchers', opts);
+}
+
 export function inrAccountBalanceSql(_asOfParam?: string | null): string {
   return `(a.opening_balance + COALESCE(m.movement, 0))`;
 }
 
 export function accountBalanceSql(_asOfParam?: string | null): string {
   return `(a.opening_balance + COALESCE(m.movement, 0))`;
+}
+
+/** Lifetime posted debits / credits per account (active vouchers). */
+export function accountLedgerDebitSumSql(
+  branchParam: string,
+  voucherTable: VoucherLedgerTable = 'ic_fund_vouchers',
+): string {
+  return `(SELECT COALESCE(SUM(v.amount), 0) FROM ${voucherTable} v
+    WHERE COALESCE(v.status, 'active') = 'active'
+      AND v.branch_id = ${branchParam} AND v.debit_account_id = a.id)`;
+}
+
+export function accountLedgerCreditSumSql(
+  branchParam: string,
+  voucherTable: VoucherLedgerTable = 'ic_fund_vouchers',
+): string {
+  return `(SELECT COALESCE(SUM(v.amount), 0) FROM ${voucherTable} v
+    WHERE COALESCE(v.status, 'active') = 'active'
+      AND v.branch_id = ${branchParam} AND v.credit_account_id = a.id)`;
 }
 
 export function accountPendingBalanceSql(): string {

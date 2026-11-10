@@ -855,12 +855,17 @@ export interface ICFundAccount {
   createdAt: string;
   balance: number;
   pendingBalance?: number;
+  /** Posted voucher totals (for pickers / quick ledger hint). */
+  ledgerDebit?: number;
+  ledgerCredit?: number;
   customerId?: string;
   email?: string;
   phone?: string;
   hasPortalLogin?: boolean;
   sourceType?: string;
   sourceId?: string;
+  /** Set on INR chart rows loaded from inr_fund_accounts. */
+  book?: 'AED' | 'INR';
 }
 
 export interface ICFundVoucher {

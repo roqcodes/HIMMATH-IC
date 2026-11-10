@@ -27,6 +27,9 @@ export type ReportFilterBarProps = {
   statementBook?: 'aed' | 'inr';
   onStatementBook?: (book: 'aed' | 'inr') => void;
   showInrBookTab?: boolean;
+  fundLedgerBook?: 'aed' | 'inr';
+  onFundLedgerBook?: (book: 'aed' | 'inr') => void;
+  showFundLedgerBookTab?: boolean;
 };
 
 const fieldCell = 'flex min-w-0 flex-col justify-end gap-1';
@@ -87,6 +90,9 @@ export default function ReportFilterBar({
   statementBook,
   onStatementBook,
   showInrBookTab,
+  fundLedgerBook,
+  onFundLedgerBook,
+  showFundLedgerBookTab,
 }: ReportFilterBarProps) {
   const patch = (partial: Partial<ReportFilterState>) => onChange({ ...filters, ...partial });
 
@@ -102,7 +108,7 @@ export default function ReportFilterBar({
   const activeCount = useMemo(() => countActiveFilters(filters), [filters]);
   const showClear = activeCount > 0;
 
-  const bookToggle =
+  const statementBookToggle =
     reportView === 'statement' && showInrBookTab && onStatementBook ? (
       <ReportSegmentTabs
         label="Ledger book"
@@ -114,6 +120,21 @@ export default function ReportFilterBar({
         ]}
       />
     ) : null;
+
+  const fundBookToggle =
+    showFundLedgerBookTab && onFundLedgerBook ? (
+      <ReportSegmentTabs
+        label="Ledger book"
+        value={fundLedgerBook ?? 'aed'}
+        onChange={onFundLedgerBook}
+        options={[
+          { id: 'aed', label: 'AED' },
+          { id: 'inr', label: 'INR' },
+        ]}
+      />
+    ) : null;
+
+  const bookToggle = statementBookToggle ?? fundBookToggle;
 
   const selectedAccountDetail =
     accountOptions?.find(o => o.value === (accountId ?? ''))?.detail?.trim() || '';

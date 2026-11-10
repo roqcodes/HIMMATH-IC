@@ -1,11 +1,12 @@
 'use client';
 
 import React from 'react';
-import { fmtLedgerAed, FmtLedgerAed, FmtLedgerInr } from '@/lib/icFunds/format';
+import { fmtLedgerAed, fmtLedgerInr, FmtLedgerAed, FmtLedgerInr } from '@/lib/icFunds/format';
 import { icfLabel, icfTd } from '@/components/ic-funds/ui';
 
 /** Short ledger caption for day book / trial balance headers (AED fund accounting). */
 export const AED_LEDGER_CAPTION = 'Dirhams (AED).';
+export const INR_LEDGER_CAPTION = 'Indian rupees (INR).';
 
 export function ReportSegmentTabs<T extends string>({
   label,
@@ -75,6 +76,12 @@ export function ReportCaption({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function fmtDrCr(n: number): string {
-  return n === 0 ? '—' : fmtLedgerAed(n);
+export function fmtDrCr(n: number, book: 'AED' | 'INR' = 'AED'): string {
+  if (n === 0) return '—';
+  return book === 'INR' ? fmtLedgerInr(n) : fmtLedgerAed(n);
+}
+
+export function FmtDrCr({ amount, book = 'AED' }: { amount: number; book?: 'AED' | 'INR' }) {
+  if (amount === 0) return <>—</>;
+  return book === 'INR' ? <FmtLedgerInr amount={amount} /> : <FmtLedgerAed amount={amount} />;
 }

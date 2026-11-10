@@ -18,8 +18,7 @@ import {
 import type { DateFilterRange } from '@/lib/dateFilterRange';
 import type { ICTransferPortalMode } from '@/lib/icTransfer/branchPortalScope';
 import { HQ_IC_FUNDS_BRANCH_SLUG } from '@/lib/icFunds/hqBranch';
-import { IC_FUND_VOUCHER_LABELS } from '@/lib/icFunds/constants';
-import { fmtICDate, fmtLedgerAmount, FmtLedgerAmount } from '@/lib/icFunds/format';
+import { fmtLedgerAmount, FmtLedgerAmount } from '@/lib/icFunds/format';
 import {
   formatDealTableAed,
   formatDealTableInr,
@@ -53,7 +52,8 @@ import ViewSaleModal from '@/components/ic-transfer/sales/ViewSaleModal';
 import { getAdminSaleCustomerName } from '@/lib/icTransfer/branchOrderOwnership';
 import { effectiveSaleCounterpartyId } from '@/lib/counterparties/effectiveId';
 import {
-  sortDealJournals,
+  groupWarehouseDealJournals,
+  warehouseJournalAccountDisplayName,
   warehouseJournalDealRef,
   warehouseJournalEntryLabel,
 } from '@/lib/icTransfer/warehouseJournalLabels';
@@ -92,6 +92,22 @@ function DateCell({ iso }: { iso?: string }) {
       </div>
     </div>
   );
+}
+
+function JournalAccountCell({
+  row,
+  side,
+  icFundsSlug,
+}: {
+  row: ICFundVoucher;
+  side: 'debit' | 'credit';
+  icFundsSlug: string;
+}) {
+  const rawName = side === 'debit' ? row.debitAccountName : row.creditAccountName;
+  const accountId = side === 'debit' ? row.debitAccountId : row.creditAccountId;
+  const name = warehouseJournalAccountDisplayName(rawName);
+  if (row.book === 'INR') return <span>{name}</span>;
+  return <ICFundAccountLink slug={icFundsSlug} accountId={accountId} name={name} />;
 }
 
 type Props = {
@@ -219,7 +235,7 @@ export default function WarehouseDetailTabs({
     [activity.length, purchases.length, sales.length, labRows.length, journals, journalsLoaded],
   );
 
-  const filteredJournals = useMemo(() => {
+  const filteredJournalGroups = useMemo(() => {
     const q = search.trim().toLowerCase();
     const active = journals.filter(v => v.status !== 'void');
     const rows = !q
@@ -227,16 +243,20 @@ export default function WarehouseDetailTabs({
       : active.filter(v => {
           const entry = warehouseJournalEntryLabel(v, icPurchases, icSales).toLowerCase();
           const deal = warehouseJournalDealRef(v, icPurchases, icSales).toLowerCase();
+          const debit = warehouseJournalAccountDisplayName(v.debitAccountName).toLowerCase();
+          const credit = warehouseJournalAccountDisplayName(v.creditAccountName).toLowerCase();
           return (
             entry.includes(q) ||
             deal.includes(q) ||
             v.notes.toLowerCase().includes(q) ||
             String(v.voucherNo).includes(q) ||
             v.debitAccountName.toLowerCase().includes(q) ||
-            v.creditAccountName.toLowerCase().includes(q)
+            v.creditAccountName.toLowerCase().includes(q) ||
+            debit.includes(q) ||
+            credit.includes(q)
           );
         });
-    return sortDealJournals(rows);
+    return groupWarehouseDealJournals(rows, icPurchases, icSales);
   }, [journals, search, icPurchases, icSales]);
 
   const renderPurchaseRow = (p: ICPurchase, showType?: boolean) => (
@@ -380,95 +400,88 @@ export default function WarehouseDetailTabs({
 
   const journalTable = (
     <div className={icfTableWrap}>
-      <table className="w-full min-w-[760px] text-left">
+      <table className="w-full min-w-[720px] text-left">
         <thead>
           <tr className={icfTheadRow}>
             <th className={icfTh}>Date</th>
-            <th className={icfTh}>Book</th>
-            <th className={icfTh}>#</th>
-            <th className={icfTh}>Entry</th>
             <th className={icfTh}>Deal</th>
-            <th className={icfTh}>Voucher</th>
+            <th className={icfTh}>Summary</th>
+            <th className={icfTh}>Book</th>
             <th className={icfTh}>Debit</th>
             <th className={icfTh}>Credit</th>
             <th className={icfThAlign('right')}>Amount</th>
-            <th className={icfTh}>Notes</th>
           </tr>
         </thead>
         <tbody>
           {journalsLoading ? (
-            <ASICTableRowsSkeleton rows={6} cols={10} />
-          ) : filteredJournals.length === 0 ? (
+            <ASICTableRowsSkeleton rows={6} cols={7} />
+          ) : filteredJournalGroups.length === 0 ? (
             <tr>
-              <td colSpan={10} className={`${icfTd} py-8 text-center text-sm text-slate-500`}>
+              <td colSpan={7} className={`${icfTd} py-8 text-center text-sm text-slate-500`}>
                 No journals for this warehouse in the selected period.
               </td>
             </tr>
           ) : (
-            filteredJournals.map(row => (
-              <tr
-                key={`${row.book ?? 'AED'}-${row.id}`}
-                role="button"
-                tabIndex={0}
-                onClick={() => setViewJournal(row)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    setViewJournal(row);
-                  }
-                }}
-                className={`cursor-pointer border-b border-slate-100 hover:bg-slate-50 ${row.status === 'pending' ? 'bg-amber-50/40' : ''}`}
-              >
-                <td className={`${icfTd} tabular-nums`}>{fmtICDate(row.voucherDate)}</td>
-                <td className={icfTd}>
-                  <span
-                    className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                      row.book === 'INR' ? 'bg-indigo-50 text-indigo-800' : 'bg-slate-100 text-slate-700'
-                    }`}
+            filteredJournalGroups.map(group => (
+              <React.Fragment key={group.key}>
+                <tr className="border-t border-slate-200 bg-slate-50/90">
+                  <td className={`${icfTd} py-2`}>
+                    <DateCell iso={group.latestAt} />
+                  </td>
+                  <td className={`${icfTd} py-2 font-mono text-xs font-semibold text-slate-700`}>{group.dealRef}</td>
+                  <td className={`${icfTd} py-2 text-sm font-semibold text-slate-900`} colSpan={5}>
+                    {group.headline}
+                    <span className="ml-2 text-xs font-normal text-slate-500">
+                      {group.lines.length} {group.lines.length === 1 ? 'line' : 'lines'}
+                    </span>
+                  </td>
+                </tr>
+                {group.lines.map(row => (
+                  <tr
+                    key={`${row.book ?? 'AED'}-${row.id}`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setViewJournal(row)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setViewJournal(row);
+                      }
+                    }}
+                    className={`cursor-pointer border-b border-slate-100 hover:bg-slate-50/80 ${row.status === 'pending' ? 'bg-amber-50/40' : ''}`}
                   >
-                    {row.book === 'INR' ? 'INR' : 'AED'}
-                  </span>
-                </td>
-                <td className={`${icfTd} font-mono tabular-nums text-slate-500`}>
-                  {row.voucherNo}
-                  {row.status === 'pending' ? (
-                    <span className="ml-1 text-[10px] font-semibold uppercase text-amber-600">PENDING</span>
-                  ) : null}
-                </td>
-                <td className={`${icfTd} text-xs font-medium text-slate-800`}>
-                  {warehouseJournalEntryLabel(row, icPurchases, icSales)}
-                </td>
-                <td className={`${icfTd} font-mono text-xs text-slate-600`}>
-                  {warehouseJournalDealRef(row, icPurchases, icSales)}
-                </td>
-                <td className={icfTd}>{IC_FUND_VOUCHER_LABELS[row.voucherType]}</td>
-                <td className={icfTd} onClick={e => e.stopPropagation()}>
-                  {row.book === 'INR' ? (
-                    <span>{row.debitAccountName}</span>
-                  ) : (
-                    <ICFundAccountLink
-                      slug={icFundsSlug}
-                      accountId={row.debitAccountId}
-                      name={row.debitAccountName}
-                    />
-                  )}
-                </td>
-                <td className={icfTd} onClick={e => e.stopPropagation()}>
-                  {row.book === 'INR' ? (
-                    <span>{row.creditAccountName}</span>
-                  ) : (
-                    <ICFundAccountLink
-                      slug={icFundsSlug}
-                      accountId={row.creditAccountId}
-                      name={row.creditAccountName}
-                    />
-                  )}
-                </td>
-                <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                  <FmtLedgerAmount amount={row.amount} book={row.book} />
-                </td>
-                <td className={`${icfTd} max-w-[14rem] truncate text-slate-500`}>{row.notes || '—'}</td>
-              </tr>
+                    <td className={icfTd} />
+                    <td className={icfTd} />
+                    <td className={`${icfTd} pl-6 text-xs text-slate-600`}>
+                      <span className="font-medium text-slate-800">
+                        {warehouseJournalEntryLabel(row, icPurchases, icSales)}
+                      </span>
+                      <span className="ml-2 font-mono text-[10px] tabular-nums text-slate-400">#{row.voucherNo}</span>
+                      {row.status === 'pending' ? (
+                        <span className="ml-1 text-[10px] font-semibold uppercase text-amber-600">PENDING</span>
+                      ) : null}
+                    </td>
+                    <td className={icfTd}>
+                      <span
+                        className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                          row.book === 'INR' ? 'bg-indigo-50 text-indigo-800' : 'bg-slate-100 text-slate-700'
+                        }`}
+                      >
+                        {row.book === 'INR' ? 'INR' : 'AED'}
+                      </span>
+                    </td>
+                    <td className={icfTd} onClick={e => e.stopPropagation()}>
+                      <JournalAccountCell row={row} side="debit" icFundsSlug={icFundsSlug} />
+                    </td>
+                    <td className={icfTd} onClick={e => e.stopPropagation()}>
+                      <JournalAccountCell row={row} side="credit" icFundsSlug={icFundsSlug} />
+                    </td>
+                    <td className={`${icfTd} text-right font-mono tabular-nums`}>
+                      <FmtLedgerAmount amount={row.amount} book={row.book} />
+                    </td>
+                  </tr>
+                ))}
+              </React.Fragment>
             ))
           )}
         </tbody>

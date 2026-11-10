@@ -3,6 +3,7 @@
 import React from 'react';
 import { icfCard } from '@/components/ic-funds/ui';
 import { FmtLedgerAed, FmtLedgerInr } from '@/lib/icFunds/format';
+import { signedLedgerAmountNode } from '@/lib/icFunds/formatDisplay';
 import type { WarehouseInventoryTotals } from '@/lib/icTransfer/warehouseMatrixMetrics';
 import type { DealBookPair } from '@/lib/icTransfer/dealBookKpis';
 import { formatMetalGrams } from '@/lib/icTransfer/warehouseMatrixMetrics';
@@ -190,9 +191,9 @@ export default function WarehouseInventoryKpiGrid({ metrics, books, rangeLabel }
         
         {/* AED Row */}
         <div className="grid grid-cols-2 divide-x divide-slate-100 border-b border-slate-100 dark:divide-slate-800 dark:border-slate-800 sm:grid-cols-4">
-          <KpiCell 
-            label="AED Opening" 
-            value={<FmtLedgerAed amount={books.aed.opening} />} 
+          <KpiCell
+            label="AED Opening"
+            value={signedLedgerAmountNode('AED', books.aed.opening)}
             tone="slate"
           />
           <KpiCell 
@@ -205,10 +206,16 @@ export default function WarehouseInventoryKpiGrid({ metrics, books, rangeLabel }
             value={<FmtLedgerAed amount={books.aed.periodCredit} />} 
             tone="emerald"
           />
-          <KpiCell 
-            label="AED Closing" 
-            value={<FmtLedgerAed amount={books.aed.closing} />} 
-            tone={books.aed.closing >= 0 ? 'emerald' : 'red'}
+          <KpiCell
+            label="AED Closing"
+            value={signedLedgerAmountNode('AED', books.aed.closing)}
+            tone={
+              Math.abs(books.aed.closing) < 0.005
+                ? 'slate'
+                : books.aed.closing < 0
+                  ? 'emerald'
+                  : 'amber'
+            }
           />
         </div>
 

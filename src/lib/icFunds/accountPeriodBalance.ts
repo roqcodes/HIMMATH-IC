@@ -1,5 +1,6 @@
 import type { ICFundAccountType } from '@/types';
 import { trialBalanceSplit } from '@/lib/icFunds/accountBalance';
+import { LEDGER_MONEY_DECIMAL_PLACES, roundLedgerAmount } from '@/lib/icFunds/currencyPolicy';
 
 /** Per-account trial balance / ledger period columns (posted active vouchers only). */
 export type AccountPeriodLedger = {
@@ -50,21 +51,54 @@ export function toTrialBalanceRow(ledger: AccountPeriodLedger): TrialBalanceRow 
     accountId: ledger.accountId,
     accountName: ledger.accountName,
     accountType: ledger.accountType,
-    openingDebit: round2(open.debit),
-    openingCredit: round2(open.credit),
-    periodDebit: round2(ledger.periodDebit),
-    periodCredit: round2(ledger.periodCredit),
-    closingDebit: round2(close.debit),
-    closingCredit: round2(close.credit),
-    pendingDebit: round2(pending.debit),
-    pendingCredit: round2(pending.credit),
-    debit: round2(close.debit),
-    credit: round2(close.credit),
+    openingDebit: roundMoneyColumn(open.debit),
+    openingCredit: roundMoneyColumn(open.credit),
+    periodDebit: roundMoneyColumn(ledger.periodDebit),
+    periodCredit: roundMoneyColumn(ledger.periodCredit),
+    closingDebit: roundMoneyColumn(close.debit),
+    closingCredit: roundMoneyColumn(close.credit),
+    pendingDebit: roundMoneyColumn(pending.debit),
+    pendingCredit: roundMoneyColumn(pending.credit),
+    debit: roundMoneyColumn(close.debit),
+    credit: roundMoneyColumn(close.credit),
   };
 }
 
-function round2(n: number): number {
-  return Number(n.toFixed(2));
+/** Trial balance columns keep ledger fil precision; UI formats to 2 dp separately. */
+function roundMoneyColumn(n: number): number {
+  return roundLedgerAmount(n);
+}
+
+const TB_BALANCE_EPS = 10 ** -LEDGER_MONEY_DECIMAL_PLACES / 2;
+
+/** Posted Dr/Cr column totals should match at ledger precision (not per-row 2 dp). */
+export function trialBalanceColumnsBalanced(debitTotal: number, creditTotal: number): boolean {
+  return Math.abs(roundLedgerAmount(debitTotal) - roundLedgerAmount(creditTotal)) < TB_BALANCE_EPS;
+}
+
+export function summarizeTrialBalanceTotals(ledgers: AccountPeriodLedger[]): {
+  closingDebit: number;
+  closingCredit: number;
+  periodDebit: number;
+  periodCredit: number;
+} {
+  let closingDebit = 0;
+  let closingCredit = 0;
+  let periodDebit = 0;
+  let periodCredit = 0;
+  for (const l of ledgers) {
+    periodDebit += l.periodDebit;
+    periodCredit += l.periodCredit;
+    const close = trialBalanceSplit(l.closing);
+    closingDebit += close.debit;
+    closingCredit += close.credit;
+  }
+  return {
+    closingDebit: roundLedgerAmount(closingDebit),
+    closingCredit: roundLedgerAmount(closingCredit),
+    periodDebit: roundLedgerAmount(periodDebit),
+    periodCredit: roundLedgerAmount(periodCredit),
+  };
 }
 
 const ACTIVE = `COALESCE(v.status, 'active') = 'active'`;
@@ -129,6 +163,44 @@ export function accountPeriodLedgerSqlWithAgg(
       (a.opening_balance + COALESCE(m.through_mov, 0)) AS closing_balance,
       ${pendingBalanceExpr} AS pending_balance
     FROM ic_fund_accounts a
+    LEFT JOIN mov_agg m ON m.account_id = a.id`;
+}
+
+/** INR fund accounts — same period columns as AED, sourced from inr_fund_vouchers. */
+export function inrAccountPeriodLedgerSqlWithAgg(
+  branchParam: string,
+  startParam: string,
+  endParam: string,
+  pendingBalanceExpr: string,
+): string {
+  const active = `COALESCE(v.status, 'active') = 'active'`;
+  return `WITH voucher_lines AS (
+      SELECT v.debit_account_id AS account_id, v.amount AS amt, v.voucher_date, 'D'::text AS side
+      FROM inr_fund_vouchers v
+      WHERE ${active} AND v.branch_id = ${branchParam}
+      UNION ALL
+      SELECT v.credit_account_id, v.amount, v.voucher_date, 'C'::text
+      FROM inr_fund_vouchers v
+      WHERE ${active} AND v.branch_id = ${branchParam}
+    ),
+    mov_agg AS (
+      SELECT account_id,
+        COALESCE(SUM(amt) FILTER (WHERE side = 'D' AND voucher_date < ${startParam}::date), 0)
+          - COALESCE(SUM(amt) FILTER (WHERE side = 'C' AND voucher_date < ${startParam}::date), 0) AS open_mov,
+        COALESCE(SUM(amt) FILTER (WHERE side = 'D' AND voucher_date >= ${startParam}::date AND voucher_date <= ${endParam}::date), 0) AS period_dr,
+        COALESCE(SUM(amt) FILTER (WHERE side = 'C' AND voucher_date >= ${startParam}::date AND voucher_date <= ${endParam}::date), 0) AS period_cr,
+        COALESCE(SUM(amt) FILTER (WHERE side = 'D' AND voucher_date <= ${endParam}::date), 0)
+          - COALESCE(SUM(amt) FILTER (WHERE side = 'C' AND voucher_date <= ${endParam}::date), 0) AS through_mov
+      FROM voucher_lines
+      GROUP BY account_id
+    )
+    SELECT a.id, a.name, a.account_type,
+      (a.opening_balance + COALESCE(m.open_mov, 0)) AS period_opening,
+      COALESCE(m.period_dr, 0) AS period_debit,
+      COALESCE(m.period_cr, 0) AS period_credit,
+      (a.opening_balance + COALESCE(m.through_mov, 0)) AS closing_balance,
+      ${pendingBalanceExpr} AS pending_balance
+    FROM inr_fund_accounts a
     LEFT JOIN mov_agg m ON m.account_id = a.id`;
 }
 

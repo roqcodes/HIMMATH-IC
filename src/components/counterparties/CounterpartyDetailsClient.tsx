@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
 import { findCounterpartyByRouteParam } from '@/lib/counterparties/counterpartySlug';
@@ -13,7 +14,14 @@ import AsicPageHeader from '@/components/asic/AsicPageHeader';
 import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
 import ICTransferDateFilterBar from '@/components/ic-transfer/shared/ICTransferDateFilterBar';
 import { useICTransferFilters } from '@/components/ic-transfer/ui';
-import { asicBtnOutline } from '@/components/asic/ui';
+import { asicBtnOutline, asicBtnPrimary } from '@/components/asic/ui';
+import {
+  counterpartyPartyAccountId,
+  counterpartyVoucherHref,
+  pickCounterpartyVoucherBook,
+} from '@/lib/icFunds/voucherDeepLink';
+import { voucherPostedTargetsCounterparty } from '@/lib/icFunds/voucherPostedNotify';
+import { useOnIcFundsVoucherPosted } from '@/hooks/useOnIcFundsVoucherPosted';
 import { useWriteAccess } from '@/context/RbacWriteContext';
 import { fmtLedgerAed, fmtLedgerInr } from '@/lib/icFunds/format';
 import { buildLedgerAccountMetrics } from '@/lib/icFunds/ledgerKpiMetrics';
@@ -62,20 +70,23 @@ export default function CounterpartyDetailsClient({ counterpartyId, branchSlug }
     [dateFilter, customStartDate, customEndDate],
   );
 
-  useEffect(() => {
+  const reloadLedgerKpis = useCallback(() => {
     if (!counterparty?.id) return;
-    let cancelled = false;
     void getCounterpartyLedgerKpisAction({
       counterpartyId: counterparty.id,
       startDate: range.startDate ?? undefined,
       endDate: range.endDate ?? undefined,
-    }).then(next => {
-      if (!cancelled) setLedger(next);
-    });
-    return () => {
-      cancelled = true;
-    };
+    }).then(setLedger);
   }, [counterparty?.id, range.startDate, range.endDate]);
+
+  useEffect(() => {
+    reloadLedgerKpis();
+  }, [reloadLedgerKpis]);
+
+  useOnIcFundsVoucherPosted(detail => {
+    if (!counterparty?.id || !voucherPostedTargetsCounterparty(detail, counterparty.id)) return;
+    reloadLedgerKpis();
+  });
 
   if (!counterparty && icSuppliers.length > 0) {
     return notFound();
@@ -86,20 +97,54 @@ export default function CounterpartyDetailsClient({ counterpartyId, branchSlug }
   const listHref = counterpartyListPath(branchSlug ? { branchSlug } : undefined);
   const rolesLabel = formatCounterpartyRolesLabel(counterparty.roles);
 
+  const voucherBook = pickCounterpartyVoucherBook(ledger.aed.accountId, ledger.inr.accountId);
+  const partyAccountId = counterpartyPartyAccountId(voucherBook, ledger.aed.accountId, ledger.inr.accountId);
+  const paymentHref = counterpartyVoucherHref('payment', {
+    partyAccountId,
+    book: voucherBook,
+    branchSlug,
+  });
+  const receiptHref = counterpartyVoucherHref('receipt', {
+    partyAccountId,
+    book: voucherBook,
+    branchSlug,
+  });
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <AsicPageHeader
         breadcrumbs={[{ label: 'Counterparties', href: listHref }, { label: counterparty.name }]}
         subtitle={`${counterparty.code?.trim() || 'No code'} · ${rolesLabel} · ${counterparty.status === 'inactive' ? 'Inactive' : 'Active'}`}
         actions={
-          <button
-            type="button"
-            className={`${asicBtnOutline}${!canWrite ? ' cursor-not-allowed opacity-50' : ''}`}
-            onClick={canWrite ? () => setEditOpen(true) : undefined}
-            {...wp()}
-          >
-            Edit
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {canWrite ? (
+              <>
+                <Link href={paymentHref} className={`${asicBtnPrimary} no-underline`} {...wp()}>
+                  Payment
+                </Link>
+                <Link href={receiptHref} className={`${asicBtnOutline} no-underline`} {...wp()}>
+                  Receipt
+                </Link>
+              </>
+            ) : (
+              <>
+                <span className={`${asicBtnPrimary} cursor-not-allowed opacity-50`} {...wp()}>
+                  Payment
+                </span>
+                <span className={`${asicBtnOutline} cursor-not-allowed opacity-50`} {...wp()}>
+                  Receipt
+                </span>
+              </>
+            )}
+            <button
+              type="button"
+              className={`${asicBtnOutline}${!canWrite ? ' cursor-not-allowed opacity-50' : ''}`}
+              onClick={canWrite ? () => setEditOpen(true) : undefined}
+              {...wp()}
+            >
+              Edit
+            </button>
+          </div>
         }
       />
 

@@ -218,7 +218,7 @@ export async function ensureLinkedAccount(
   return fallback.rows.length > 0 ? String(fallback.rows[0].id) : null;
 }
 
-async function ensureSystemAccount(
+export async function ensureSystemAccount(
   client: DbClient,
   branchId: string,
   name: string,
@@ -226,33 +226,47 @@ async function ensureSystemAccount(
   sourceId: string,
 ): Promise<string> {
   const existing = await client.query(
-    `SELECT id, name FROM ic_fund_accounts
+    `SELECT id, name, account_type, source_type, source_id FROM ic_fund_accounts
      WHERE branch_id = $1 AND source_type = 'ic_system' AND source_id = $2
      LIMIT 1`,
     [branchId, sourceId],
   );
   if (existing.rows.length > 0) {
-    const id = String(existing.rows[0].id);
-    if (String(existing.rows[0].name) !== name) {
-      await client.query(`UPDATE ic_fund_accounts SET name = $1 WHERE id = $2`, [name, id]);
+    const row = existing.rows[0];
+    const id = String(row.id);
+    const needsUpdate =
+      String(row.name) !== name ||
+      String(row.account_type) !== accountType ||
+      String(row.source_type) !== 'ic_system' ||
+      String(row.source_id) !== sourceId;
+    if (needsUpdate) {
+      await client.query(
+        `UPDATE ic_fund_accounts
+         SET name = $1, account_type = $2, source_type = 'ic_system', source_id = $3
+         WHERE id = $4`,
+        [name, accountType, sourceId, id],
+      );
     }
     return id;
   }
 
   const byName = await client.query(
-    `SELECT id FROM ic_fund_accounts
+    `SELECT id, account_type, source_type, source_id FROM ic_fund_accounts
      WHERE branch_id = $1 AND LOWER(TRIM(name)) = LOWER(TRIM($2))
      LIMIT 1`,
     [branchId, name],
   );
   if (byName.rows.length > 0) {
-    const foundId = String(byName.rows[0].id);
+    const row = byName.rows[0];
+    const foundId = String(row.id);
     await client.query(
       `UPDATE ic_fund_accounts
-       SET source_type = COALESCE(source_type, 'ic_system'),
-           source_id = COALESCE(source_id, $1)
-       WHERE id = $2`,
-      [sourceId, foundId],
+       SET source_type = 'ic_system',
+           source_id = $1,
+           account_type = $2,
+           name = $3
+       WHERE id = $4`,
+      [sourceId, accountType, name, foundId],
     );
     return foundId;
   }

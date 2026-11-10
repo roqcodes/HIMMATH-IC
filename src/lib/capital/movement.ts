@@ -2,6 +2,12 @@ import 'server-only';
 
 import type { QueryResult } from 'pg';
 import { roundLedgerAmount } from '@/lib/icFunds/currencyPolicy';
+import {
+  accountBalanceSql,
+  accountMovementJoinSql,
+  inrAccountBalanceSql,
+  inrAccountMovementJoinSql,
+} from '@/lib/icFunds/accountBalance';
 import { postVoucherInTx } from '@/lib/icFunds/icTransferFundSync';
 import { ensureInrCashTill, postInrVoucherInTx } from '@/lib/ledgers/inr/inrFundSync';
 import {
@@ -38,6 +44,49 @@ export function computeAedEquivalent(
   if (book === 'AED') return n;
   if (!Number.isFinite(inrPerAed) || inrPerAed <= 0) return 0;
   return roundLedgerAmount(n / inrPerAed);
+}
+
+async function postedBankBalance(
+  client: DbClient,
+  branchId: string,
+  book: 'AED' | 'INR',
+  bankAccountId: string,
+): Promise<number> {
+  if (book === 'AED') {
+    const res = await client.query(
+      `SELECT ${accountBalanceSql()} AS balance
+       FROM ic_fund_accounts a
+       ${accountMovementJoinSql({ branchParam: '$1', accountParam: '$2' })}
+       WHERE a.id = $2 AND a.branch_id = $1`,
+      [branchId, bankAccountId],
+    );
+    return Number(res.rows[0]?.balance) || 0;
+  }
+  const res = await client.query(
+    `SELECT ${inrAccountBalanceSql()} AS balance
+     FROM inr_fund_accounts a
+     ${inrAccountMovementJoinSql({ branchParam: '$1', accountParam: '$2' })}
+     WHERE a.id = $2 AND a.branch_id = $1`,
+    [branchId, bankAccountId],
+  );
+  return Number(res.rows[0]?.balance) || 0;
+}
+
+async function investorProfitDueInBook(
+  client: DbClient,
+  branchId: string,
+  investorId: string,
+  book: 'AED' | 'INR',
+): Promise<number> {
+  const res = await client.query(
+    `SELECT
+       COALESCE(SUM(allocated_amount) FILTER (WHERE kind <> 'payout'), 0)
+         - COALESCE(SUM(allocated_amount) FILTER (WHERE kind = 'payout'), 0) AS due
+     FROM ic_capital_allocations
+     WHERE branch_id = $1 AND investor_id = $2 AND book = $3 AND status = 'active'`,
+    [branchId, investorId, book],
+  );
+  return Number(res.rows[0]?.due) || 0;
 }
 
 async function remainingNativeCapital(
@@ -121,6 +170,26 @@ export async function postCapitalMovementInTx(
   if (bank.rows.length === 0) throw new Error('Bank account not found');
   if (String(bank.rows[0].account_type) !== 'bank') throw new Error('Select a bank / cash account');
   if (bank.rows[0].status !== 'active') throw new Error('Bank account is inactive');
+
+  if (movement === 'withdraw' || movement === 'payout') {
+    const bankBal = await postedBankBalance(client, params.branchId, params.book, params.bankAccountId);
+    if (amountNative > bankBal + 0.0001) {
+      throw new Error(
+        `Insufficient ${params.book} cash in the selected account (${params.book === 'INR' ? '₹' : 'د.إ'} ${bankBal.toFixed(2)} available)`,
+      );
+    }
+    if (movement === 'payout') {
+      const profitDue = await investorProfitDueInBook(
+        client,
+        params.branchId,
+        params.investorId,
+        params.book,
+      );
+      if (amountNative > profitDue + 0.0001) {
+        throw new Error(`Payout exceeds profit due in the ${params.book} book`);
+      }
+    }
+  }
 
   const lotId = `ICCL-${crypto.randomUUID().slice(0, 10).toUpperCase()}`;
   const refType = refForMovement(movement);

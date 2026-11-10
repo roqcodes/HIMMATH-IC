@@ -1,6 +1,34 @@
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
 import type { ICPurchase, ICSale, ICFundVoucher } from '@/types';
 
+const WAREHOUSE_DEAL_REFERENCE_TYPES = new Set([
+  'ic_purchase',
+  'metal_purchase',
+  'metal_purchase_aed',
+  'lab_test_purchase',
+  'ic_sale',
+  'metal_sale_receipt',
+  'metal_sale_aed',
+  'lab_test_sale',
+  'metal_sale_cogs',
+  'ic_sale_cogs',
+  'metal_sale_profit',
+  'ic_sale_profit',
+  'metal_sale_ic_stock',
+  'metal_fx_profit',
+]);
+
+const JOURNAL_ACCOUNT_DISPLAY_NAMES: Record<string, string> = {
+  'Metal AED settlement': 'AED clearing',
+  'Metal purchase AED': 'Metal AED',
+  'Metal FX Profit': 'Metal FX (AED)',
+};
+
+/** Operator-facing names for internal metal clearing accounts (ledger names unchanged). */
+export function warehouseJournalAccountDisplayName(name: string): string {
+  return JOURNAL_ACCOUNT_DISPLAY_NAMES[name] ?? name;
+}
+
 function isMetal(mode: string | undefined | null): boolean {
   return mode === 'metal';
 }
@@ -21,6 +49,7 @@ function accountingEntryLabel(voucherType?: string | null, referenceType?: strin
     if (referenceType === 'ic_fund_payment') return 'Payment';
     if (referenceType === 'ic_fund_receipt') return 'Receipt';
   }
+  if (referenceType === 'currency_exchange') return 'Currency exchange';
   return null;
 }
 
@@ -123,16 +152,107 @@ export function journalStoryRank(referenceType?: string | null): number {
   }
 }
 
+function journalSortInstant(row: Pick<ICFundVoucher, 'voucherDate' | 'voucherNo' | 'createdAt'>): number {
+  const ts = Date.parse(String(row.createdAt || ''));
+  if (Number.isFinite(ts)) return ts;
+  const day = Date.parse(`${String(row.voucherDate || '').slice(0, 10)}T00:00:00Z`);
+  if (Number.isFinite(day)) return day;
+  return 0;
+}
+
+/** Newest posting first (flat list — e.g. server merge before grouping). */
 export function sortDealJournals<T extends Pick<ICFundVoucher, 'voucherDate' | 'voucherNo' | 'createdAt' | 'referenceType'>>(
   rows: T[],
 ): T[] {
   return [...rows].sort((a, b) => {
-    const da = String(a.voucherDate || '');
-    const db = String(b.voucherDate || '');
-    if (da !== db) return db.localeCompare(da);
+    const tb = journalSortInstant(b);
+    const ta = journalSortInstant(a);
+    if (tb !== ta) return tb - ta;
+    return (b.voucherNo || 0) - (a.voucherNo || 0);
+  });
+}
+
+/** Story order within one purchase/sale (buy → agent → COGS → profit). */
+export function sortJournalsWithinDealGroup<T extends Pick<ICFundVoucher, 'voucherNo' | 'referenceType'>>(
+  rows: T[],
+): T[] {
+  return [...rows].sort((a, b) => {
     const ra = journalStoryRank(a.referenceType);
     const rb = journalStoryRank(b.referenceType);
     if (ra !== rb) return ra - rb;
     return (a.voucherNo || 0) - (b.voucherNo || 0);
   });
+}
+
+function warehouseDealGroupKey(voucher: Pick<ICFundVoucher, 'id' | 'referenceType' | 'referenceId'>): string {
+  const ref = voucher.referenceType;
+  const id = voucher.referenceId;
+  if (id && ref && WAREHOUSE_DEAL_REFERENCE_TYPES.has(ref)) return `deal:${id}`;
+  return `voucher:${voucher.id}`;
+}
+
+export function warehouseJournalGroupHeadline(
+  lines: ICFundVoucher[],
+  purchases: ICPurchase[],
+  sales: ICSale[],
+): string {
+  const refId = lines.find(l => l.referenceId)?.referenceId;
+  if (refId) {
+    const purchase = purchases.find(x => x.id === refId);
+    if (purchase) {
+      return isMetal(purchase.settlementMode) ? 'Bought metal' : 'IC purchase';
+    }
+    const sale = sales.find(x => x.id === refId);
+    if (sale) {
+      return isMetal(sale.settlementMode) ? 'Sold metal' : 'Sold IC';
+    }
+  }
+  const first = lines[0];
+  return first ? warehouseJournalEntryLabel(first, purchases, sales) : '—';
+}
+
+export type WarehouseJournalDealGroup = {
+  key: string;
+  lines: ICFundVoucher[];
+  latestAt: string;
+  dealRef: string;
+  headline: string;
+};
+
+export function groupWarehouseDealJournals(
+  rows: ICFundVoucher[],
+  purchases: ICPurchase[],
+  sales: ICSale[],
+): WarehouseJournalDealGroup[] {
+  const map = new Map<string, ICFundVoucher[]>();
+  for (const row of rows) {
+    const key = warehouseDealGroupKey(row);
+    const bucket = map.get(key) ?? [];
+    bucket.push(row);
+    map.set(key, bucket);
+  }
+
+  const groups: WarehouseJournalDealGroup[] = [];
+  for (const [key, rawLines] of map) {
+    const lines = sortJournalsWithinDealGroup(rawLines);
+    const latestAt = lines.reduce((max, line) => {
+      const t = journalSortInstant(line);
+      return t > max ? t : max;
+    }, 0);
+    const sample = lines[0];
+    groups.push({
+      key,
+      lines,
+      latestAt: latestAt ? new Date(latestAt).toISOString() : sample?.createdAt || sample?.voucherDate || '',
+      dealRef: sample ? warehouseJournalDealRef(sample, purchases, sales) : '—',
+      headline: warehouseJournalGroupHeadline(lines, purchases, sales),
+    });
+  }
+
+  groups.sort((a, b) => {
+    const tb = Date.parse(b.latestAt) || journalSortInstant(b.lines[0] ?? ({} as ICFundVoucher));
+    const ta = Date.parse(a.latestAt) || journalSortInstant(a.lines[0] ?? ({} as ICFundVoucher));
+    return tb - ta;
+  });
+  return groups;
 }

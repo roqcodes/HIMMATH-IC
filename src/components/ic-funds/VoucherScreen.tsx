@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import AccountPicker from '@/components/ic-funds/AccountPicker';
 import {
   deleteICFundVoucherAction,
@@ -28,6 +29,10 @@ import { useWriteAccess } from '@/context/RbacWriteContext';
 import { useApp } from '@/context/AppContext';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import type { ICFundAccount, ICFundVoucher } from '@/types';
+import {
+  counterpartyIdsFromVoucherAccounts,
+  notifyIcFundsVoucherPosted,
+} from '@/lib/icFunds/voucherPostedNotify';
 
 type LedgerBook = 'AED' | 'INR';
 
@@ -84,6 +89,8 @@ export default function VoucherScreen({
   const cashBookEnabled = voucherType === 'payment' || voucherType === 'receipt';
   const [book, setBook] = useState<LedgerBook>('AED');
   const saveIdempotencyKey = useRef<string | null>(null);
+  const deepLinkPartyApplied = useRef(false);
+  const searchParams = useSearchParams();
 
   const pageSize = VOUCHER_LIST_PAGE_SIZE;
 
@@ -113,13 +120,32 @@ export default function VoucherScreen({
       setBook('AED');
       return;
     }
+    const fromUrl = searchParams.get('book');
+    if (fromUrl === 'INR' || fromUrl === 'AED') {
+      setBook(fromUrl);
+      return;
+    }
     try {
       const stored = sessionStorage.getItem(BOOK_STORAGE_KEY);
       if (stored === 'INR' || stored === 'AED') setBook(stored);
     } catch {
       /* ignore */
     }
-  }, [cashBookEnabled]);
+  }, [cashBookEnabled, searchParams]);
+
+  useEffect(() => {
+    deepLinkPartyApplied.current = false;
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!cashBookEnabled || deepLinkPartyApplied.current) return;
+    const partyId = searchParams.get('partyAccountId')?.trim();
+    if (!partyId || accounts.length === 0) return;
+    if (!accounts.some(a => a.id === partyId)) return;
+    if (voucherType === 'payment') setDebitId(partyId);
+    else if (voucherType === 'receipt') setCreditId(partyId);
+    deepLinkPartyApplied.current = true;
+  }, [accounts, cashBookEnabled, searchParams, voucherType]);
 
   useEffect(() => {
     setOffset(0);
@@ -129,6 +155,11 @@ export default function VoucherScreen({
     setDebitId('');
     setCreditId('');
   }, [book, voucherType, branchId]);
+
+  const loadAccounts = useCallback(async () => {
+    const lite = await listICFundAccountsLiteAction(branchId, cashBookEnabled ? book : 'AED');
+    setAccounts(lite);
+  }, [branchId, book, cashBookEnabled]);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,6 +222,22 @@ export default function VoucherScreen({
     setVoucherDate(defaultVoucherDate);
   };
 
+  const resetFormAfterSave = () => {
+    const partyAccountId = voucherType === 'payment' ? debitId : creditId;
+    setAmount('');
+    setNotes('');
+    setVoucherDate(defaultVoucherDate);
+    if (voucherType === 'payment') {
+      setDebitId(partyAccountId);
+      setCreditId('');
+    } else if (voucherType === 'receipt') {
+      setDebitId('');
+      setCreditId(partyAccountId);
+    } else {
+      resetForm();
+    }
+  };
+
   const handleSave = async () => {
     if (saving) return;
     if (!canWrite) return;
@@ -231,8 +278,12 @@ export default function VoucherScreen({
       }
       showToast(`${IC_FUND_VOUCHER_LABELS[voucherType].slice(0, -1)} saved`, 'success');
       saveIdempotencyKey.current = null;
-      resetForm();
-      await loadVouchers();
+      const counterpartyIds = counterpartyIdsFromVoucherAccounts(accounts, debitId, creditId);
+      await Promise.all([loadVouchers(), loadAccounts()]);
+      notifyIcFundsVoucherPosted(
+        counterpartyIds.length > 0 ? { counterpartyIds } : undefined,
+      );
+      resetFormAfterSave();
     } finally {
       setSaving(false);
     }
@@ -251,7 +302,15 @@ export default function VoucherScreen({
       return;
     }
     showToast('Voucher voided', 'success');
-    await loadVouchers();
+    const counterpartyIds = counterpartyIdsFromVoucherAccounts(
+      accounts,
+      voucher.debitAccountId,
+      voucher.creditAccountId,
+    );
+    await Promise.all([loadVouchers(), loadAccounts()]);
+    notifyIcFundsVoucherPosted(
+      counterpartyIds.length > 0 ? { counterpartyIds } : undefined,
+    );
   };
 
   const visible = vouchers;
@@ -337,6 +396,8 @@ export default function VoucherScreen({
               value={creditId}
               excludeId={debitId}
               onChange={setCreditId}
+              book={cashBookEnabled ? book : 'AED'}
+              partyOnly={voucherType === 'receipt'}
             />
           </div>
           <div className="min-w-0 sm:col-span-2 lg:col-span-3">
@@ -347,6 +408,8 @@ export default function VoucherScreen({
               value={debitId}
               excludeId={creditId}
               onChange={setDebitId}
+              book={cashBookEnabled ? book : 'AED'}
+              partyOnly={voucherType === 'payment'}
             />
           </div>
           <div className="sm:col-span-1 lg:col-span-1">

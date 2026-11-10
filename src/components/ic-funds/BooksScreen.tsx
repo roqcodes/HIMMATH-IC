@@ -13,6 +13,7 @@ import {
   resolveInrFundAccountIdForIcFundAccountAction,
 } from '@/app/actions/icFundsActions';
 import { accountTypeLabel, IC_FUND_VOUCHER_LABELS } from '@/lib/icFunds/constants';
+import { ledgerAccountTypeCaption } from '@/lib/icFunds/voucherPartyAccounts';
 import { fmtICDate, fmtLedgerAed, fmtLedgerAmount, icfLedgerColumnLabel, FmtLedgerAed, FmtLedgerAmount } from '@/lib/icFunds/format';
 import { formatReportPeriodCaption } from '@/lib/icFunds/reportCaptions';
 import { downloadCsv, exportReportPdfFromElement, openReportPreviewNewTab } from '@/lib/icFunds/booksExport';
@@ -126,6 +127,7 @@ export default function BooksScreen({
   const [error, setError] = useState<string | null>(null);
   const [reportFilters, setReportFilters] = useState<ReportFilterState>(DEFAULT_REPORT_FILTERS);
   const [statementBook, setStatementBook] = useState<'aed' | 'inr'>('aed');
+  const [fundLedgerBook, setFundLedgerBook] = useState<'aed' | 'inr'>('aed');
   const [profitLossBook, setProfitLossBook] = useState<'aed' | 'inr'>('aed');
   const [warehouseStatementBook, setWarehouseStatementBook] = useState<'ic' | 'metal'>('ic');
   const [inrAccountId, setInrAccountId] = useState<string | null>(null);
@@ -318,7 +320,7 @@ export default function BooksScreen({
         .map(a => ({
           value: a.id,
           label: a.name,
-          detail: accountTypeLabel(a.accountType),
+          detail: ledgerAccountTypeCaption(a),
         })),
     [accounts],
   );
@@ -382,30 +384,59 @@ export default function BooksScreen({
     return { metalSoldG, metalSaleInr, metalCogsInr };
   }, [warehousePl, reportFilters.warehouseId, reportFilters.search]);
 
-  const filteredAllVouchers = useMemo(
-    () => (bundle ? filterVouchers(bundle.allVouchers, reportFilters) : []),
-    [bundle, reportFilters],
+  const activeLedgerBook = useMemo((): 'AED' | 'INR' => {
+    if (reportView === 'statement') return statementBook === 'inr' ? 'INR' : 'AED';
+    if (
+      reportView === 'receivables' ||
+      reportView === 'all-vouchers' ||
+      reportView === 'trial-balance'
+    ) {
+      return fundLedgerBook === 'inr' ? 'INR' : 'AED';
+    }
+    return 'AED';
+  }, [fundLedgerBook, reportView, statementBook]);
+
+  /** HQ INR fund exists (not the statement account link). */
+  const inrBooksAvailable = useMemo(
+    () => (bundle?.inrAccounts?.length ?? 0) > 0,
+    [bundle?.inrAccounts],
   );
+
+  const reportAccounts = useMemo(() => {
+    if (!bundle) return accounts;
+    if (activeLedgerBook === 'INR' && bundle.inrAccounts?.length) return bundle.inrAccounts;
+    return accounts;
+  }, [accounts, activeLedgerBook, bundle]);
+
+  const filteredAllVouchers = useMemo(() => {
+    if (!bundle) return [];
+    const source = activeLedgerBook === 'INR' ? bundle.inrAllVouchers : bundle.allVouchers;
+    return filterVouchers(source ?? [], reportFilters);
+  }, [activeLedgerBook, bundle, reportFilters]);
 
   const filteredExpenseRegister = useMemo(
     () => (bundle ? filterVouchers(bundle.expenseRegister ?? bundle.dExpenses, reportFilters) : []),
     [bundle, reportFilters],
   );
 
-  const filteredTrialBalance = useMemo(
-    () => (bundle ? filterTrialBalanceLines(bundle.trialBalance, reportFilters) : []),
-    [bundle, reportFilters],
-  );
+  const filteredTrialBalance = useMemo(() => {
+    if (!bundle) return [];
+    const source =
+      activeLedgerBook === 'INR' ? bundle.inrTrialBalance ?? [] : bundle.trialBalance ?? [];
+    return filterTrialBalanceLines(source, reportFilters);
+  }, [activeLedgerBook, bundle, reportFilters]);
 
-  const filteredReceivables = useMemo(
-    () => (bundle ? filterAccounts(bundle.receivables, reportFilters) : []),
-    [bundle, reportFilters],
-  );
+  const filteredReceivables = useMemo(() => {
+    if (!bundle) return [];
+    const source = activeLedgerBook === 'INR' ? bundle.inrReceivables : bundle.receivables;
+    return filterAccounts(source ?? [], reportFilters);
+  }, [activeLedgerBook, bundle, reportFilters]);
 
-  const filteredPayables = useMemo(
-    () => (bundle ? filterAccounts(bundle.payables, reportFilters) : []),
-    [bundle, reportFilters],
-  );
+  const filteredPayables = useMemo(() => {
+    if (!bundle) return [];
+    const source = activeLedgerBook === 'INR' ? bundle.inrPayables : bundle.payables;
+    return filterAccounts(source ?? [], reportFilters);
+  }, [activeLedgerBook, bundle, reportFilters]);
 
   const activeStatement = useMemo(() => {
     if (statementBook === 'inr' && inrStatement) {
@@ -473,8 +504,10 @@ export default function BooksScreen({
         : null,
       settlementTradeReport: filteredSettlementReport,
       statement: activeStatement,
+      ledgerBook: activeLedgerBook,
     });
   }, [
+    activeLedgerBook,
     activeStatement,
     bundle,
     filteredAllVouchers,
@@ -843,7 +876,12 @@ export default function BooksScreen({
 
   useICFundsReportHeaderToolbar(headerToolbar);
 
-  const accountTable = (rows: ICFundAccount[], empty: string, showAsOf = false) => (
+  const accountTable = (
+    rows: ICFundAccount[],
+    empty: string,
+    showAsOf = false,
+    currency: 'AED' | 'INR' = 'AED',
+  ) => (
     <div>
       {showAsOf ? (
         <p className="border-b border-slate-200 px-2.5 py-1 text-[11px] text-slate-500">{asOfLabel}</p>
@@ -869,9 +907,16 @@ export default function BooksScreen({
                     {row.name}
                   </Link>
                 </td>
-                <td className={`${icfTd} text-slate-500`}>{accountTypeLabel(row.accountType)}</td>
-                <AmountCell n={ledgerById.get(row.id)?.opening ?? row.openingBalance} />
-                <BalanceWithPendingCell balance={row.balance} pendingBalance={row.pendingBalance} />
+                <td className={`${icfTd} text-slate-500`}>{ledgerAccountTypeCaption(row)}</td>
+                <AmountCell
+                  n={ledgerById.get(row.id)?.opening ?? row.openingBalance}
+                  currency={currency}
+                />
+                <BalanceWithPendingCell
+                  balance={row.balance}
+                  pendingBalance={row.pendingBalance}
+                  book={currency}
+                />
               </tr>
             ))
           )}
@@ -967,6 +1012,13 @@ export default function BooksScreen({
             statementBook,
             onStatementBook: setStatementBook,
             showInrBookTab: Boolean(inrAccountId),
+            fundLedgerBook,
+            onFundLedgerBook: setFundLedgerBook,
+            showFundLedgerBookTab:
+              inrBooksAvailable &&
+              (reportView === 'receivables' ||
+                reportView === 'all-vouchers' ||
+                reportView === 'trial-balance'),
           }}
         />
 
@@ -1077,9 +1129,10 @@ export default function BooksScreen({
           <DayBookReport
             vouchers={filteredAllVouchers}
             slug={slug}
-            accounts={accounts}
+            accounts={reportAccounts}
             periodLabel={periodLabel}
-            truncated={bundle.dayBookTruncated}
+            truncated={activeLedgerBook === 'INR' ? bundle.inrDayBookTruncated : bundle.dayBookTruncated}
+            book={activeLedgerBook}
           />
         ) : null}
         {bundle && reportView === 'cash-bank' ? (
@@ -1096,14 +1149,26 @@ export default function BooksScreen({
         ) : null}
         {bundle && reportView === 'receivables' ? (
           <div className="grid sm:grid-cols-2">
-            <p className="border-b border-slate-200 px-2.5 py-1 text-[11px] text-slate-500 sm:col-span-2">{asOfLabel}</p>
+            <p className="border-b border-slate-200 px-2.5 py-1 text-[11px] text-slate-500 sm:col-span-2">
+              {asOfLabel} · {activeLedgerBook} trade parties
+            </p>
             <div className="border-b border-slate-200 sm:border-b-0 sm:border-r">
               <p className="border-b border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-slate-500">Receivables</p>
-              {accountTable(filteredReceivables, 'No receivable balances match these filters.')}
+              {accountTable(
+                filteredReceivables,
+                'No receivable balances match these filters.',
+                false,
+                activeLedgerBook,
+              )}
             </div>
             <div>
               <p className="border-b border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-slate-500">Payables</p>
-              {accountTable(filteredPayables, 'No payable balances match these filters.')}
+              {accountTable(
+                filteredPayables,
+                'No payable balances match these filters.',
+                false,
+                activeLedgerBook,
+              )}
             </div>
           </div>
         ) : null}
@@ -1154,8 +1219,9 @@ export default function BooksScreen({
           <TrialBalanceReport
             lines={filteredTrialBalance}
             slug={slug}
-            accounts={accounts}
+            accounts={reportAccounts}
             asAtLabel={asOfLabel}
+            book={activeLedgerBook}
           />
         ) : null}
         </div>

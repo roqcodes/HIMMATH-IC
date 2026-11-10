@@ -12,7 +12,9 @@ export type MetalJournalRole =
   | 'metal_sales'
   | 'metal_cost'
   | 'metal_profit'
-  | 'metal_aed';
+  | 'metal_aed'
+  | 'metal_aed_proceeds'
+  | 'metal_fx';
 
 export type MetalJournalLine = {
   book: MetalJournalBook;
@@ -42,6 +44,8 @@ export type MetalSaleJournalInput = {
   saleAed: number;
   /** Pro-rata purchase-side INR cost for this sale slice (net of lab), from linked lot. */
   lotCostInrAllocated: number;
+  /** Pro-rata purchase-side AED (agent metal lot). */
+  lotPurchaseAedAllocated?: number;
   hasAgent: boolean;
 };
 
@@ -185,14 +189,40 @@ export function planMetalSaleJournals(input: MetalSaleJournalInput): MetalJourna
   const inrBillParty: MetalJournalRole = settledViaAgent ? 'aed_settlement' : 'customer';
 
   if (settledViaAgent) {
+    const lotPay = normalizeMetalPaymentMethod(input.lotPaymentMethod);
+    const aedProceedsCredit: MetalJournalRole =
+      lotPay === 'AED' ? 'metal_aed' : 'metal_aed_proceeds';
     lines.push({
       book: 'AED',
       referenceType: 'metal_sale_aed',
       debit: 'agent',
-      credit: 'metal_aed',
+      credit: aedProceedsCredit,
       amount: saleAed,
-      label: 'Collected via agent',
+      label: lotPay === 'AED' ? 'Collected via agent' : 'AED proceeds (INR-cost lot)',
     });
+    const lotAedCost = amt(input.lotPurchaseAedAllocated ?? 0);
+    if (lotPay === 'AED' && lotAedCost > 0) {
+      const fx = roundLedgerAmount(saleAed - lotAedCost);
+      if (fx > 0.005) {
+        lines.push({
+          book: 'AED',
+          referenceType: 'metal_fx_profit',
+          debit: 'metal_aed',
+          credit: 'metal_fx',
+          amount: fx,
+          label: 'Metal FX (AED)',
+        });
+      } else if (fx < -0.005) {
+        lines.push({
+          book: 'AED',
+          referenceType: 'metal_fx_profit',
+          debit: 'metal_fx',
+          credit: 'metal_aed',
+          amount: Math.abs(fx),
+          label: 'Metal FX loss (AED)',
+        });
+      }
+    }
   }
   if (saleGrossInr > 0) {
     lines.push({

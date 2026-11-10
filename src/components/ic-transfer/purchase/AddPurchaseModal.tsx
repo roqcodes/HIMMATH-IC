@@ -808,7 +808,7 @@ export default function AddPurchaseModal({
                 className={isMetal ? 'min-h-0 lg:flex-1' : undefined}
               >
                 {isMetal ? (
-                  <div className="flex min-h-0 flex-col gap-3 lg:flex-1 lg:justify-between">
+                  <div className="flex min-h-0 flex-col gap-3 lg:flex-1">
                     <div className={metalAmountRows}>
                       <PurchaseField label="Weight (g) *" className="max-w-md">
                         <FormattedNumberInput
@@ -820,6 +820,43 @@ export default function AddPurchaseModal({
                           onNumericChange={n => onMetalField('weight', n)}
                         />
                       </PurchaseField>
+                      <div className="rounded-lg border border-slate-200/80 bg-slate-50/80 p-2.5">
+                        <div className="mb-1.5">
+                          <span className={icFormSectionEyebrow}>Lab test (INR)</span>
+                        </div>
+                        <div className={leftBottomGridMetal}>
+                          <PurchaseField label="Weight (g)">
+                            <FormattedNumberInput
+                              className={denseInput}
+                              book="inr"
+                              maxFractionDigits={METAL_WEIGHT_DECIMALS}
+                              disabled={isSubmitting}
+                              value={lab.labWeightG}
+                              onNumericChange={n => onLabField('weight', n)}
+                            />
+                          </PurchaseField>
+                          <PurchaseField label="Charge (INR/g)">
+                            <FormattedNumberInput
+                              className={denseInput}
+                              book="inr"
+                              maxFractionDigits={METAL_AMOUNT_DECIMALS}
+                              disabled={isSubmitting}
+                              value={lab.labChargeInrPerG}
+                              onNumericChange={n => onLabField('charge', n)}
+                            />
+                          </PurchaseField>
+                          <PurchaseField label="Total (INR)">
+                            <FormattedNumberInput
+                              className={denseInput}
+                              book="inr"
+                              maxFractionDigits={METAL_AMOUNT_DECIMALS}
+                              disabled={isSubmitting}
+                              value={lab.labTotalInr}
+                              onNumericChange={n => onLabField('total', n)}
+                            />
+                          </PurchaseField>
+                        </div>
+                      </div>
                       <div className={metalAmountPairRow}>
                         <PurchaseField label="G rate (INR) *">
                           <FormattedNumberInput
@@ -867,44 +904,6 @@ export default function AddPurchaseModal({
                           </PurchaseField>
                         </div>
                       </SmoothCollapse>
-                    </div>
-
-                    <div className="shrink-0 rounded-lg border border-slate-200/80 bg-slate-50/80 p-2.5 lg:mt-auto">
-                      <div className="mb-1.5">
-                        <span className={icFormSectionEyebrow}>Lab test (INR)</span>
-                      </div>
-                      <div className={leftBottomGridMetal}>
-                        <PurchaseField label="Weight (g)">
-                          <FormattedNumberInput
-                            className={denseInput}
-                            book="inr"
-                            maxFractionDigits={METAL_WEIGHT_DECIMALS}
-                            disabled={isSubmitting}
-                            value={lab.labWeightG}
-                            onNumericChange={n => onLabField('weight', n)}
-                          />
-                        </PurchaseField>
-                        <PurchaseField label="Charge (INR/g)">
-                          <FormattedNumberInput
-                            className={denseInput}
-                            book="inr"
-                            maxFractionDigits={METAL_AMOUNT_DECIMALS}
-                            disabled={isSubmitting}
-                            value={lab.labChargeInrPerG}
-                            onNumericChange={n => onLabField('charge', n)}
-                          />
-                        </PurchaseField>
-                        <PurchaseField label="Total (INR)">
-                          <FormattedNumberInput
-                            className={denseInput}
-                            book="inr"
-                            maxFractionDigits={METAL_AMOUNT_DECIMALS}
-                            disabled={isSubmitting}
-                            value={lab.labTotalInr}
-                            onNumericChange={n => onLabField('total', n)}
-                          />
-                        </PurchaseField>
-                      </div>
                     </div>
                   </div>
                 ) : (

@@ -39,6 +39,29 @@ export const icfLedgerColumnLabel = {
   saleRate: 'Sale rate (AED)',
 } as const;
 
+const ICF_LEDGER_COLUMN_INR_SUFFIX = 'INR' as const;
+
+export function icfLedgerColumnLabelForBook(book: 'AED' | 'INR') {
+  if (book === 'AED') return icfLedgerColumnLabel;
+  const tag = `(${ICF_LEDGER_COLUMN_INR_SUFFIX})`;
+  return {
+    amount: `Amount ${tag}`,
+    debit: `Debit ${tag}`,
+    credit: `Credit ${tag}`,
+    balance: `Balance ${tag}`,
+    opening: `Opening ${tag}`,
+    period: `Period ${tag}`,
+    pendingDr: `Pending Dr ${tag}`,
+    pendingCr: `Pending Cr ${tag}`,
+    revenue: `Revenue ${tag}`,
+    cogs: `COGS ${tag}`,
+    grossProfit: `Gross profit ${tag}`,
+    profit: `Profit ${tag}`,
+    avgCost: `Avg cost ${tag}`,
+    saleRate: `Sale rate ${tag}`,
+  };
+}
+
 /** Foreign amount with ISO currency code (wallet / FX layer). */
 export function fmtForeignAmount(n: number, currency: string): string {
   const code = String(currency || IC_FUNDS_BASE_CURRENCY).trim().toUpperCase();

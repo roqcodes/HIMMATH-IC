@@ -5,8 +5,55 @@ import { createPortal } from 'react-dom';
 import type { ICFundAccount } from '@/types';
 import type { ICFundAccountType } from '@/lib/icFunds/constants';
 import { accountTypeLabel } from '@/lib/icFunds/constants';
-import { fmtLedgerAed, FmtLedgerAed } from '@/lib/icFunds/format';
+import { isVoucherPartyAccount, voucherPartyAccountSubtitle } from '@/lib/icFunds/voucherPartyAccounts';
+import { FmtLedgerAed, FmtLedgerInr } from '@/lib/icFunds/format';
 import { icfInput, icfLabel } from '@/components/ic-funds/ui';
+
+function LedgerAmount({ amount, book }: { amount: number; book: 'AED' | 'INR' }) {
+  return book === 'INR' ? <FmtLedgerInr amount={amount} /> : <FmtLedgerAed amount={amount} />;
+}
+
+function AccountLedgerTotals({
+  account,
+  book,
+  compact,
+}: {
+  account: ICFundAccount;
+  book: 'AED' | 'INR';
+  compact?: boolean;
+}) {
+  const dr = account.ledgerDebit ?? 0;
+  const cr = account.ledgerCredit ?? 0;
+  const bal = account.balance;
+  if (compact) {
+    return (
+      <span className="flex shrink-0 flex-col items-end gap-0.5 font-mono text-[10px] tabular-nums text-slate-500">
+        <span>
+          Dr <LedgerAmount amount={dr} book={book} />
+        </span>
+        <span>
+          Cr <LedgerAmount amount={cr} book={book} />
+        </span>
+        <span className={bal < 0 ? 'text-red-600' : 'font-medium text-slate-700'}>
+          Bal <LedgerAmount amount={bal} book={book} />
+        </span>
+      </span>
+    );
+  }
+  return (
+    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[10px] tabular-nums text-slate-500">
+      <span>
+        Dr <LedgerAmount amount={dr} book={book} />
+      </span>
+      <span>
+        Cr <LedgerAmount amount={cr} book={book} />
+      </span>
+      <span className={bal < 0 ? 'font-medium text-red-600' : 'font-medium text-slate-700'}>
+        Bal <LedgerAmount amount={bal} book={book} />
+      </span>
+    </div>
+  );
+}
 
 function matchAccount(account: ICFundAccount, query: string): boolean {
   const q = query.trim().toLowerCase();
@@ -16,6 +63,7 @@ function matchAccount(account: ICFundAccount, query: string): boolean {
   if (account.email?.toLowerCase().includes(q)) return true;
   if (account.id.toLowerCase().includes(q)) return true;
   if (accountTypeLabel(account.accountType).toLowerCase().includes(q)) return true;
+  if (voucherPartyAccountSubtitle(account).toLowerCase().includes(q)) return true;
   return false;
 }
 
@@ -26,6 +74,8 @@ export default function AccountPicker({
   value,
   onChange,
   excludeId,
+  book = 'AED',
+  partyOnly = false,
 }: {
   label: string;
   accounts: ICFundAccount[];
@@ -33,6 +83,9 @@ export default function AccountPicker({
   value: string;
   onChange: (accountId: string) => void;
   excludeId?: string;
+  book?: 'AED' | 'INR';
+  /** Payments / receipts: hide deal-posted system & P&L ledgers. */
+  partyOnly?: boolean;
 }) {
   const listboxId = useId();
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -61,10 +114,14 @@ export default function AccountPicker({
         if (a.id === excludeId) return false;
         if (a.status !== 'active') return false;
         if (!allowedTypes.has(a.accountType)) return false;
+        if (partyOnly && !isVoucherPartyAccount(a)) return false;
         return matchAccount(a, query);
       }),
-    [accounts, allowedTypes, excludeId, query],
+    [accounts, allowedTypes, excludeId, partyOnly, query],
   );
+
+  const typeSubtitle = (account: ICFundAccount) =>
+    partyOnly ? voucherPartyAccountSubtitle(account) : accountTypeLabel(account.accountType);
 
   const updateMenuPosition = () => {
     const anchor = anchorRef.current;
@@ -145,16 +202,10 @@ export default function AccountPicker({
 
   return (
     <div ref={wrapperRef} className="min-w-0">
-      <div className="flex items-center justify-between gap-2">
-        <label className={icfLabel} htmlFor={`${listboxId}-input`}>{label}</label>
-        {selected ? (
-          <span
-            className={`font-mono text-[11px] tabular-nums ${selected.balance < 0 ? 'text-red-600' : 'text-slate-500'}`}
-          >
-            <FmtLedgerAed amount={selected.balance} />
-          </span>
-        ) : null}
-      </div>
+      <label className={icfLabel} htmlFor={`${listboxId}-input`}>
+        {label}
+      </label>
+      {selected ? <AccountLedgerTotals account={selected} book={book} /> : null}
       <div ref={anchorRef} className="relative">
         <input
           ref={inputRef}
@@ -214,12 +265,10 @@ export default function AccountPicker({
                             {account.name}
                           </span>
                           <span className="ml-1.5 text-[11px] text-slate-400">
-                            {accountTypeLabel(account.accountType)}
+                            {typeSubtitle(account)}
                           </span>
                         </span>
-                        <span className="shrink-0 font-mono text-[11px] tabular-nums text-slate-500">
-                          <FmtLedgerAed amount={account.balance} />
-                        </span>
+                        <AccountLedgerTotals account={account} book={book} compact />
                       </button>
                     </li>
                   ))

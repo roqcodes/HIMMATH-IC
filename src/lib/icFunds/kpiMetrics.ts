@@ -9,6 +9,8 @@ import type { ICFundsReportId } from '@/lib/icFunds/nav';
 import type { ICWarehousePLReport } from '@/lib/icFunds/warehouseProfit';
 import type { ICSettlementTradeReport } from '@/lib/icFunds/settlementTradeReport';
 import type { ICFundAccount, ICFundTrialBalanceLine } from '@/types';
+import { splitTradeReceivablesPayables } from '@/lib/icFunds/voucherPartyAccounts';
+import { trialBalanceColumnsBalanced } from '@/lib/icFunds/accountPeriodBalance';
 
 import type { PlStatement } from '@/lib/icFunds/reportPresentation';
 
@@ -138,9 +140,7 @@ export function computeAccountsKpis(
   const inactive = accounts.length - active.length;
   const bankAccounts = accounts.filter(a => a.accountType === 'bank');
   const cashBank = bankAccounts.reduce((sum, a) => sum + a.balance, 0);
-  const personal = accounts.filter(a => a.accountType === 'personal');
-  const receivableRows = personal.filter(a => a.balance > 0);
-  const payableRows = personal.filter(a => a.balance < 0);
+  const { receivables: receivableRows, payables: payableRows } = splitTradeReceivablesPayables(accounts);
   const receivables = receivableRows.reduce((sum, a) => sum + a.balance, 0);
   const payables = payableRows.reduce((sum, a) => sum + Math.abs(a.balance), 0);
   const pending = sumAbsPending(accounts);
@@ -159,7 +159,7 @@ export function computeAccountsKpis(
       {
         label: 'Receivables',
         value: ledgerAedNode(receivables),
-        hint: `${receivableRows.length} customers owe us`,
+        hint: `${receivableRows.length} parties owe us`,
       },
       {
         label: 'Payables',
@@ -292,6 +292,7 @@ export function computeBooksKpis(input: {
     currency?: 'AED' | 'INR';
     lines: Array<{ debit: number; credit: number; status?: string }>;
   } | null;
+  ledgerBook?: 'AED' | 'INR';
 }): AsicKpiMetric[] {
   const {
     reportView,
@@ -306,6 +307,7 @@ export function computeBooksKpis(input: {
     warehousePl,
     settlementTradeReport,
     statement,
+    ledgerBook = 'AED',
   } = input;
 
   if (reportView === 'profit-loss' && plStatement) {
@@ -364,34 +366,38 @@ export function computeBooksKpis(input: {
   }
 
   if (reportView === 'trial-balance') {
+    const inrBook = ledgerBook === 'INR';
+    const moneyNode = inrBook ? ledgerInrNode : ledgerAedNode;
+    const fmtMoney = inrBook ? fmtLedgerInr : fmtLedgerAed;
     const debit = trialBalance.reduce((sum, line) => sum + (line.closingDebit ?? line.debit), 0);
     const credit = trialBalance.reduce((sum, line) => sum + (line.closingCredit ?? line.credit), 0);
     const pendingDr = trialBalance.reduce((sum, line) => sum + (line.pendingDebit ?? 0), 0);
     const pendingCr = trialBalance.reduce((sum, line) => sum + (line.pendingCredit ?? 0), 0);
+    const balanced = trialBalanceColumnsBalanced(debit, credit);
     const diff = Math.abs(debit - credit);
 
     return [
       {
         label: 'Total debits',
-        value: ledgerAedNode(debit),
+        value: moneyNode(debit),
         hint: `${trialBalance.length} accounts with balance`,
       },
       {
         label: 'Total credits',
-        value: ledgerAedNode(credit),
+        value: moneyNode(credit),
         hint: 'Posted trial balance',
       },
       {
         label: 'Difference',
-        value: diff < 0.01 ? '—' : ledgerAedNode(diff),
-        valueTitle: diff < 0.01 ? undefined : fmtLedgerAed(diff),
-        hint: diff < 0.01 ? 'Debits equal credits' : 'Out of balance',
-        tone: diff < 0.01 ? 'emerald' : 'red',
+        value: balanced ? '—' : moneyNode(diff),
+        valueTitle: balanced ? undefined : fmtMoney(diff),
+        hint: balanced ? 'Debits equal credits' : 'Out of balance',
+        tone: balanced ? 'emerald' : 'red',
       },
       {
         label: 'Pending',
-        value: ledgerAedNode(pendingDr + pendingCr),
-        hint: `Dr ${fmtLedgerAed(pendingDr)} · Cr ${fmtLedgerAed(pendingCr)}`,
+        value: moneyNode(pendingDr + pendingCr),
+        hint: `Dr ${fmtMoney(pendingDr)} · Cr ${fmtMoney(pendingCr)}`,
         tone: pendingDr + pendingCr > 0 ? 'amber' : 'slate',
       },
     ];
@@ -443,22 +449,23 @@ export function computeBooksKpis(input: {
   if (reportView === 'receivables') {
     const ar = receivables.reduce((sum, account) => sum + account.balance, 0);
     const ap = payables.reduce((sum, account) => sum + Math.abs(account.balance), 0);
+    const money = ledgerBook === 'INR' ? ledgerInrNode : ledgerAedNode;
 
     return [
       {
         label: 'Receivables',
-        value: ledgerAedNode(ar),
-        hint: `${receivables.length} customers owe us`,
+        value: money(ar),
+        hint: `${receivables.length} trade parties owe us (${ledgerBook})`,
       },
       {
         label: 'Payables',
-        value: ledgerAedNode(ap),
-        hint: `${payables.length} balances we owe`,
+        value: money(ap),
+        hint: `${payables.length} balances we owe (${ledgerBook})`,
         tone: ap > 0 ? 'amber' : 'slate',
       },
       {
-        label: 'Net personal',
-        value: ledgerAedNode(ar - ap),
+        label: 'Net position',
+        value: money(ar - ap),
         hint: 'Receivables minus payables',
         tone: ar - ap >= 0 ? 'emerald' : 'red',
       },

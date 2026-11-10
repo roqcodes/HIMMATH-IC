@@ -1,7 +1,8 @@
-import type { ICFundAccountType } from '@/types';
+import type { ICFundAccount, ICFundAccountType } from '@/types';
 import { plPeriodMovement } from '@/lib/icFunds/accountBalance';
 import type { AccountPeriodLedger } from '@/lib/icFunds/accountPeriodBalance';
 import type { ICFundVoucher } from '@/types';
+import { isTradePartyLedgerAccount, ledgerAccountTypeCaption } from '@/lib/icFunds/voucherPartyAccounts';
 
 export type PlAccountLine = {
   accountId: string;
@@ -92,9 +93,20 @@ export function buildPlStatement(
   };
 }
 
+/** Income / expense still open on the chart — profit accounts are already equity. */
+export function unclosedPeriodResult(ledgers: AccountPeriodLedger[]): number {
+  let n = 0;
+  for (const a of ledgers) {
+    if (a.accountType === 'income') n += -a.closing;
+    else if (a.accountType === 'expense' || a.accountType === 'd_expense') n -= a.closing;
+  }
+  return Number(n.toFixed(2));
+}
+
 export function buildBalanceSheetPresentation(
   ledgers: AccountPeriodLedger[],
-  netForPeriod: number,
+  _netForPeriod: number,
+  accountById?: ReadonlyMap<string, Pick<ICFundAccount, 'accountType' | 'sourceType' | 'sourceId'>>,
 ): BalanceSheetPresentation {
   const assets: BalanceSheetLine[] = [];
   const liabilities: BalanceSheetLine[] = [];
@@ -112,17 +124,23 @@ export function buildBalanceSheetPresentation(
         section: 'asset',
       });
     } else if (a.accountType === 'personal') {
+      const meta = accountById?.get(a.accountId);
+      const tradeParty = meta ? isTradePartyLedgerAccount(meta) : true;
+      const label =
+        meta && !tradeParty
+          ? `${a.accountName} (${ledgerAccountTypeCaption(meta)})`
+          : a.accountName;
       if (closing > 0) {
         assets.push({
           accountId: a.accountId,
-          label: a.accountName,
+          label,
           amount: closing,
           section: 'asset',
         });
       } else {
         liabilities.push({
           accountId: a.accountId,
-          label: a.accountName,
+          label,
           amount: Math.abs(closing),
           section: 'liability',
         });
@@ -140,10 +158,11 @@ export function buildBalanceSheetPresentation(
     }
   }
 
-  if (Math.abs(netForPeriod) > 0.005) {
+  const unclosed = unclosedPeriodResult(ledgers);
+  if (Math.abs(unclosed) > 0.005) {
     equity.push({
       label: 'Current period result',
-      amount: netForPeriod,
+      amount: unclosed,
       section: 'equity',
     });
   }

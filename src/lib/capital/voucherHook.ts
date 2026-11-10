@@ -3,6 +3,7 @@ import 'server-only';
 import type { QueryResult } from 'pg';
 import { roundLedgerAmount } from '@/lib/icFunds/currencyPolicy';
 import { allocateProfitEventInTx, shouldAllocateCapitalForReference } from '@/lib/capital/allocation';
+import { toIsoDateString, toIsoTimestamp } from '@/lib/toIsoDateString';
 import type { CapitalAllocationKind } from '@/lib/capital/constants';
 
 type DbClient = {
@@ -28,9 +29,10 @@ export async function tryAllocateCapitalFromAedVoucher(
   client: DbClient,
   branchId: string,
   voucherId: string,
+  options?: { useCurrentCapitalShares?: boolean },
 ): Promise<void> {
   const res = await client.query(
-    `SELECT v.id, v.voucher_date, v.amount, v.reference_type,
+    `SELECT v.id, v.voucher_date, v.created_at, v.amount, v.reference_type,
             da.account_type AS debit_type, ca.account_type AS credit_type
      FROM ic_fund_vouchers v
      JOIN ic_fund_accounts da ON da.id = v.debit_account_id
@@ -45,14 +47,16 @@ export async function tryAllocateCapitalFromAedVoucher(
   const impact = signedPlImpact(String(row.debit_type), String(row.credit_type), Number(row.amount));
   if (impact === null) return;
 
-  const kind: CapitalAllocationKind =
-    String(row.reference_type) === 'ic_sale_profit' ? 'profit' : 'expense';
+  const ref = String(row.reference_type ?? '');
+  const kind: CapitalAllocationKind = ref === 'ic_sale_profit' ? 'profit' : 'expense';
 
   await allocateProfitEventInTx(client, {
     branchId,
     sourceVoucherId: voucherId,
     sourceBook: 'AED',
-    voucherDate: String(row.voucher_date).slice(0, 10),
+    voucherDate: toIsoDateString(row.voucher_date),
+    voucherAt: toIsoTimestamp(row.created_at),
+    useCurrentCapitalShares: options?.useCurrentCapitalShares,
     eventAmount: impact,
     kind,
   });
@@ -62,9 +66,10 @@ export async function tryAllocateCapitalFromInrVoucher(
   client: DbClient,
   branchId: string,
   voucherId: string,
+  options?: { useCurrentCapitalShares?: boolean },
 ): Promise<void> {
   const res = await client.query(
-    `SELECT v.id, v.voucher_date, v.amount, v.reference_type,
+    `SELECT v.id, v.voucher_date, v.created_at, v.amount, v.reference_type,
             da.account_type AS debit_type, ca.account_type AS credit_type
      FROM inr_fund_vouchers v
      JOIN inr_fund_accounts da ON da.id = v.debit_account_id
@@ -86,7 +91,9 @@ export async function tryAllocateCapitalFromInrVoucher(
     branchId,
     sourceVoucherId: voucherId,
     sourceBook: 'INR',
-    voucherDate: String(row.voucher_date).slice(0, 10),
+    voucherDate: toIsoDateString(row.voucher_date),
+    voucherAt: toIsoTimestamp(row.created_at),
+    useCurrentCapitalShares: options?.useCurrentCapitalShares,
     eventAmount: impact,
     kind,
   });

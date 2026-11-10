@@ -30,6 +30,7 @@ const WarehouseOrdersGate = dynamic(() => import('@/modules/warehouse/WarehouseO
 const WarehouseDeliveryGate = dynamic(() => import('@/modules/warehouse/WarehouseDeliveryGate'));
 const DeliverySettlementGate = dynamic(() => import('@/modules/warehouse/DeliverySettlementGate'));
 const CapitalScreen = dynamic(() => import('@/components/capital/CapitalScreen'));
+const FxScreen = dynamic(() => import('@/components/fx/FxScreen'));
 
 const FUND_SECTIONS: Partial<Record<AsicSectionId, ICFundsSectionId>> = {
   payments: 'payments',
@@ -112,6 +113,9 @@ export default function ASICSectionRouter({
         break;
       case 'ic-finance':
         body = <ICTransferFinance />;
+        break;
+      case 'fx':
+        body = <FxScreen />;
         break;
       case 'capital':
         body = <CapitalScreen />;

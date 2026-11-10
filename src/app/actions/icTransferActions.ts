@@ -110,6 +110,16 @@ function scheduleIcFundLedgerSync(task: () => Promise<void>): void {
   });
 }
 
+/** Await ledger sync on completed deals so journals and capital allocations land reliably. */
+async function awaitIcFundLedgerSync(task: () => Promise<void>, entityId: string, kind: 'sale' | 'purchase'): Promise<void> {
+  try {
+    await task();
+  } catch (err) {
+    logger.error({ err, entityId, kind }, 'IC Funds ledger sync failed');
+    scheduleIcFundLedgerSync(task);
+  }
+}
+
 async function loadRateGroupsWithMembers(groupIds: string[]) {
   if (groupIds.length === 0) return [];
   const res = await query(SELECT_RATE_GROUPS_BY_IDS_WITH_MEMBERS, [groupIds]);
@@ -1073,7 +1083,7 @@ export async function dbAddICPurchaseAction(
       return res.rows[0];
     });
 
-    scheduleIcFundLedgerSync(() => syncICPurchaseFundLedger(String(row.id)));
+    await awaitIcFundLedgerSync(() => syncICPurchaseFundLedger(String(row.id)), String(row.id), 'purchase');
     return { success: true, data: mapICPurchaseRow(row) };
   } catch (err: unknown) {
     logger.error({ err, purchase }, 'Validation error in dbAddICPurchaseAction');
@@ -1390,8 +1400,14 @@ export async function dbAddICSaleAction(
       return res.rows[0];
     });
 
-    scheduleIcFundLedgerSync(() => syncICSaleFundLedger(String(row.id)));
-    return { success: true, data: mapICSaleRow(row) };
+  const saleId = String(row.id);
+  const completed = String(row.order_status || '') === 'completed';
+  if (completed) {
+    await awaitIcFundLedgerSync(() => syncICSaleFundLedger(saleId), saleId, 'sale');
+  } else {
+    scheduleIcFundLedgerSync(() => syncICSaleFundLedger(saleId));
+  }
+  return { success: true, data: mapICSaleRow(row) };
   } catch (err: unknown) {
     logger.error({ err, sale }, 'Error in dbAddICSaleAction');
     return { success: false, error: err instanceof Error ? err.message : 'Database error' };

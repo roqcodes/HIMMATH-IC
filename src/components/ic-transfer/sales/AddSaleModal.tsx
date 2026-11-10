@@ -1018,7 +1018,7 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
                 className={isMetal ? 'min-h-0 lg:flex-1' : undefined}
               >
                 {isMetal ? (
-                  <div className="flex min-h-0 flex-col gap-3 lg:flex-1 lg:justify-between">
+                  <div className="flex min-h-0 flex-col gap-3 lg:flex-1">
                     <div className={metalAmountRows}>
                       <div className={metalAmountPairRow}>
                         <ICTransferFormField label="Purchase lot *">
@@ -1036,6 +1036,43 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
                             aria-readonly
                           />
                         </ICTransferFormField>
+                      </div>
+                      <div className="rounded-lg border border-slate-200/80 bg-slate-50/80 p-2.5">
+                        <div className="mb-1.5">
+                          <span className={icFormSectionEyebrow}>Lab test (INR)</span>
+                        </div>
+                        <div className={leftBottomGridMetal}>
+                          <ICTransferFormField label="Weight (g)">
+                            <FormattedNumberInput
+                              className={denseInput}
+                              book="inr"
+                              maxFractionDigits={METAL_WEIGHT_DECIMALS}
+                              disabled={formDisabled}
+                              value={lab.labWeightG}
+                              onNumericChange={n => onLabField('weight', n)}
+                            />
+                          </ICTransferFormField>
+                          <ICTransferFormField label="Charge (INR/g)">
+                            <FormattedNumberInput
+                              className={denseInput}
+                              book="inr"
+                              maxFractionDigits={METAL_AMOUNT_DECIMALS}
+                              disabled={formDisabled}
+                              value={lab.labChargeInrPerG}
+                              onNumericChange={n => onLabField('charge', n)}
+                            />
+                          </ICTransferFormField>
+                          <ICTransferFormField label="Total (INR)">
+                            <FormattedNumberInput
+                              className={denseInput}
+                              book="inr"
+                              maxFractionDigits={METAL_AMOUNT_DECIMALS}
+                              disabled={formDisabled}
+                              value={lab.labTotalInr}
+                              onNumericChange={n => onLabField('total', n)}
+                            />
+                          </ICTransferFormField>
+                        </div>
                       </div>
                       <div className={metalAmountPairRow}>
                         <ICTransferFormField label="G rate (INR) *">
@@ -1079,44 +1116,6 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
                             disabled={formDisabled}
                             value={metal.aedTotal}
                             onNumericChange={n => onMetalField('totalAed', n)}
-                          />
-                        </ICTransferFormField>
-                      </div>
-          </div>
-
-                    <div className="shrink-0 rounded-lg border border-slate-200/80 bg-slate-50/80 p-2.5 lg:mt-auto">
-                      <div className="mb-1.5">
-                        <span className={icFormSectionEyebrow}>Lab test (INR)</span>
-                      </div>
-                      <div className={leftBottomGridMetal}>
-                        <ICTransferFormField label="Weight (g)">
-                          <FormattedNumberInput
-                            className={denseInput}
-                            book="inr"
-                            maxFractionDigits={METAL_WEIGHT_DECIMALS}
-                            disabled={formDisabled}
-                            value={lab.labWeightG}
-                            onNumericChange={n => onLabField('weight', n)}
-                          />
-                        </ICTransferFormField>
-                        <ICTransferFormField label="Charge (INR/g)">
-                          <FormattedNumberInput
-                            className={denseInput}
-                            book="inr"
-                            maxFractionDigits={METAL_AMOUNT_DECIMALS}
-                            disabled={formDisabled}
-                            value={lab.labChargeInrPerG}
-                            onNumericChange={n => onLabField('charge', n)}
-                          />
-                        </ICTransferFormField>
-                        <ICTransferFormField label="Total (INR)">
-                          <FormattedNumberInput
-                            className={denseInput}
-                            book="inr"
-                            maxFractionDigits={METAL_AMOUNT_DECIMALS}
-                            disabled={formDisabled}
-                            value={lab.labTotalInr}
-                            onNumericChange={n => onLabField('total', n)}
                           />
                         </ICTransferFormField>
                       </div>

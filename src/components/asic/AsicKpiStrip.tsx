@@ -21,7 +21,7 @@ const toneClass: Record<NonNullable<AsicKpiMetric['tone']>, string> = {
   red: 'text-red-700 dark:text-red-400',
 };
 
-function MetricCell({ label, value, valueTitle, hint, tone = 'default' }: AsicKpiMetric) {
+export function AsicKpiMetricCell({ label, value, valueTitle, hint, tone = 'default' }: AsicKpiMetric) {
   const valueTooltip = valueTitle ?? (typeof value === 'string' ? value : undefined);
   return (
     <div className="min-w-0 overflow-hidden px-3 py-2.5">
@@ -77,7 +77,7 @@ export default function AsicKpiStrip({
       <div className={`grid grid-cols-2 divide-x divide-y divide-[var(--theme-border-subtle)] ${colClass}`}>
         {metrics.map(m => (
           <div key={m.label} className="min-w-0 bg-[var(--theme-surface)]">
-            <MetricCell {...m} />
+            <AsicKpiMetricCell {...m} />
           </div>
         ))}
       </div>

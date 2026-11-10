@@ -1,30 +1,34 @@
 'use client';
 
-import { accountTypeLabel } from '@/lib/icFunds/constants';
-import { fmtLedgerAed, icfLedgerColumnLabel, FmtLedgerAed } from '@/lib/icFunds/format';
+import { ledgerAccountTypeCaption } from '@/lib/icFunds/voucherPartyAccounts';
+import { icfLedgerColumnLabelForBook } from '@/lib/icFunds/format';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import { icfTableWrap, icfTd, icfTh, icfThAlign, icfTheadRow } from '@/components/ic-funds/ui';
 import type { ICFundAccount, ICFundTrialBalanceLine } from '@/types';
-import { AED_LEDGER_CAPTION, fmtDrCr, ReportCaption } from './reportShared';
+import { AED_LEDGER_CAPTION, FmtDrCr, fmtDrCr, INR_LEDGER_CAPTION, ReportCaption } from './reportShared';
 
 export default function TrialBalanceReport({
   lines,
   slug,
   accounts,
   asAtLabel,
+  book = 'AED',
 }: {
   lines: ICFundTrialBalanceLine[];
   slug: string;
   accounts: ICFundAccount[];
   asAtLabel: string;
+  book?: 'AED' | 'INR';
 }) {
+  const col = icfLedgerColumnLabelForBook(book);
   const sum = (pick: (l: ICFundTrialBalanceLine) => number) =>
     lines.reduce((s, l) => s + pick(l), 0);
 
   return (
     <div>
       <ReportCaption>
-        {asAtLabel} · {AED_LEDGER_CAPTION} Posted balances; pending shown separately.
+        {asAtLabel} · {book === 'INR' ? INR_LEDGER_CAPTION : AED_LEDGER_CAPTION} Posted balances;
+        pending shown separately.
       </ReportCaption>
       <div className={icfTableWrap}>
         <table className="w-full min-w-[880px] text-left text-sm">
@@ -34,12 +38,12 @@ export default function TrialBalanceReport({
               <th className={icfTh}>Type</th>
               <th className={icfThAlign('right')}>Opening Dr</th>
               <th className={icfThAlign('right')}>Opening Cr</th>
-              <th className={icfThAlign('right')}>{icfLedgerColumnLabel.debit}</th>
-              <th className={icfThAlign('right')}>{icfLedgerColumnLabel.credit}</th>
+              <th className={icfThAlign('right')}>{col.debit}</th>
+              <th className={icfThAlign('right')}>{col.credit}</th>
               <th className={icfThAlign('right')}>Closing Dr</th>
               <th className={icfThAlign('right')}>Closing Cr</th>
-              <th className={icfThAlign('right')}>{icfLedgerColumnLabel.pendingDr}</th>
-              <th className={icfThAlign('right')}>{icfLedgerColumnLabel.pendingCr}</th>
+              <th className={icfThAlign('right')}>{col.pendingDr}</th>
+              <th className={icfThAlign('right')}>{col.pendingCr}</th>
             </tr>
           </thead>
           <tbody>
@@ -60,18 +64,26 @@ export default function TrialBalanceReport({
                       accounts={accounts}
                     />
                   </td>
-                  <td className={`${icfTd} text-slate-500`}>{accountTypeLabel(line.accountType)}</td>
-                  <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtDrCr(line.openingDebit ?? 0)}</td>
-                  <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtDrCr(line.openingCredit ?? 0)}</td>
-                  <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtDrCr(line.periodDebit ?? 0)}</td>
-                  <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtDrCr(line.periodCredit ?? 0)}</td>
-                  <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtDrCr(line.closingDebit ?? line.debit)}</td>
-                  <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtDrCr(line.closingCredit ?? line.credit)}</td>
+                  <td className={`${icfTd} text-slate-500`}>
+                    {ledgerAccountTypeCaption(
+                      accounts.find(a => a.id === line.accountId) ?? {
+                        accountType: line.accountType,
+                        sourceType: undefined,
+                        sourceId: undefined,
+                      },
+                    )}
+                  </td>
+                  <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtDrCr(line.openingDebit ?? 0, book)}</td>
+                  <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtDrCr(line.openingCredit ?? 0, book)}</td>
+                  <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtDrCr(line.periodDebit ?? 0, book)}</td>
+                  <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtDrCr(line.periodCredit ?? 0, book)}</td>
+                  <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtDrCr(line.closingDebit ?? line.debit, book)}</td>
+                  <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtDrCr(line.closingCredit ?? line.credit, book)}</td>
                   <td className={`${icfTd} text-right font-mono tabular-nums text-amber-700`}>
-                    {fmtDrCr(line.pendingDebit ?? 0)}
+                    {fmtDrCr(line.pendingDebit ?? 0, book)}
                   </td>
                   <td className={`${icfTd} text-right font-mono tabular-nums text-amber-700`}>
-                    {fmtDrCr(line.pendingCredit ?? 0)}
+                    {fmtDrCr(line.pendingCredit ?? 0, book)}
                   </td>
                 </tr>
               ))
@@ -83,17 +95,17 @@ export default function TrialBalanceReport({
                 <td className={icfTd} colSpan={2}>
                   Totals (posted)
                 </td>
-                <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={sum(l => l.openingDebit ?? 0)} /></td>
-                <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={sum(l => l.openingCredit ?? 0)} /></td>
-                <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={sum(l => l.periodDebit ?? 0)} /></td>
-                <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={sum(l => l.periodCredit ?? 0)} /></td>
-                <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={sum(l => l.closingDebit ?? l.debit)} /></td>
-                <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={sum(l => l.closingCredit ?? l.credit)} /></td>
+                <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtDrCr amount={sum(l => l.openingDebit ?? 0)} book={book} /></td>
+                <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtDrCr amount={sum(l => l.openingCredit ?? 0)} book={book} /></td>
+                <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtDrCr amount={sum(l => l.periodDebit ?? 0)} book={book} /></td>
+                <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtDrCr amount={sum(l => l.periodCredit ?? 0)} book={book} /></td>
+                <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtDrCr amount={sum(l => l.closingDebit ?? l.debit)} book={book} /></td>
+                <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtDrCr amount={sum(l => l.closingCredit ?? l.credit)} book={book} /></td>
                 <td className={`${icfTd} text-right font-mono tabular-nums text-amber-700`}>
-                  <FmtLedgerAed amount={sum(l => l.pendingDebit ?? 0)} />
+                  <FmtDrCr amount={sum(l => l.pendingDebit ?? 0)} book={book} />
                 </td>
                 <td className={`${icfTd} text-right font-mono tabular-nums text-amber-700`}>
-                  <FmtLedgerAed amount={sum(l => l.pendingCredit ?? 0)} />
+                  <FmtDrCr amount={sum(l => l.pendingCredit ?? 0)} book={book} />
                 </td>
               </tr>
             </tfoot>

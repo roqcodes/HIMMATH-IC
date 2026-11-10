@@ -6,6 +6,7 @@ import { roundLedgerAmount } from '@/lib/icFunds/currencyPolicy';
 import { relinkAedAgentLedgerAccounts } from '@/lib/counterparties/aedAgentSync';
 import {
   ensureLinkedAccount,
+  ensureSystemAccount,
   postVoucherInTx,
   voidVoucherByReference,
 } from '@/lib/icFunds/icTransferFundSync';
@@ -15,7 +16,7 @@ import {
   postInrJournalInTx,
   voidInrVoucherByReference,
 } from '@/lib/ledgers/inr/inrFundSync';
-import { allocateMetalLotCostInr } from '@/lib/icTransfer/metalLotCost';
+import { allocateMetalLotCostAed, allocateMetalLotCostInr } from '@/lib/icTransfer/metalLotCost';
 import {
   planMetalPurchaseJournals,
   planMetalSaleJournals,
@@ -39,6 +40,10 @@ async function ensureMetalAedAccount(client: DbClient, branchId: string): Promis
     sourceId: 'metal_purchase_aed_clearing',
     name: 'Metal purchase AED',
   });
+}
+
+async function ensureMetalAedProceedsAccount(client: DbClient, branchId: string): Promise<string> {
+  return ensureSystemAccount(client, branchId, 'Metal AED proceeds', 'personal', 'metal_aed_proceeds');
 }
 
 async function ensureAedAgentAccount(
@@ -334,6 +339,12 @@ export async function syncMetalSaleLedgers(
         saleG,
       )
     : 0;
+  const lotPurchaseAedAllocated = hasLot
+    ? allocateMetalLotCostAed(
+        { aedTotal: lot.purchaseAed, metalWeightG: lot.purchasedG },
+        saleG,
+      )
+    : 0;
 
   const agentId = sale.aed_agent_id ? String(sale.aed_agent_id) : null;
   const lines = planMetalSaleJournals({
@@ -345,6 +356,7 @@ export async function syncMetalSaleLedgers(
     saleLabInr,
     saleAed,
     lotCostInrAllocated,
+    lotPurchaseAedAllocated,
     hasAgent: Boolean(agentId),
   });
   if (lines.length === 0) return;
@@ -367,6 +379,9 @@ export async function syncMetalSaleLedgers(
   const metalProfitInr = lines.some(l => l.debit === 'metal_profit' || l.credit === 'metal_profit')
     ? await ensureInrSystemAccount(client, branchId, 'Metal Profit', 'profit', 'metal_profit')
     : null;
+  const metalFxAed = lines.some(l => l.debit === 'metal_fx' || l.credit === 'metal_fx')
+    ? await ensureSystemAccount(client, branchId, 'Metal FX Profit', 'profit', 'metal_fx_profit')
+    : null;
 
   const needsAedSettlement = lines.some(
     l => l.debit === 'aed_settlement' || l.credit === 'aed_settlement',
@@ -386,12 +401,29 @@ export async function syncMetalSaleLedgers(
 
   let agentAccountId: string | null = null;
   let metalAedAccountId: string | null = null;
-  if (lines.some(l => l.debit === 'agent' || l.credit === 'agent' || l.debit === 'metal_aed' || l.credit === 'metal_aed')) {
+  const needsMetalAedProceeds = lines.some(
+    l => l.debit === 'metal_aed_proceeds' || l.credit === 'metal_aed_proceeds',
+  );
+  const metalAedProceedsId = needsMetalAedProceeds
+    ? await ensureMetalAedProceedsAccount(client, branchId)
+    : null;
+
+  if (
+    lines.some(
+      l =>
+        l.debit === 'agent' ||
+        l.credit === 'agent' ||
+        l.debit === 'metal_aed' ||
+        l.credit === 'metal_aed' ||
+        l.debit === 'metal_aed_proceeds' ||
+        l.credit === 'metal_aed_proceeds',
+    )
+  ) {
     if (agentId) {
       agentAccountId = await ensureAedAgentAccount(client, branchId, agentId, 'AED agent');
       metalAedAccountId = await ensureMetalAedAccount(client, branchId);
     }
-    if (!agentAccountId || !metalAedAccountId) {
+    if (!agentAccountId || (!metalAedAccountId && !metalAedProceedsId)) {
       const inrOnly = lines.filter(l => l.book === 'INR');
       if (inrOnly.length === 0) return;
     }
@@ -415,6 +447,10 @@ export async function syncMetalSaleLedgers(
         return agentAccountId;
       case 'metal_aed':
         return metalAedAccountId;
+      case 'metal_aed_proceeds':
+        return metalAedProceedsId;
+      case 'metal_fx':
+        return metalFxAed;
       default:
         return null;
     }
@@ -451,10 +487,18 @@ export async function syncMetalSaleLedgers(
       referenceType: line.referenceType,
       referenceId: saleId,
     });
-    if (inrVoucherId && line.referenceType === 'metal_sale_profit') {
-      const { tryAllocateCapitalFromInrVoucher } = await import('@/lib/capital/voucherHook');
-      await tryAllocateCapitalFromInrVoucher(client, branchId, inrVoucherId);
-    }
+  }
+
+  const profitRow = await client.query(
+    `SELECT id::text AS id FROM inr_fund_vouchers
+     WHERE branch_id = $1 AND reference_type = 'metal_sale_profit' AND reference_id = $2 AND status = 'active'
+     LIMIT 1`,
+    [branchId, saleId],
+  );
+  const profitVoucherId = profitRow.rows[0]?.id;
+  if (profitVoucherId) {
+    const { tryAllocateCapitalFromInrVoucher } = await import('@/lib/capital/voucherHook');
+    await tryAllocateCapitalFromInrVoucher(client, branchId, profitVoucherId);
   }
 }
 

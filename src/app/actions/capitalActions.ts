@@ -1,6 +1,6 @@
 'use server';
 
-import { query, withTransaction } from '@/lib/db';
+import { query, runQueryBatch, withTransaction } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { requireICFundsAccess } from '@/lib/icFunds/requireAccess';
 import { HQ_IC_FUNDS_BRANCH_ID } from '@/lib/icFunds/hqBranch';
@@ -65,31 +65,163 @@ export async function getCapitalDashboardAction(): Promise<ActionResult<CapitalD
   if (readDenied) return readDenied;
 
   try {
-    await withTransaction(async client => {
-      await ensureHouseInvestor(client, HQ_IC_FUNDS_BRANCH_ID);
-      await ensureCapitalSettingsRow(client, HQ_IC_FUNDS_BRANCH_ID);
-    });
-    const dashboard = await loadCapitalDashboard(HQ_IC_FUNDS_BRANCH_ID);
-    const settingsRes = await query(
-      `SELECT opening_aed, opening_inr, opening_inr_per_aed, management_investor_id
-       FROM ic_capital_settings WHERE id = 'hq'`,
-    );
-    const row = settingsRes.rows[0];
+    const loaded = await loadCapitalDashboard(HQ_IC_FUNDS_BRANCH_ID);
+    const { settings: snap, ...dashboard } = loaded;
     return {
       success: true,
       data: {
         ...dashboard,
         settings: {
-          openingAed: Number(row?.opening_aed) || 0,
-          openingInr: Number(row?.opening_inr) || 0,
-          openingInrPerAed: Number(row?.opening_inr_per_aed) || 0,
-          managementInvestorId: row?.management_investor_id ? String(row.management_investor_id) : null,
+          openingAed: snap.openingAed,
+          openingInr: snap.openingInr,
+          openingInrPerAed: snap.openingInrPerAed,
+          managementInvestorId: snap.managementInvestorId,
         },
       },
     };
   } catch (err) {
     logger.error({ err }, 'getCapitalDashboardAction failed');
     return { success: false, error: 'Failed to load capital dashboard.' };
+  }
+}
+
+export type CapitalMovementListRow = {
+  id: string;
+  investorName: string;
+  movementType: string;
+  book: string;
+  lotDate: string;
+  amountNative: number;
+  inrPerAed: number;
+  aedEq: number;
+  notes: string;
+};
+
+export type CapitalAllocationListRow = {
+  id: string;
+  voucherDate: string;
+  /** Profit voucher posted at (source journal `created_at`). */
+  voucherPostedAt: string;
+  sourceVoucherId: string;
+  book: string;
+  investorName: string;
+  kind: string;
+  eventAmount: number;
+  allocatedAmount: number;
+  shareBps: number;
+};
+
+function mapCapitalDashboardPayload(
+  loaded: Awaited<ReturnType<typeof loadCapitalDashboard>>,
+): CapitalDashboard & {
+  settings: {
+    openingAed: number;
+    openingInr: number;
+    openingInrPerAed: number;
+    managementInvestorId: string | null;
+  };
+} {
+  const { settings: snap, ...dashboard } = loaded;
+  return {
+    ...dashboard,
+    settings: {
+      openingAed: snap.openingAed,
+      openingInr: snap.openingInr,
+      openingInrPerAed: snap.openingInrPerAed,
+      managementInvestorId: snap.managementInvestorId,
+    },
+  };
+}
+
+async function fetchCapitalMovements(limit: number): Promise<CapitalMovementListRow[]> {
+  const res = await query(
+    `SELECT l.id, i.name AS investor_name, l.movement_type, l.book, l.lot_date,
+            l.amount_native, l.inr_per_aed, l.aed_eq, l.notes
+     FROM ic_capital_lots l
+     JOIN ic_capital_investors i ON i.id = l.investor_id
+     WHERE l.branch_id = $1 AND l.status = 'active'
+     ORDER BY l.lot_date DESC, l.created_at DESC
+     LIMIT $2`,
+    [HQ_IC_FUNDS_BRANCH_ID, Math.min(limit, 500)],
+  );
+  return res.rows.map(r => ({
+    id: String(r.id),
+    investorName: String(r.investor_name),
+    movementType: String(r.movement_type),
+    book: String(r.book),
+    lotDate: String(r.lot_date).slice(0, 10),
+    amountNative: Number(r.amount_native) || 0,
+    inrPerAed: Number(r.inr_per_aed) || 0,
+    aedEq: Number(r.aed_eq) || 0,
+    notes: String(r.notes ?? ''),
+  }));
+}
+
+async function fetchCapitalAllocations(limit: number): Promise<CapitalAllocationListRow[]> {
+  const res = await query(
+    `SELECT a.id, a.source_voucher_date, a.source_voucher_id, a.book, a.kind,
+            a.event_amount, a.allocated_amount, a.capital_share_bps_snapshot, i.name AS investor_name,
+            COALESCE(iv.created_at, inrv.created_at, a.created_at) AS voucher_posted_at
+     FROM ic_capital_allocations a
+     JOIN ic_capital_investors i ON i.id = a.investor_id
+     LEFT JOIN ic_fund_vouchers iv
+       ON a.source_book = 'AED' AND iv.id::text = a.source_voucher_id::text
+     LEFT JOIN inr_fund_vouchers inrv
+       ON a.source_book = 'INR' AND inrv.id::text = a.source_voucher_id::text
+     WHERE a.branch_id = $1 AND a.status = 'active'
+     ORDER BY a.source_voucher_date DESC, a.created_at DESC
+     LIMIT $2`,
+    [HQ_IC_FUNDS_BRANCH_ID, Math.min(limit, 500)],
+  );
+  return res.rows.map(r => ({
+    id: String(r.id),
+    voucherDate: String(r.source_voucher_date).slice(0, 10),
+    voucherPostedAt: r.voucher_posted_at ? String(r.voucher_posted_at) : String(r.source_voucher_date),
+    sourceVoucherId: String(r.source_voucher_id),
+    book: String(r.book),
+    investorName: String(r.investor_name),
+    kind: String(r.kind),
+    eventAmount: Number(r.event_amount) || 0,
+    allocatedAmount: Number(r.allocated_amount) || 0,
+    shareBps: Number(r.capital_share_bps_snapshot) || 0,
+  }));
+}
+
+/** One auth check + bounded-concurrency loads for the Capital page (avoids pool timeouts). */
+type CapitalDashboardPayload = ReturnType<typeof mapCapitalDashboardPayload>;
+
+export async function getCapitalPageDataAction(
+  movementLimit = 80,
+  allocationLimit = 120,
+): Promise<
+  ActionResult<{
+    dashboard: CapitalDashboardPayload;
+    movements: CapitalMovementListRow[];
+    allocations: CapitalAllocationListRow[];
+  }>
+> {
+  const readDenied = await requireCapitalRead();
+  if (readDenied) return readDenied;
+
+  try {
+    const { backfillHqCapitalAllocationsFromProfitVouchers, healMissingMetalFxProfitJournals } = await import('@/lib/icFunds/dealLedgerHeal');
+    await healMissingMetalFxProfitJournals();
+    await backfillHqCapitalAllocationsFromProfitVouchers();
+
+    const loaded = await loadCapitalDashboard(HQ_IC_FUNDS_BRANCH_ID);
+    const movements = await fetchCapitalMovements(movementLimit);
+    const allocations = await fetchCapitalAllocations(allocationLimit);
+    return {
+      success: true,
+      data: {
+        dashboard: mapCapitalDashboardPayload(loaded),
+        movements,
+        allocations,
+      },
+    };
+  } catch (err) {
+    logger.error({ err }, 'getCapitalPageDataAction failed');
+    return { success: false, error: 'Failed to load capital page.' };
   }
 }
 
@@ -280,50 +412,50 @@ export async function postCapitalMovementAction(input: unknown): Promise<ActionR
   }
 }
 
+async function fetchCapitalBankAccounts(book: 'AED' | 'INR') {
+  const table = book === 'AED' ? 'ic_fund_accounts' : 'inr_fund_accounts';
+  const res = await query(
+    `SELECT id, name, opening_balance AS balance
+     FROM ${table}
+     WHERE branch_id = $1 AND account_type = 'bank' AND status = 'active'
+     ORDER BY LOWER(name)`,
+    [HQ_IC_FUNDS_BRANCH_ID],
+  );
+  return res.rows.map(r => ({
+    id: String(r.id),
+    name: String(r.name),
+    balance: Number(r.balance) || 0,
+  }));
+}
+
 export async function listCapitalBankAccountsAction(
   book: 'AED' | 'INR',
 ): Promise<ActionResult<Array<{ id: string; name: string; balance: number }>>> {
   const readDenied = await requireCapitalRead();
   if (readDenied) return readDenied;
 
-  const table = book === 'AED' ? 'ic_fund_accounts' : 'inr_fund_accounts';
   try {
-    if (book === 'INR') {
-      const res = await query(
-        `SELECT a.id, a.name,
-           a.opening_balance + COALESCE(m.movement, 0) AS balance
-         FROM inr_fund_accounts a
-         LEFT JOIN LATERAL (
-           SELECT COALESCE(SUM(
-             CASE WHEN v.debit_account_id = a.id THEN v.amount ELSE -v.amount END
-           ), 0) AS movement
-           FROM inr_fund_vouchers v
-           WHERE v.status = 'active' AND (v.debit_account_id = a.id OR v.credit_account_id = a.id)
-         ) m ON true
-         WHERE a.branch_id = $1 AND a.account_type = 'bank' AND a.status = 'active'
-         ORDER BY LOWER(a.name)`,
-        [HQ_IC_FUNDS_BRANCH_ID],
-      );
-      return {
-        success: true,
-        data: res.rows.map(r => ({
-          id: String(r.id),
-          name: String(r.name),
-          balance: Number(r.balance) || 0,
-        })),
-      };
-    }
-
-    const { listICFundAccountsLiteAction } = await import('@/app/actions/icFundsActions');
-    const accounts = await listICFundAccountsLiteAction(HQ_IC_FUNDS_BRANCH_ID, 'AED');
-    return {
-      success: true,
-      data: accounts
-        .filter(a => a.accountType === 'bank')
-        .map(a => ({ id: a.id, name: a.name, balance: a.balance })),
-    };
+    return { success: true, data: await fetchCapitalBankAccounts(book) };
   } catch (err) {
     logger.error({ err, book }, 'listCapitalBankAccountsAction failed');
+    return { success: false, error: 'Failed to load bank accounts' };
+  }
+}
+
+export async function listCapitalBankAccountsBothAction(): Promise<
+  ActionResult<{ aed: Array<{ id: string; name: string; balance: number }>; inr: Array<{ id: string; name: string; balance: number }> }>
+> {
+  const readDenied = await requireCapitalRead();
+  if (readDenied) return readDenied;
+
+  try {
+    const [aed, inr] = await runQueryBatch([
+      () => fetchCapitalBankAccounts('AED'),
+      () => fetchCapitalBankAccounts('INR'),
+    ]);
+    return { success: true, data: { aed, inr } };
+  } catch (err) {
+    logger.error({ err }, 'listCapitalBankAccountsBothAction failed');
     return { success: false, error: 'Failed to load bank accounts' };
   }
 }
@@ -345,31 +477,7 @@ export async function listCapitalAllocationsAction(limit = 150): Promise<
 > {
   const readDenied = await requireCapitalRead();
   if (readDenied) return readDenied;
-
-  const res = await query(
-    `SELECT a.id, a.source_voucher_date, a.source_voucher_id, a.book, a.kind,
-            a.event_amount, a.allocated_amount, a.capital_share_bps_snapshot, i.name AS investor_name
-     FROM ic_capital_allocations a
-     JOIN ic_capital_investors i ON i.id = a.investor_id
-     WHERE a.branch_id = $1 AND a.status = 'active'
-     ORDER BY a.source_voucher_date DESC, a.created_at DESC
-     LIMIT $2`,
-    [HQ_IC_FUNDS_BRANCH_ID, Math.min(limit, 500)],
-  );
-  return {
-    success: true,
-    data: res.rows.map(r => ({
-      id: String(r.id),
-      voucherDate: String(r.source_voucher_date).slice(0, 10),
-      sourceVoucherId: String(r.source_voucher_id),
-      book: String(r.book),
-      investorName: String(r.investor_name),
-      kind: String(r.kind),
-      eventAmount: Number(r.event_amount) || 0,
-      allocatedAmount: Number(r.allocated_amount) || 0,
-      shareBps: Number(r.capital_share_bps_snapshot) || 0,
-    })),
-  };
+  return { success: true, data: await fetchCapitalAllocations(limit) };
 }
 
 export async function listCapitalMovementsAction(limit = 100): Promise<
@@ -389,29 +497,5 @@ export async function listCapitalMovementsAction(limit = 100): Promise<
 > {
   const readDenied = await requireCapitalRead();
   if (readDenied) return readDenied;
-
-  const res = await query(
-    `SELECT l.id, i.name AS investor_name, l.movement_type, l.book, l.lot_date,
-            l.amount_native, l.inr_per_aed, l.aed_eq, l.notes
-     FROM ic_capital_lots l
-     JOIN ic_capital_investors i ON i.id = l.investor_id
-     WHERE l.branch_id = $1 AND l.status = 'active'
-     ORDER BY l.lot_date DESC, l.created_at DESC
-     LIMIT $2`,
-    [HQ_IC_FUNDS_BRANCH_ID, Math.min(limit, 500)],
-  );
-  return {
-    success: true,
-    data: res.rows.map(r => ({
-      id: String(r.id),
-      investorName: String(r.investor_name),
-      movementType: String(r.movement_type),
-      book: String(r.book),
-      lotDate: String(r.lot_date).slice(0, 10),
-      amountNative: Number(r.amount_native) || 0,
-      inrPerAed: Number(r.inr_per_aed) || 1,
-      aedEq: Number(r.aed_eq) || 0,
-      notes: String(r.notes ?? ''),
-    })),
-  };
+  return { success: true, data: await fetchCapitalMovements(limit) };
 }

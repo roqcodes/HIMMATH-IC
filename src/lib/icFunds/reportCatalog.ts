@@ -26,7 +26,7 @@ export const REPORT_CATALOG_GROUPS: ReadonlyArray<{
       {
         id: 'all-vouchers',
         title: 'Day book',
-        description: 'Every AED voucher in date order. Metal in rupees is not on this page.',
+        description: 'AED or INR tab — vouchers in date order for the selected book (never mixed).',
       },
       {
         id: 'cash-bank',
@@ -54,7 +54,8 @@ export const REPORT_CATALOG_GROUPS: ReadonlyArray<{
       {
         id: 'receivables',
         title: 'Receivables & payables',
-        description: 'Who owes us and whom we owe, in AED. INR metal balances are on Statement (INR).',
+        description:
+          'AED or INR tab — trade parties only (not clearing ledgers). Amounts are never added across books.',
       },
     ],
   },
@@ -66,7 +67,8 @@ export const REPORT_CATALOG_GROUPS: ReadonlyArray<{
       {
         id: 'trial-balance',
         title: 'Trial balance',
-        description: 'AED accounts: opening, movement, and closing. Checks that debits equal credits.',
+        description:
+          'Full AED chart: every account with movement (including system ledgers). Type shows Counterparty, System ledger, Bank, etc.',
       },
       {
         id: 'profit-loss',

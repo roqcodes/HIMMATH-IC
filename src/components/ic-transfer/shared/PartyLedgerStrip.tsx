@@ -1,11 +1,13 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   getCounterpartyLedgerKpisAction,
   type CounterpartyBookSnapshot,
 } from '@/app/actions/icFundsActions';
 import { FmtLedgerAed, FmtLedgerInr } from '@/lib/icFunds/format';
+import { voucherPostedTargetsCounterparty } from '@/lib/icFunds/voucherPostedNotify';
+import { useOnIcFundsVoucherPosted } from '@/hooks/useOnIcFundsVoucherPosted';
 
 type Props = {
   counterpartyId: string;
@@ -39,24 +41,25 @@ function Balance({ n, book }: { n: number; book: 'AED' | 'INR' }) {
 export default function PartyLedgerStrip({ counterpartyId, partyLabel, book }: Props) {
   const [snap, setSnap] = useState<CounterpartyBookSnapshot | null>(null);
 
-  useEffect(() => {
+  const loadSnap = useCallback(() => {
     if (!counterpartyId) {
       setSnap(null);
       return;
     }
-    let cancelled = false;
-    setSnap(null);
     void getCounterpartyLedgerKpisAction({ counterpartyId })
-      .then(next => {
-        if (!cancelled) setSnap(book === 'INR' ? next.inr : next.aed);
-      })
-      .catch(() => {
-        if (!cancelled) setSnap(null);
-      });
-    return () => {
-      cancelled = true;
-    };
+      .then(next => setSnap(book === 'INR' ? next.inr : next.aed))
+      .catch(() => setSnap(null));
   }, [counterpartyId, book]);
+
+  useEffect(() => {
+    setSnap(null);
+    loadSnap();
+  }, [loadSnap]);
+
+  useOnIcFundsVoucherPosted(detail => {
+    if (!voucherPostedTargetsCounterparty(detail, counterpartyId)) return;
+    loadSnap();
+  });
 
   if (!counterpartyId) return null;
 

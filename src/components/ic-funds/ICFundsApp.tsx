@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import AsicPageHeader from '@/components/asic/AsicPageHeader';
 import VoucherScreen from '@/components/ic-funds/VoucherScreen';
@@ -150,12 +150,14 @@ export default function ICFundsApp({
         <AsicPageHeader title={sectionLabel(section)} meta={ledgerPicker} />
       ) : null}
       {voucherType ? (
-        <VoucherScreen
-          key={voucherType}
-          branchId={branchId!}
-          voucherType={voucherType}
-          branchSlug={fundSlug}
-        />
+        <Suspense fallback={<ASICPageSkeleton />}>
+          <VoucherScreen
+            key={voucherType}
+            branchId={branchId!}
+            voucherType={voucherType}
+            branchSlug={fundSlug}
+          />
+        </Suspense>
       ) : section === 'accounts' ? (
         <AccountsScreen
           branchId={branchId!}

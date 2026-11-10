@@ -7,18 +7,10 @@ export type VoucherPartyRole = 'debit' | 'credit';
 
 const BANK_ONLY: ReadonlySet<ICFundAccountType> = new Set(['bank']);
 
-const PAYMENT_DEBIT: ReadonlySet<ICFundAccountType> = new Set([
-  'personal',
-  'expense',
-  'd_expense',
-  'profit',
-]);
+/** Paid-to / received-from are party ledgers only (not P&L or system accounts). */
+const PAYMENT_DEBIT: ReadonlySet<ICFundAccountType> = new Set(['personal']);
 
-const RECEIPT_CREDIT: ReadonlySet<ICFundAccountType> = new Set([
-  'personal',
-  'income',
-  'profit',
-]);
+const RECEIPT_CREDIT: ReadonlySet<ICFundAccountType> = new Set(['personal']);
 
 const ANY: ReadonlySet<ICFundAccountType> = new Set([
   'bank',

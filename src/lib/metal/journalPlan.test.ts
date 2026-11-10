@@ -172,7 +172,7 @@ describe('planMetalSaleJournals', () => {
     assert.deepEqual(
       lines.map(l => [l.referenceType, l.debit, l.credit, l.book]),
       [
-        ['metal_sale_aed', 'agent', 'metal_aed', 'AED'],
+        ['metal_sale_aed', 'agent', 'metal_aed_proceeds', 'AED'],
         ['metal_sale_receipt', 'aed_settlement', 'metal_sales', 'INR'],
         ['lab_test_sale', 'metal_sales', 'aed_settlement', 'INR'],
         ['metal_sale_cogs', 'metal_cost', 'metal_stock', 'INR'],
@@ -180,6 +180,7 @@ describe('planMetalSaleJournals', () => {
       ],
     );
     assert.equal(lines.find(l => l.referenceType === 'metal_sale_profit')?.amount, 19_88_000);
+    assert.ok(!lines.some(l => l.referenceType === 'metal_fx_profit'));
   });
 
   it('AED sale of AED lot: agent collection + INR revenue, COGS, margin profit', () => {
@@ -192,15 +193,20 @@ describe('planMetalSaleJournals', () => {
       saleLabInr: 50,
       saleAed: 40,
       lotCostInrAllocated: 900,
+      lotPurchaseAedAllocated: 30,
       hasAgent: true,
     });
     assert.deepEqual(lines.map(l => l.referenceType), [
       'metal_sale_aed',
+      'metal_fx_profit',
       'metal_sale_receipt',
       'lab_test_sale',
       'metal_sale_cogs',
       'metal_sale_profit',
     ]);
     assert.equal(lines.find(l => l.referenceType === 'metal_sale_profit')?.amount, 50);
+    assert.equal(lines.find(l => l.referenceType === 'metal_fx_profit')?.amount, 10);
+    assert.equal(lines.find(l => l.referenceType === 'metal_fx_profit')?.debit, 'metal_aed');
+    assert.equal(lines.find(l => l.referenceType === 'metal_fx_profit')?.credit, 'metal_fx');
   });
 });

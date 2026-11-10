@@ -45,12 +45,15 @@ import JournalVoucherDetailModal from '@/components/ic-transfer/journal/JournalV
 import WarehouseLink from '@/components/ic-transfer/warehouse/WarehouseLink';
 import {
   sortDealJournals,
+  warehouseJournalAccountDisplayName,
   warehouseJournalDealRef,
   warehouseJournalEntryLabel,
 } from '@/lib/icTransfer/warehouseJournalLabels';
 import SearchInput from '@/components/ic-transfer/ui/SearchInput';
 import { asicCard } from '@/components/asic/ui';
 import type { ICPurchase, ICSale, ICFundVoucher } from '@/types';
+import { voucherPostedTargetsCounterparty } from '@/lib/icFunds/voucherPostedNotify';
+import { useOnIcFundsVoucherPosted } from '@/hooks/useOnIcFundsVoucherPosted';
 
 type TabId = 'all' | 'purchases' | 'sales' | 'journals';
 
@@ -145,6 +148,11 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
     setJournals([]);
     void loadJournals();
   }, [loadJournals]);
+
+  useOnIcFundsVoucherPosted(detail => {
+    if (!voucherPostedTargetsCounterparty(detail, counterpartyId)) return;
+    void loadJournals();
+  });
 
   const tabs = useMemo(
     () => [
@@ -421,23 +429,23 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
                 </td>
                 <td className={icfTd} onClick={e => e.stopPropagation()}>
                   {row.book === 'INR' ? (
-                    <span>{row.debitAccountName}</span>
+                    <span>{warehouseJournalAccountDisplayName(row.debitAccountName)}</span>
                   ) : (
                     <ICFundAccountLink
                       slug={icFundsSlug}
                       accountId={row.debitAccountId}
-                      name={row.debitAccountName}
+                      name={warehouseJournalAccountDisplayName(row.debitAccountName)}
                     />
                   )}
                 </td>
                 <td className={icfTd} onClick={e => e.stopPropagation()}>
                   {row.book === 'INR' ? (
-                    <span>{row.creditAccountName}</span>
+                    <span>{warehouseJournalAccountDisplayName(row.creditAccountName)}</span>
                   ) : (
                     <ICFundAccountLink
                       slug={icFundsSlug}
                       accountId={row.creditAccountId}
-                      name={row.creditAccountName}
+                      name={warehouseJournalAccountDisplayName(row.creditAccountName)}
                     />
                   )}
                 </td>

@@ -1,12 +1,12 @@
 'use client';
 
 import { IC_FUND_VOUCHER_LABELS } from '@/lib/icFunds/constants';
-import { fmtICDate, fmtLedgerAed, FmtLedgerAed } from '@/lib/icFunds/format';
+import { fmtICDate, FmtLedgerAmount } from '@/lib/icFunds/format';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import VoucherUserCell from '@/components/ic-funds/VoucherUserCell';
 import { icfTableWrap, icfTd, icfTh, icfThAlign, icfTheadRow } from '@/components/ic-funds/ui';
 import type { ICFundAccount, ICFundVoucher } from '@/types';
-import { AED_LEDGER_CAPTION, ReportCaption } from './reportShared';
+import { ReportCaption } from './reportShared';
 
 export default function DayBookReport({
   vouchers,
@@ -14,13 +14,19 @@ export default function DayBookReport({
   accounts,
   periodLabel,
   truncated,
+  book = 'AED',
 }: {
   vouchers: ICFundVoucher[];
   slug: string;
   accounts: ICFundAccount[];
   periodLabel: string;
   truncated?: boolean;
+  book?: 'AED' | 'INR';
 }) {
+  const ledgerCaption =
+    book === 'INR'
+      ? 'INR metal cash ledger — payments, receipts, and journals in rupees.'
+      : 'AED fund ledger — IC cash and counterparty balances.';
   const sorted = [...vouchers].sort((a, b) => {
     const d = a.voucherDate.localeCompare(b.voucherDate);
     if (d !== 0) return d;
@@ -30,7 +36,7 @@ export default function DayBookReport({
   return (
     <div>
       <ReportCaption>
-        {periodLabel} · Day book in date order · {AED_LEDGER_CAPTION}
+        {periodLabel} · Day book in date order · {ledgerCaption}
         {truncated ? ' · Showing first 50,000 entries; narrow the date range for full export.' : ''}
       </ReportCaption>
       <div className={icfTableWrap}>
@@ -84,7 +90,9 @@ export default function DayBookReport({
                       accounts={accounts}
                     />
                   </td>
-                  <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={row.amount} /></td>
+                  <td className={`${icfTd} text-right font-mono tabular-nums`}>
+                    <FmtLedgerAmount amount={row.amount} book={book} />
+                  </td>
                   <td className={icfTd}>
                     <VoucherUserCell voucher={row} />
                   </td>

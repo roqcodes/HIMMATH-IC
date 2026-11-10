@@ -222,7 +222,11 @@ export function computeSaleBookKpis(sales: ICSale[], range: DateFilterRange): De
   };
 }
 
-/** Purchases (Dr) and sales (Cr) on one AED + INR strip — for warehouse / dashboard. */
+/**
+ * Purchases (Dr) and sales (Cr) on one AED + INR strip — for warehouse / dashboard.
+ * Closing = opening + Dr − Cr (ledger balance). Matched round-trip with zero opening:
+ * closing is negative when sale AED exceeds purchase AED — same magnitude as cash P&L, Cr side.
+ */
 export function computeCombinedTradeBookKpis(
   purchases: ICPurchase[],
   sales: ICSale[],

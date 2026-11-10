@@ -103,6 +103,15 @@ export function resolveJournalReferenceLink(
     };
   }
 
+  if (ref === 'currency_exchange') {
+    return {
+      kind: 'manual',
+      label: 'Currency exchange',
+      href: '/admin/fx',
+      description: 'AED ↔ INR cash conversion (not profit).',
+    };
+  }
+
   if (!ref && !id) {
     const section = icFundVoucherSectionPath(
       opts.icFundsSlug,

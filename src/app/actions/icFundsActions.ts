@@ -11,21 +11,31 @@ import {
   updateCognitoUserName,
 } from '@/app/actions/cognitoActions';
 import { requireICFundsAccess } from '@/lib/icFunds/requireAccess';
+import { sortDealJournals } from '@/lib/icTransfer/warehouseJournalLabels';
 import { ensureHqIcFundsBranch } from '@/lib/icFunds/ensureHqBranch';
 import { HQ_IC_FUNDS_BRANCH_ID, HQ_IC_FUNDS_BRANCH_SLUG, isHqIcFundsBranch, isHqIcFundsBranchId } from '@/lib/icFunds/hqBranch';
 import { relinkAedAgentLedgerAccounts } from '@/lib/counterparties/aedAgentSync';
 import {
   accountBalanceSql,
+  accountLedgerCreditSumSql,
+  accountLedgerDebitSumSql,
   accountMovementJoinSql,
   accountPendingBalanceSql,
   accountPendingMovementJoinSql,
+  inrAccountBalanceSql,
+  inrAccountMovementJoinSql,
+  inrAccountPendingMovementJoinSql,
   VOUCHER_LEDGER_STATUS_SQL,
 } from '@/lib/icFunds/accountBalance';
 import {
   accountPeriodBalanceSelectSql,
   accountPeriodLedgerSqlWithAgg,
+  inrAccountPeriodBalanceSelectSql,
+  inrAccountPeriodLedgerSqlWithAgg,
   mapRowToPeriodLedger,
+  summarizeTrialBalanceTotals,
   toTrialBalanceRow,
+  trialBalanceColumnsBalanced,
   type AccountPeriodLedger,
 } from '@/lib/icFunds/accountPeriodBalance';
 import {
@@ -34,6 +44,7 @@ import {
   type BalanceSheetPresentation,
   type PlStatement,
 } from '@/lib/icFunds/reportPresentation';
+import { splitTradeReceivablesPayables } from '@/lib/icFunds/voucherPartyAccounts';
 import {
   purchaseAedTotal,
   remainingStockWac,
@@ -136,9 +147,14 @@ function isoDate(value: unknown): string {
   return raw.length >= 10 ? raw.slice(0, 10) : raw;
 }
 
-function mapAccount(row: Record<string, unknown>): ICFundAccount {
+function mapAccount(
+  row: Record<string, unknown>,
+  opts?: { book?: 'AED' | 'INR' },
+): ICFundAccount {
   const branchId = String(row.branch_id);
   const branchSlug = row.branch_slug ? String(row.branch_slug) : undefined;
+  const book =
+    opts?.book ?? (row.book === 'INR' ? 'INR' : row.book === 'AED' ? 'AED' : undefined);
   return {
     id: String(row.id),
     branchId,
@@ -152,6 +168,8 @@ function mapAccount(row: Record<string, unknown>): ICFundAccount {
     createdAt: row.created_at ? String(row.created_at) : new Date().toISOString(),
     balance: Number(row.balance) || 0,
     pendingBalance: Number(row.pending_balance) || 0,
+    ledgerDebit: row.ledger_debit != null ? Number(row.ledger_debit) : undefined,
+    ledgerCredit: row.ledger_credit != null ? Number(row.ledger_credit) : undefined,
     customerId:
       row.source_type === 'ic_counterparty' && row.source_id
         ? String(row.source_id)
@@ -167,6 +185,7 @@ function mapAccount(row: Record<string, unknown>): ICFundAccount {
     hasPortalLogin: Boolean(row.customer_auth_user_id),
     sourceType: row.source_type ? String(row.source_type) : undefined,
     sourceId: row.source_id ? String(row.source_id) : undefined,
+    book,
   };
 }
 
@@ -203,30 +222,12 @@ function mapVoucher(row: Record<string, unknown>): ICFundVoucher {
   };
 }
 
-const PARTY_ACCOUNT_SOURCE_TYPES = new Set(['ic_counterparty', 'ic_supplier', 'ic_customer']);
-
+/** Manual payment/receipt/journal rows must not reuse party id as reference_id — deal refs are 1:1 per entity. */
 function accountingVoucherPartyRef(
-  voucherType: string,
-  debit: Record<string, unknown>,
-  credit: Record<string, unknown>,
+  _voucherType: string,
+  _debit: Record<string, unknown>,
+  _credit: Record<string, unknown>,
 ): { referenceType: string; referenceId: string } | null {
-  const preferred = voucherType === 'receipt' ? [credit] : voucherType === 'payment' ? [debit] : [debit, credit];
-  for (const acc of preferred) {
-    const sourceType = String(acc.source_type ?? '');
-    const sourceId = String(acc.source_id ?? '').trim();
-    if (!sourceId || !PARTY_ACCOUNT_SOURCE_TYPES.has(sourceType)) continue;
-    if (sourceId.startsWith('aed_agent:')) continue;
-    const referenceType =
-      voucherType === 'payment'
-        ? 'ic_fund_payment'
-        : voucherType === 'receipt'
-          ? 'ic_fund_receipt'
-          : voucherType === 'journal'
-            ? 'ic_fund_journal'
-            : null;
-    if (!referenceType) return null;
-    return { referenceType, referenceId: sourceId };
-  }
   return null;
 }
 
@@ -234,6 +235,7 @@ function accountBalanceSelectSql(opts?: {
   asOfParam?: string | null;
   branchParam?: string | null;
   accountParam?: string | null;
+  includeLedgerTotals?: boolean;
 }): string {
   const joinOpts = {
     asOfParam: opts?.asOfParam ?? undefined,
@@ -242,8 +244,14 @@ function accountBalanceSelectSql(opts?: {
   };
   const movementJoin = accountMovementJoinSql(joinOpts);
   const pendingJoin = accountPendingMovementJoinSql(joinOpts);
+  const branchParam = opts?.branchParam ?? '$1';
+  const ledgerTotals = opts?.includeLedgerTotals
+    ? `,
+    ${accountLedgerDebitSumSql(branchParam, 'ic_fund_vouchers')} AS ledger_debit,
+    ${accountLedgerCreditSumSql(branchParam, 'ic_fund_vouchers')} AS ledger_credit`
+    : '';
   return `SELECT a.*, ${accountBalanceSql(opts?.asOfParam ?? null)} AS balance,
-    ${accountPendingBalanceSql()} AS pending_balance,
+    ${accountPendingBalanceSql()} AS pending_balance${ledgerTotals},
     cp.email AS portal_email,
     cp.email AS customer_email,
     COALESCE(cp.phone, a.phone) AS customer_phone,
@@ -288,6 +296,28 @@ const RELATED_SALE_PARTY_SQL = `(
       )
   )
 )`;
+
+async function fetchInrAccountsWithBalances(asOfDate?: string | null): Promise<ICFundAccount[]> {
+  await withTransaction(async client => {
+    await ensureInrCashTill(client, HQ_IC_FUNDS_BRANCH_ID);
+  });
+  const joinOpts = asOfDate
+    ? { asOfParam: '$2', branchParam: '$1' }
+    : { branchParam: '$1' };
+  const params = asOfDate ? [HQ_IC_FUNDS_BRANCH_ID, asOfDate] : [HQ_IC_FUNDS_BRANCH_ID];
+  const res = await query(
+    `SELECT a.*, ${inrAccountBalanceSql(joinOpts.asOfParam ?? null)} AS balance,
+      0::numeric AS pending_balance,
+      b.name AS branch_name, b.slug AS branch_slug
+     FROM inr_fund_accounts a
+     ${inrAccountMovementJoinSql(joinOpts)}
+     LEFT JOIN branches b ON b.id = a.branch_id
+     WHERE a.branch_id = $1
+     ORDER BY a.account_type, LOWER(a.name)`,
+    params,
+  );
+  return res.rows.map(r => mapAccount(r as Record<string, unknown>, { book: 'INR' }));
+}
 
 async function fetchAccountsWithBalances(
   branchId: string,
@@ -347,10 +377,89 @@ async function fetchAccountPeriodLedgers(
   return res.rows.map(r => mapRowToPeriodLedger(r as Record<string, unknown>));
 }
 
+async function fetchInrAccountPeriodLedgers(
+  branchId: string,
+  startDate?: string | null,
+  endDate?: string | null,
+): Promise<AccountPeriodLedger[]> {
+  const branchParam = '$1';
+  let startParam: string | null = null;
+  let endParam: string | null = null;
+  const params: unknown[] = [branchId];
+  if (startDate) {
+    params.push(startDate);
+    startParam = '$2';
+  }
+  if (endDate) {
+    params.push(endDate);
+    endParam = startDate ? '$3' : '$2';
+  }
+
+  const pendingJoinOpts = endParam
+    ? { asOfParam: endParam, branchParam: branchParam }
+    : { branchParam: branchParam };
+
+  const pendingJoin = inrAccountPendingMovementJoinSql(pendingJoinOpts);
+
+  const useAgg = startParam != null && endParam != null;
+  const res = await query(
+    useAgg
+      ? `${inrAccountPeriodLedgerSqlWithAgg(branchParam, startParam!, endParam!, accountPendingBalanceSql())}
+       ${pendingJoin}
+       WHERE a.branch_id = $1
+       ORDER BY a.account_type, LOWER(a.name)`
+      : `SELECT a.id, a.name, a.account_type, ${inrAccountPeriodBalanceSelectSql({ branchParam, startParam, endParam })},
+        ${accountPendingBalanceSql()} AS pending_balance
+       FROM inr_fund_accounts a
+       ${pendingJoin}
+       WHERE a.branch_id = $1
+       ORDER BY a.account_type, LOWER(a.name)`,
+    params,
+  );
+  return res.rows.map(r => mapRowToPeriodLedger(r as Record<string, unknown>));
+}
+
+function buildTrialBalanceLines(
+  ledgers: AccountPeriodLedger[],
+): ICFundTrialBalanceLine[] {
+  return ledgers
+    .filter(
+      a =>
+        a.closing !== 0 ||
+        a.opening !== 0 ||
+        a.periodDebit !== 0 ||
+        a.periodCredit !== 0 ||
+        Math.abs(a.pendingBalance) > 0.00005,
+    )
+    .map(a => {
+      const row = toTrialBalanceRow(a);
+      return {
+        accountId: row.accountId,
+        accountName: row.accountName,
+        accountType: row.accountType,
+        debit: row.debit,
+        credit: row.credit,
+        pendingDebit: row.pendingDebit,
+        pendingCredit: row.pendingCredit,
+        openingDebit: row.openingDebit,
+        openingCredit: row.openingCredit,
+        periodDebit: row.periodDebit,
+        periodCredit: row.periodCredit,
+        closingDebit: row.closingDebit,
+        closingCredit: row.closingCredit,
+      };
+    })
+    .sort(
+      (a, b) =>
+        a.accountType.localeCompare(b.accountType) || a.accountName.localeCompare(b.accountName),
+    );
+}
+
 async function listICFundVouchersForReport(params: {
   branchId: string;
   startDate?: string;
   endDate?: string;
+  book?: 'AED' | 'INR';
 }): Promise<{ vouchers: ICFundVoucher[]; truncated: boolean }> {
   const pageSize = VOUCHER_REPORT_MAX;
   const maxRows = 8_000;
@@ -365,6 +474,7 @@ async function listICFundVouchersForReport(params: {
       endDate: params.endDate,
       limit: pageSize,
       offset,
+      book: params.book,
     });
     all.push(...batch);
     if (batch.length < pageSize) break;
@@ -642,7 +752,27 @@ export async function listICFundAccountsAction(branchId: string): Promise<ICFund
   }
 }
 
-/** Fast account list for voucher pickers — skips voucher balance aggregation. */
+function inrAccountBalanceSelectSql(opts: {
+  branchParam: string;
+  includeLedgerTotals?: boolean;
+}): string {
+  const movementJoin = inrAccountMovementJoinSql({ branchParam: opts.branchParam });
+  const ledgerTotals = opts.includeLedgerTotals
+    ? `,
+    ${accountLedgerDebitSumSql(opts.branchParam, 'inr_fund_vouchers')} AS ledger_debit,
+    ${accountLedgerCreditSumSql(opts.branchParam, 'inr_fund_vouchers')} AS ledger_credit`
+    : '';
+  return `SELECT a.*, ${inrAccountBalanceSql()} AS balance,
+    0::numeric AS pending_balance${ledgerTotals},
+    NULL::text AS customer_email,
+    NULL::text AS customer_phone,
+  b.name AS branch_name, b.slug AS branch_slug
+  FROM inr_fund_accounts a
+  ${movementJoin}
+  LEFT JOIN branches b ON b.id = a.branch_id`;
+}
+
+/** Account list for voucher pickers (posted balance + lifetime Dr/Cr). */
 export async function listICFundAccountsLiteAction(
   branchId: string,
   book: 'AED' | 'INR' = 'AED',
@@ -655,43 +785,17 @@ export async function listICFundAccountsLiteAction(
         await ensureInrCashTill(client, HQ_IC_FUNDS_BRANCH_ID);
       });
       const res = await query(
-        `SELECT a.id, a.branch_id, a.name, a.account_type, a.status, a.opening_balance,
-                a.notes, a.created_at, a.source_type, a.source_id,
-                NULL::text AS phone,
-                NULL::text AS customer_email,
-                NULL::text AS customer_phone,
-                NULL::uuid AS customer_auth_user_id,
-                b.name AS branch_name, b.slug AS branch_slug,
-                a.opening_balance AS balance,
-                0::numeric AS pending_balance
-         FROM inr_fund_accounts a
-         LEFT JOIN branches b ON b.id = a.branch_id
+        `${inrAccountBalanceSelectSql({ branchParam: '$1', includeLedgerTotals: true })}
          WHERE a.branch_id = $1
-           AND a.account_type IN ('bank', 'personal', 'income', 'profit', 'expense', 'd_expense')
          ORDER BY a.account_type, LOWER(a.name)`,
         [HQ_IC_FUNDS_BRANCH_ID],
       );
       return res.rows.map(r => mapAccount(r as Record<string, unknown>));
     }
 
+    await relinkAedAgentLedgerAccounts();
     const res = await query(
-      `SELECT a.id, a.branch_id, a.name, a.account_type, a.status, a.opening_balance,
-              a.notes, a.created_at, a.source_type, a.source_id, a.phone,
-              cp.email AS customer_email,
-              COALESCE(cp.phone, a.phone) AS customer_phone,
-              NULL::uuid AS customer_auth_user_id,
-              b.name AS branch_name, b.slug AS branch_slug,
-              a.opening_balance AS balance,
-              0::numeric AS pending_balance
-       FROM ic_fund_accounts a
-       LEFT JOIN ic_aed_agents ag_src
-         ON a.source_type = 'ic_counterparty'
-        AND a.source_id = ('aed_agent:' || ag_src.id::text)
-       LEFT JOIN ic_counterparties cp ON (
-         (a.source_type IN ('ic_counterparty', 'ic_customer') AND cp.id::text = a.source_id)
-         OR cp.id = ag_src.counterparty_id
-       )
-       LEFT JOIN branches b ON b.id = a.branch_id
+      `${accountBalanceSelectSql({ branchParam: '$1', includeLedgerTotals: true })}
        WHERE a.branch_id = $1
        ORDER BY a.account_type, LOWER(a.name)`,
       [branchId],
@@ -937,17 +1041,29 @@ export async function listICFundVouchersAction(params: {
   search?: string;
   limit?: number;
   offset?: number;
+  book?: 'AED' | 'INR';
 }): Promise<ICFundVoucher[]> {
-  const access = await requireICFundsAccess(params.branchId, 'read');
+  const book = params.book === 'INR' ? 'INR' : 'AED';
+  const branchId = book === 'INR' ? HQ_IC_FUNDS_BRANCH_ID : params.branchId;
+  const access = await requireICFundsAccess(branchId, 'read');
   if (!access.ok) return [];
 
   const limit = clampVoucherListLimit(params.limit);
   const offset = clampVoucherListOffset(params.offset);
 
   try {
-    const { clauses, values, nextIdx } = buildVoucherListFilter(params);
+    if (book === 'INR') {
+      await withTransaction(async client => {
+        await ensureInrCashTill(client, HQ_IC_FUNDS_BRANCH_ID);
+      });
+    }
+    const fromSql = book === 'INR' ? INR_VOUCHER_FROM_SQL_SHARED : VOUCHER_FROM_SQL;
+    const listColumns = book === 'INR' ? INR_VOUCHER_LIST_SELECT_COLUMNS : VOUCHER_LIST_SELECT_COLUMNS;
+    const filterParams = { ...params, branchId };
+    const { clauses, values, nextIdx } = buildVoucherListFilter(filterParams);
     const res = await query(
-      `${VOUCHER_LIST_SELECT_SQL}
+      `SELECT ${listColumns}, '${book}'::text AS book
+       ${fromSql}
        WHERE ${clauses.join(' AND ')}
        ORDER BY v.voucher_date DESC, v.voucher_no DESC, v.created_at DESC
        LIMIT $${nextIdx} OFFSET $${nextIdx + 1}`,
@@ -955,7 +1071,7 @@ export async function listICFundVouchersAction(params: {
     );
     return res.rows.map(r => mapVoucher(r as Record<string, unknown>));
   } catch (err) {
-    logger.error({ err, params, limit, offset }, 'Failed to list IC fund vouchers');
+    logger.error({ err, params, limit, offset, book }, 'Failed to list IC fund vouchers');
     throw new ActionError('Failed to load vouchers. Please try again.', {
       scope: 'listICFundVouchersAction',
       branchId: params.branchId,
@@ -1017,6 +1133,13 @@ export async function listWarehouseDealVouchersAction(params: {
   const limit = clampVoucherListLimit(params.limit ?? 500);
   const startDate = params.startDate?.trim() || null;
   const endDate = params.endDate?.trim() || null;
+
+  try {
+    const { healWarehouseCashDealLedgers } = await import('@/lib/icFunds/dealLedgerHeal');
+    await healWarehouseCashDealLedgers(warehouseId);
+  } catch (err) {
+    logger.warn({ err, warehouseId }, 'Warehouse deal ledger heal skipped');
+  }
 
   const dealDateSql = (alias: string) =>
     `AND ($3::date IS NULL OR ${alias}.created_at >= $3::date)
@@ -1093,12 +1216,7 @@ export async function listWarehouseDealVouchersAction(params: {
       ...aedRes.rows.map(r => mapVoucher(r as Record<string, unknown>)),
       ...inrRes.rows.map(r => mapVoucher(r as Record<string, unknown>)),
     ];
-    merged.sort((a, b) => {
-      const da = `${a.voucherDate} ${a.createdAt}`;
-      const db = `${b.voucherDate} ${b.createdAt}`;
-      return db.localeCompare(da);
-    });
-    return merged.slice(0, limit);
+    return sortDealJournals(merged).slice(0, limit);
   } catch (err) {
     logger.error({ err, warehouseId }, 'Failed to list warehouse deal vouchers');
     return [];
@@ -1297,12 +1415,7 @@ export async function listCounterpartyDealVouchersAction(params: {
         ? inrSettled.value.rows.map(r => mapVoucher(r as Record<string, unknown>))
         : []),
     ];
-    merged.sort((a, b) => {
-      const da = `${a.voucherDate} ${a.createdAt}`;
-      const db = `${b.voucherDate} ${b.createdAt}`;
-      return db.localeCompare(da);
-    });
-    return merged.slice(0, limit);
+    return sortDealJournals(merged).slice(0, limit);
   } catch (err) {
     logger.error({ err, counterpartyId }, 'Failed to list counterparty deal vouchers');
     return [];
@@ -2271,11 +2384,17 @@ export async function getICFundReportBundleAction(params: unknown): Promise<
     cashBank: ICFundAccount[];
     allVouchers: ICFundVoucher[];
     dayBookTruncated: boolean;
+    inrAllVouchers: ICFundVoucher[];
+    inrDayBookTruncated: boolean;
+    inrAccounts: ICFundAccount[];
+    inrReceivables: ICFundAccount[];
+    inrPayables: ICFundAccount[];
     dExpenses: ICFundVoucher[];
     expenseRegister: ICFundVoucher[];
     receivables: ICFundAccount[];
     payables: ICFundAccount[];
     trialBalance: ICFundTrialBalanceLine[];
+    inrTrialBalance: ICFundTrialBalanceLine[];
     asOfDate: string | null;
     startDate: string | null;
     endDate: string | null;
@@ -2309,15 +2428,17 @@ export async function getICFundReportBundleAction(params: unknown): Promise<
   if (!access.ok) return { success: false, error: access.error };
 
   try {
+    const { healMissingMetalFxProfitJournals } = await import('@/lib/icFunds/dealLedgerHeal');
+    await healMissingMetalFxProfitJournals();
+
     const asOfDate = parsed.data.endDate ?? null;
     const startDate = parsed.data.startDate ?? null;
     const endDate = parsed.data.endDate ?? null;
 
-    const accountLedgers = await fetchAccountPeriodLedgers(
-      parsed.data.branchId,
-      startDate,
-      endDate,
-    );
+    const [accountLedgers, inrAccountLedgers] = await Promise.all([
+      fetchAccountPeriodLedgers(parsed.data.branchId, startDate, endDate),
+      fetchInrAccountPeriodLedgers(HQ_IC_FUNDS_BRANCH_ID, startDate, endDate),
+    ]);
 
     const fullAccounts = await fetchAccountsWithBalances(parsed.data.branchId, asOfDate);
     const ledgerById = new Map(accountLedgers.map(l => [l.accountId, l]));
@@ -2331,12 +2452,23 @@ export async function getICFundReportBundleAction(params: unknown): Promise<
       };
     });
 
-    const { vouchers: periodVouchers, truncated: dayBookTruncated } =
-      await listICFundVouchersForReport({
+    const [aedDayBook, inrDayBook, inrFullAccounts] = await Promise.all([
+      listICFundVouchersForReport({
         branchId: parsed.data.branchId,
         startDate: parsed.data.startDate,
         endDate: parsed.data.endDate,
-      });
+        book: 'AED',
+      }),
+      listICFundVouchersForReport({
+        branchId: HQ_IC_FUNDS_BRANCH_ID,
+        startDate: parsed.data.startDate,
+        endDate: parsed.data.endDate,
+        book: 'INR',
+      }),
+      fetchInrAccountsWithBalances(asOfDate),
+    ]);
+    const periodVouchers = aedDayBook.vouchers;
+    const dayBookTruncated = aedDayBook.truncated;
 
     const periodPL = await queryProfitLossTotals(parsed.data.branchId, {
       startDate: parsed.data.startDate,
@@ -2344,9 +2476,11 @@ export async function getICFundReportBundleAction(params: unknown): Promise<
     });
 
     const plStatement = buildPlStatement(accountLedgers, periodVouchers, periodPL);
+    const accountById = new Map(accounts.map(a => [a.id, a] as const));
     const balanceSheetDetail = buildBalanceSheetPresentation(
       accountLedgers,
       plStatement.netForPeriod,
+      accountById,
     );
     const accumulatedTotals = asOfDate
       ? await queryProfitLossTotals(parsed.data.branchId, { endDate: asOfDate })
@@ -2357,10 +2491,10 @@ export async function getICFundReportBundleAction(params: unknown): Promise<
       accumulatedTotals.expense -
       accumulatedTotals.dExpense;
 
-    const personal = accounts.filter(a => a.accountType === 'personal');
     const cashBank = accounts.filter(a => a.accountType === 'bank');
-    const receivables = personal.filter(a => a.balance > 0 || (a.pendingBalance ?? 0) > 0);
-    const payables = personal.filter(a => a.balance < 0 || (a.pendingBalance ?? 0) < 0);
+    const { receivables, payables } = splitTradeReceivablesPayables(accounts);
+    const { receivables: inrReceivables, payables: inrPayables } =
+      splitTradeReceivablesPayables(inrFullAccounts);
 
     const bankTotal = balanceSheetDetail.assets
       .filter(l => l.accountId && cashBank.some(c => c.id === l.accountId))
@@ -2371,34 +2505,11 @@ export async function getICFundReportBundleAction(params: unknown): Promise<
       .filter(a => a.accountType === 'profit')
       .reduce((s, a) => s + -a.closing, 0);
 
-    const trialBalance: ICFundTrialBalanceLine[] = accountLedgers
-      .filter(a => a.closing !== 0 || a.opening !== 0 || a.periodDebit !== 0 || a.periodCredit !== 0 || Math.abs(a.pendingBalance) > 0.005)
-      .map(a => {
-        const row = toTrialBalanceRow(a);
-        return {
-          accountId: row.accountId,
-          accountName: row.accountName,
-          accountType: row.accountType,
-          debit: row.debit,
-          credit: row.credit,
-          pendingDebit: row.pendingDebit,
-          pendingCredit: row.pendingCredit,
-          openingDebit: row.openingDebit,
-          openingCredit: row.openingCredit,
-          periodDebit: row.periodDebit,
-          periodCredit: row.periodCredit,
-          closingDebit: row.closingDebit,
-          closingCredit: row.closingCredit,
-        };
-      })
-      .sort(
-        (a, b) =>
-          a.accountType.localeCompare(b.accountType) || a.accountName.localeCompare(b.accountName),
-      );
+    const trialBalance = buildTrialBalanceLines(accountLedgers);
+    const inrTrialBalance = buildTrialBalanceLines(inrAccountLedgers);
 
-    const trialDebit = trialBalance.reduce((s, l) => s + (l.closingDebit ?? l.debit), 0);
-    const trialCredit = trialBalance.reduce((s, l) => s + (l.closingCredit ?? l.credit), 0);
-    const tbBalanced = Math.abs(trialDebit - trialCredit) < 0.01;
+    const aedTbTotals = summarizeTrialBalanceTotals(accountLedgers);
+    const tbBalanced = trialBalanceColumnsBalanced(aedTbTotals.closingDebit, aedTbTotals.closingCredit);
 
     const inventoryOnHand = accounts
       .filter(a => a.sourceId === 'ic_inventory' || a.name.trim() === 'IC Stock' || a.name.trim() === 'IC Inventory')
@@ -2414,6 +2525,11 @@ export async function getICFundReportBundleAction(params: unknown): Promise<
         cashBank,
         allVouchers: periodVouchers,
         dayBookTruncated,
+        inrAllVouchers: inrDayBook.vouchers,
+        inrDayBookTruncated: inrDayBook.truncated,
+        inrAccounts: inrFullAccounts,
+        inrReceivables,
+        inrPayables,
         dExpenses: periodVouchers.filter(
           v => v.debitAccountType === 'd_expense' || v.creditAccountType === 'd_expense',
         ),
@@ -2427,6 +2543,7 @@ export async function getICFundReportBundleAction(params: unknown): Promise<
         receivables,
         payables,
         trialBalance,
+        inrTrialBalance,
         asOfDate,
         startDate,
         endDate,

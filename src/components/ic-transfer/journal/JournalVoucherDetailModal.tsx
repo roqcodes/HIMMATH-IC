@@ -9,6 +9,7 @@ import { fmtICDate, FmtLedgerAmount } from '@/lib/icFunds/format';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import VoucherUserCell from '@/components/ic-funds/VoucherUserCell';
 import {
+  warehouseJournalAccountDisplayName,
   warehouseJournalEntryLabel,
 } from '@/lib/icTransfer/warehouseJournalLabels';
 import { resolveJournalReferenceLink } from '@/lib/icTransfer/journalReference';
@@ -175,12 +176,12 @@ export default function JournalVoucherDetailModal({
           label="Debit"
           value={
             voucher.book === 'INR' ? (
-              voucher.debitAccountName
+              warehouseJournalAccountDisplayName(voucher.debitAccountName)
             ) : (
               <ICFundAccountLink
                 slug={icFundsSlug}
                 accountId={voucher.debitAccountId}
-                name={voucher.debitAccountName}
+                name={warehouseJournalAccountDisplayName(voucher.debitAccountName)}
               />
             )
           }
@@ -189,12 +190,12 @@ export default function JournalVoucherDetailModal({
           label="Credit"
           value={
             voucher.book === 'INR' ? (
-              voucher.creditAccountName
+              warehouseJournalAccountDisplayName(voucher.creditAccountName)
             ) : (
               <ICFundAccountLink
                 slug={icFundsSlug}
                 accountId={voucher.creditAccountId}
-                name={voucher.creditAccountName}
+                name={warehouseJournalAccountDisplayName(voucher.creditAccountName)}
               />
             )
           }
