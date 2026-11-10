@@ -80,7 +80,7 @@ import {
 import { useTrackedCallback } from '@/hooks/useTrackedCallback';
 import { trackLoading } from '@/lib/loadingBar';
 
-interface Toast {
+export interface Toast {
   id: string;
   message: string;
   type: 'success' | 'error';
@@ -973,7 +973,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 })
               : s.icWarehouses,
         }));
-        showToast('Purchase recorded successfully');
+        showToast('Purchase saved');
         return true;
       }
       showToast(res.error || 'Failed to record purchase', 'error');
@@ -1009,7 +1009,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
               })
             : s.icWarehouses,
         }));
-        showToast('Sale recorded successfully');
+        showToast('Sale saved');
         return true;
       }
       showToast(res.error || 'Failed to record sale', 'error');
@@ -1032,7 +1032,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ...s,
           icPurchases: s.icPurchases.map(p => p.id === id ? res.data! : p),
         }));
-        showToast('Purchase updated successfully');
+        showToast('Purchase saved');
         return true;
       }
       showToast(res.error || 'Failed to update purchase', 'error');
@@ -1054,7 +1054,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ...s,
           icSales: s.icSales.map(sItem => sItem.id === id ? res.data! : sItem),
         }));
-        showToast('Sale updated successfully');
+        showToast('Sale saved');
         return true;
       }
       showToast(res.error || 'Failed to update sale', 'error');

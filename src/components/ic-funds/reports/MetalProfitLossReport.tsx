@@ -25,6 +25,12 @@ export default function MetalProfitLossReport({
         {periodLabel} · Metal profit in rupees (INR). Not added to AED profit.
         {metalSoldG > 0 ? ` · ${grams} g sold` : ''}
       </ReportCaption>
+      {metalSoldG < 0.0001 ? (
+        <p className="border-b border-amber-100 bg-amber-50/80 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
+          No completed metal sales in this period. Purchases and agent AED metal still appear in Warehouse statement and
+          Metal register.
+        </p>
+      ) : null}
       <table className="w-full text-sm">
         <tbody>
           <tr className="border-b border-slate-200 bg-slate-50/80">

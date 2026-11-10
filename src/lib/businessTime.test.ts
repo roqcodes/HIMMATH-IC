@@ -8,6 +8,15 @@ import {
   txnDay,
 } from './businessTime';
 import { isDateInRange } from './dateFilterRange';
+import { toIsoDateString } from './toIsoDateString';
+
+describe('toIsoDateString (PG date read path)', () => {
+  it('uses local calendar parts for node-pg DATE Date objects', () => {
+    const pgDate = new Date(2026, 10, 10);
+    assert.equal(toIsoDateString(pgDate), '2026-11-10');
+    assert.notEqual(toIsoDateString(pgDate), '2026-11-09');
+  });
+});
 
 describe('parseCalendarDate / formatBusinessDate', () => {
   it('returns plain YYYY-MM-DD strings unchanged', () => {

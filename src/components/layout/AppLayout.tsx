@@ -11,6 +11,7 @@ import { getSessionSlugFromPath, isAdminAsicPath, isAsicPortalPath } from '@/lib
 import { ASICAppShellSkeleton } from '@/components/asic/ASICTableSkeleton';
 import { DealInvoiceProvider } from '@/components/ic-transfer/invoice/DealInvoiceContext';
 import OfflineBanner from '@/components/layout/OfflineBanner';
+import { ToastStack } from '@/components/layout/ToastStack';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isInitialLoading, toasts } = useApp();
@@ -53,23 +54,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             ) : null}
           </main>
         </div>
-        <div
-          className="pointer-events-none fixed bottom-4 left-4 right-4 z-[500] flex flex-col gap-3 sm:left-auto sm:right-6 sm:max-w-sm"
-          aria-live="polite"
-        >
-          {toasts.map(t => (
-            <div
-              key={t.id}
-              className={`pointer-events-auto flex animate-[toast-in_0.4s_cubic-bezier(0.34,1.56,0.64,1)] items-center gap-3 rounded-lg px-4 py-3 text-sm font-semibold text-white shadow-dropdown ${
-                t.type === 'success'
-                  ? 'border-l-4 border-emerald-500 bg-emerald-950'
-                  : 'border-l-4 border-red-500 bg-red-950'
-              }`}
-            >
-              {t.message}
-            </div>
-          ))}
-        </div>
+        <ToastStack toasts={toasts} />
       </div>
     </DealInvoiceProvider>
     </RbacWriteProvider>

@@ -19,8 +19,10 @@ import { asicBtnOutline, asicBtnPrimary } from '@/components/asic/ui';
 import CapitalModal, { type CapitalDashData, type CapitalModalKind } from '@/components/capital/CapitalModal';
 import {
   createCapitalInvestorAction,
-  getCapitalPageDataAction,
+  getCapitalDashboardAction,
+  listCapitalAllocationsAction,
   listCapitalBankAccountsBothAction,
+  listCapitalMovementsAction,
   postCapitalMovementAction,
   setCapitalOpeningAction,
   setManagementShareAction,
@@ -122,12 +124,23 @@ export default function CapitalScreen() {
     setLoading(true);
     setTabsLoading(true);
     setLoadError(null);
+    setMovements([]);
+    setAllocations([]);
     try {
-      const page = await getCapitalPageDataAction();
-      if (!page.success) throw new Error(page.error);
-      setData(page.data.dashboard);
-      setMovements(page.data.movements);
-      setAllocations(page.data.allocations);
+      const dash = await getCapitalDashboardAction();
+      if (!dash.success) throw new Error(dash.error);
+      setData(dash.data);
+      setLoading(false);
+
+      const [mov, alloc] = await Promise.all([
+        listCapitalMovementsAction(80),
+        listCapitalAllocationsAction(120),
+      ]);
+      if (mov.success) setMovements(mov.data);
+      if (alloc.success) setAllocations(alloc.data);
+      if (!mov.success && !alloc.success) {
+        showToast(mov.error || alloc.error || 'Failed to load tab data', 'error');
+      }
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Failed to load capital';
       setLoadError(message);
@@ -306,7 +319,7 @@ export default function CapitalScreen() {
         actions={
           canWrite ? (
             <div className="flex flex-wrap items-center gap-1.5">
-              <button type="button" className={`${asicBtnPrimary} gap-1.5`} onClick={() => openModal('deposit')} {...buttonProps}>
+              <button type="button" className={`${icfBtnOutline} gap-1.5`} onClick={() => openModal('deposit')} {...buttonProps}>
                 <ArrowDownToLine className="size-3.5 shrink-0" aria-hidden />
                 Deposit
               </button>

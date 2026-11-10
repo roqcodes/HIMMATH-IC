@@ -73,6 +73,24 @@ export const icFundsDateRangeSchema = z.object({
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
 
+const icFundsBooksReportViews = [
+  'all-vouchers',
+  'cash-bank',
+  'd-expenses',
+  'receivables',
+  'trial-balance',
+  'balance-sheet',
+] as const;
+
+export const icFundsBooksReportSchema = icFundsDateRangeSchema.extend({
+  reportView: z.enum(icFundsBooksReportViews),
+  ledgerBook: z.enum(['AED', 'INR']).optional(),
+});
+
+export const icFundProfitLossReportSchema = icFundsDateRangeSchema.extend({
+  warehouseId: z.string().optional(),
+});
+
 export const icSettlementTradeReportSchema = icFundsDateRangeSchema.extend({
   settlementMode: z.enum(['cash', 'metal']),
   includeVoidOrders: z.boolean().optional().default(false),

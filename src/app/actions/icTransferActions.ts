@@ -110,16 +110,6 @@ function scheduleIcFundLedgerSync(task: () => Promise<void>): void {
   });
 }
 
-/** Await ledger sync on completed deals so journals and capital allocations land reliably. */
-async function awaitIcFundLedgerSync(task: () => Promise<void>, entityId: string, kind: 'sale' | 'purchase'): Promise<void> {
-  try {
-    await task();
-  } catch (err) {
-    logger.error({ err, entityId, kind }, 'IC Funds ledger sync failed');
-    scheduleIcFundLedgerSync(task);
-  }
-}
-
 async function loadRateGroupsWithMembers(groupIds: string[]) {
   if (groupIds.length === 0) return [];
   const res = await query(SELECT_RATE_GROUPS_BY_IDS_WITH_MEMBERS, [groupIds]);
@@ -985,11 +975,13 @@ export async function dbAddICPurchaseAction(
     if (!parsed.warehouseId?.trim()) {
       return { success: false, error: 'Warehouse is required for inventory and ledger stock.' };
     }
-    const warehouseCheck = parsed.warehouseId
-      ? await assertBranchManagerPurchaseWarehouse(parsed.warehouseId, branchSlug)
-      : null;
+    const [warehouseCheck, supplierCheck] = await Promise.all([
+      parsed.warehouseId
+        ? assertBranchManagerPurchaseWarehouse(parsed.warehouseId, branchSlug)
+        : Promise.resolve(null),
+      assertBranchManagerPurchaseSupplier(parsed.counterpartyId, branchSlug),
+    ]);
     if (warehouseCheck) return { success: false, error: warehouseCheck.error };
-    const supplierCheck = await assertBranchManagerPurchaseSupplier(parsed.counterpartyId, branchSlug);
     if (supplierCheck) return { success: false, error: supplierCheck.error };
     if (
       normalized.settlementMode === 'metal' &&
@@ -1083,7 +1075,7 @@ export async function dbAddICPurchaseAction(
       return res.rows[0];
     });
 
-    await awaitIcFundLedgerSync(() => syncICPurchaseFundLedger(String(row.id)), String(row.id), 'purchase');
+    scheduleIcFundLedgerSync(() => syncICPurchaseFundLedger(String(row.id)));
     return { success: true, data: mapICPurchaseRow(row) };
   } catch (err: unknown) {
     logger.error({ err, purchase }, 'Validation error in dbAddICPurchaseAction');
@@ -1199,15 +1191,17 @@ export async function dbAddICSaleAction(
   branchSlug?: string,
 ): Promise<DbActionResult<ICSale>> {
   try {
-    const salesGuard = await assertICTransferSalesEnabledAction();
+    const parsed = addSaleSchema.parse(sale);
+    const slug = branchSlug && branchSlug !== 'superadmin' ? branchSlug : undefined;
+
+    const [salesGuard, transferSettings, userRes] = await Promise.all([
+      assertICTransferSalesEnabledAction(),
+      getICTransferSettingsFromDb(),
+      slug ? getCurrentUserAction(slug) : getCurrentUserAction(),
+    ]);
     if (!salesGuard.success) {
       return { success: false, error: salesGuard.error };
     }
-
-    const transferSettings = await getICTransferSettingsFromDb();
-    const parsed = addSaleSchema.parse(sale);
-    const slug = branchSlug && branchSlug !== 'superadmin' ? branchSlug : undefined;
-    const userRes = slug ? await getCurrentUserAction(slug) : await getCurrentUserAction();
     const user = userRes.success ? userRes.data : null;
 
     if (user?.role !== 'customer' && !parsed.warehouseId?.trim()) {
@@ -1401,12 +1395,7 @@ export async function dbAddICSaleAction(
     });
 
   const saleId = String(row.id);
-  const completed = String(row.order_status || '') === 'completed';
-  if (completed) {
-    await awaitIcFundLedgerSync(() => syncICSaleFundLedger(saleId), saleId, 'sale');
-  } else {
-    scheduleIcFundLedgerSync(() => syncICSaleFundLedger(saleId));
-  }
+  scheduleIcFundLedgerSync(() => syncICSaleFundLedger(saleId));
   return { success: true, data: mapICSaleRow(row) };
   } catch (err: unknown) {
     logger.error({ err, sale }, 'Error in dbAddICSaleAction');

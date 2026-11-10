@@ -14,6 +14,7 @@ type DateProps = {
   setCustomStartDate: (val: string) => void;
   customEndDate: string;
   setCustomEndDate: (val: string) => void;
+  todayAnchor?: string;
 };
 
 type Props = {

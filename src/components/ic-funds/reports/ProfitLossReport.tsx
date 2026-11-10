@@ -84,6 +84,15 @@ export default function ProfitLossReport({
             {periodLabel} · Profit and loss in dirhams (AED). Metal profit in rupees is on the other tab — do not add
             them.
           </ReportCaption>
+          {Math.abs(statement.netForPeriod) < 0.005 &&
+          statement.incomeLines.length === 0 &&
+          statement.directCostLines.length === 0 &&
+          statement.operatingLines.length === 0 ? (
+            <p className="border-b border-amber-100 bg-amber-50/80 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
+              No income, expense, or COGS accounts moved in this period. Payments, agent journals, and inventory
+              purchases still show on Day book and Warehouse statement with the same date filter.
+            </p>
+          ) : null}
           <table className="w-full text-sm">
             <tbody>
               <tr className="border-b border-slate-200 bg-slate-50/80">

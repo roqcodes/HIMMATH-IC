@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { getICFundReportBundleAction } from '@/app/actions/icFundsActions';
+import { getICFundPlLedgerScreenAction } from '@/app/actions/icFundsActions';
 import {
   accountTypeLabel,
   IC_FUND_VOUCHER_LABELS,
@@ -18,7 +18,7 @@ import { useICFundsDateFilter } from '@/components/ic-funds/useICFundsDateFilter
 import VoucherUserCell from '@/components/ic-funds/VoucherUserCell';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import { BalanceWithPendingCell } from '@/components/ic-funds/BalanceWithPending';
-import { plDisplayBalance, plPeriodMovement } from '@/lib/icFunds/accountBalance';
+import { plDisplayBalance, plPeriodMovementFromLedger } from '@/lib/icFunds/accountBalance';
 import { resolveAccountDetailHref } from '@/lib/icFunds/accountNavigation';
 import { computeDealProfit } from '@/lib/icTransfer/dealProfit';
 import { formatMetalPlKpi } from '@/lib/icTransfer/inventoryKpiMetrics';
@@ -29,8 +29,8 @@ import { logClientActionError } from '@/lib/errors/actionError';
 import { trackLoading } from '@/lib/loadingBar';
 import type { ICFundAccount, ICFundAccountType, ICFundVoucher } from '@/types';
 
-type ReportBundle = NonNullable<
-  Extract<Awaited<ReturnType<typeof getICFundReportBundleAction>>, { success: true }>['data']
+type PlLedgerPayload = NonNullable<
+  Extract<Awaited<ReturnType<typeof getICFundPlLedgerScreenAction>>, { success: true }>['data']
 >;
 
 const PL_TYPE_ORDER: ICFundAccountType[] = ['income', 'profit', 'expense', 'd_expense'];
@@ -82,7 +82,7 @@ export default function PLScreen({
     endDate,
   } = useICFundsDateFilter(branch?.timezone);
 
-  const [bundle, setBundle] = useState<ReportBundle | null>(null);
+  const [payload, setPayload] = useState<PlLedgerPayload | null>(null);
   const [accountFilter, setAccountFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -90,18 +90,18 @@ export default function PLScreen({
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const result = await trackLoading(() => getICFundReportBundleAction({ branchId, startDate, endDate }));
+    const result = await trackLoading(() => getICFundPlLedgerScreenAction({ branchId, startDate, endDate }));
     if (!result.success) {
       logClientActionError('PLScreen.load', result.error);
       setError(result.error);
-      setBundle(null);
+      setPayload(null);
       await alert({
         title: 'Could not load P&L',
         message: result.error,
         variant: 'danger',
       });
     } else {
-      setBundle(result.data);
+      setPayload(result.data);
     }
     setLoading(false);
   }, [alert, branchId, endDate, startDate]);
@@ -110,29 +110,34 @@ export default function PLScreen({
     void load();
   }, [load]);
 
+  const ledgerById = useMemo(
+    () => new Map(payload?.accountLedgers.map(l => [l.accountId, l]) ?? []),
+    [payload?.accountLedgers],
+  );
+
   const plAccounts = useMemo(() => {
-    if (!bundle) return [];
-    return bundle.accounts
+    if (!payload) return [];
+    return payload.accounts
       .filter(a => isPLAccountType(a.accountType))
       .sort(
         (a, b) =>
           PL_TYPE_ORDER.indexOf(a.accountType) - PL_TYPE_ORDER.indexOf(b.accountType) ||
           a.name.localeCompare(b.name),
       );
-  }, [bundle]);
+  }, [payload]);
 
   const plVouchers = useMemo(() => {
-    if (!bundle) return [];
-    return bundle.allVouchers
+    if (!payload) return [];
+    return payload.plVouchers
       .filter(v => touchesPLAccount(v, accountFilter || undefined))
       .sort((a, b) => {
         const dateCmp = a.voucherDate.localeCompare(b.voucherDate);
         if (dateCmp !== 0) return dateCmp;
         return a.voucherNo - b.voucherNo;
       });
-  }, [accountFilter, bundle]);
+  }, [accountFilter, payload]);
 
-  const summary = bundle?.profitLoss;
+  const summary = payload?.profitLoss;
   const plKpiMetrics = useMemo(
     () => (summary ? computePlKpis(summary, plVouchers.length) : []),
     [summary, plVouchers.length],
@@ -180,11 +185,11 @@ export default function PLScreen({
         setCustomEndDate={setCustomEndDate}
       />
 
-      {loading && !bundle ? (
+      {loading && !payload ? (
         <ASICPageSkeleton />
       ) : error ? (
         <p className="text-sm text-red-600">{error}</p>
-      ) : bundle ? (
+      ) : payload ? (
         <>
           {plKpiMetrics.length > 0 ? <AsicKpiStrip metrics={plKpiMetrics} /> : null}
           <AsicKpiStrip metrics={dealKpiMetrics} columns={3} />
@@ -227,7 +232,18 @@ export default function PLScreen({
                         <td className={`${icfTd} text-slate-500`}>{accountTypeLabel(row.accountType)}</td>
                         <AmountCell n={plDisplayBalance(row.accountType, row.openingBalance)} />
                         <BalanceWithPendingCell
-                          balance={plPeriodMovement(row.id, row.accountType, bundle.allVouchers)}
+                          balance={plPeriodMovementFromLedger(
+                            ledgerById.get(row.id) ?? {
+                              accountType: row.accountType,
+                              periodDebit: 0,
+                              periodCredit: 0,
+                              accountId: row.id,
+                              accountName: row.name,
+                              opening: 0,
+                              closing: 0,
+                              pendingBalance: 0,
+                            },
+                          )}
                           pendingBalance={plDisplayBalance(row.accountType, row.pendingBalance ?? 0)}
                         />
                       </tr>
@@ -318,7 +334,7 @@ export default function PLScreen({
                             slug={slug}
                             accountId={row.debitAccountId}
                             name={row.debitAccountName}
-                            accounts={bundle.accounts}
+                            accounts={payload.accounts}
                           />
                         </td>
                         <td className={icfTd}>
@@ -326,7 +342,7 @@ export default function PLScreen({
                             slug={slug}
                             accountId={row.creditAccountId}
                             name={row.creditAccountName}
-                            accounts={bundle.accounts}
+                            accounts={payload.accounts}
                           />
                         </td>
                         <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAed amount={row.amount} /></td>

@@ -37,7 +37,7 @@ export default function DayBookReport({
     <div>
       <ReportCaption>
         {periodLabel} · Day book in date order · {ledgerCaption}
-        {truncated ? ' · Showing first 50,000 entries; narrow the date range for full export.' : ''}
+        {truncated ? ' · Showing first 2,000 entries; narrow the date range or export for more.' : ''}
       </ReportCaption>
       <div className={icfTableWrap}>
         <table className="w-full min-w-[960px] text-left text-sm">

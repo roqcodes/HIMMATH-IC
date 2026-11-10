@@ -58,6 +58,12 @@ import {
   warehouseJournalEntryLabel,
 } from '@/lib/icTransfer/warehouseJournalLabels';
 import { buildWarehouseLabTestRows } from '@/lib/icTransfer/labTest';
+import {
+  sortWarehouseActivity,
+  sortWarehousePurchases,
+  sortWarehouseSales,
+  type WarehouseDetailSortCtx,
+} from '@/lib/icTransfer/detailTableSort';
 import SearchInput from '@/components/ic-transfer/ui/SearchInput';
 import { asicCard } from '@/components/asic/ui';
 import type { ICPurchase, ICSale, ICFundVoucher } from '@/types';
@@ -128,6 +134,8 @@ export default function WarehouseDetailTabs({
   const { icPurchases, icSales, icSuppliers, icWarehouses, branches } = useApp();
   const [tab, setTab] = useState<TabId>('all');
   const [search, setSearch] = useState('');
+  const [sortField, setSortField] = useState('Date');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [journals, setJournals] = useState<ICFundVoucher[]>([]);
   const [journalsLoading, setJournalsLoading] = useState(false);
   const [journalsLoaded, setJournalsLoaded] = useState(false);
@@ -172,6 +180,42 @@ export default function WarehouseDetailTabs({
   const getSupplierName = useCallback(
     (id: string) => icSuppliers.find(s => s.id === id)?.name || '—',
     [icSuppliers],
+  );
+
+  const warehouseSortCtx = useMemo<WarehouseDetailSortCtx>(
+    () => ({
+      supplierName: getSupplierName,
+      saleCustomerName: s => getAdminSaleCustomerName(s, '', branches),
+      saleProfits,
+    }),
+    [getSupplierName, branches, saleProfits],
+  );
+
+  const handleSort = useCallback(
+    (field: string) => {
+      if (sortField === field) {
+        setSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'));
+      } else {
+        setSortField(field);
+        setSortOrder(field === 'Date' ? 'desc' : 'asc');
+      }
+    },
+    [sortField],
+  );
+
+  const sortedActivity = useMemo(
+    () => sortWarehouseActivity(activity, sortField, sortOrder, warehouseSortCtx),
+    [activity, sortField, sortOrder, warehouseSortCtx],
+  );
+
+  const sortedPurchases = useMemo(
+    () => sortWarehousePurchases(purchases, sortField, sortOrder, warehouseSortCtx),
+    [purchases, sortField, sortOrder, warehouseSortCtx],
+  );
+
+  const sortedSales = useMemo(
+    () => sortWarehouseSales(sales, sortField, sortOrder, warehouseSortCtx),
+    [sales, sortField, sortOrder, warehouseSortCtx],
   );
 
   const labRows = useMemo(
@@ -503,13 +547,13 @@ export default function WarehouseDetailTabs({
             onSearchChange={setSearch}
             searchPlaceholder="Search activity…"
             columns={ACTIVITY_COLUMNS}
-            sortField="Date"
-            sortOrder="desc"
-            onSort={() => {}}
+            sortField={sortField}
+            sortOrder={sortOrder}
+            onSort={handleSort}
             isEmpty={activity.length === 0}
             emptyMessage="No purchases or sales for this warehouse in the selected period."
           >
-            {activity.map(renderActivityRow)}
+            {sortedActivity.map(renderActivityRow)}
           </ICTransferDataTableShell>
         ) : null}
 
@@ -520,13 +564,13 @@ export default function WarehouseDetailTabs({
             onSearchChange={setSearch}
             searchPlaceholder="Search purchases…"
             columns={PURCHASE_COLUMNS}
-            sortField="Date"
-            sortOrder="desc"
-            onSort={() => {}}
+            sortField={sortField}
+            sortOrder={sortOrder}
+            onSort={handleSort}
             isEmpty={purchases.length === 0}
             emptyMessage="No purchases for this warehouse in the selected period."
           >
-            {purchases.map(p => renderPurchaseRow(p))}
+            {sortedPurchases.map(p => renderPurchaseRow(p))}
           </ICTransferDataTableShell>
         ) : null}
 
@@ -537,13 +581,13 @@ export default function WarehouseDetailTabs({
             onSearchChange={setSearch}
             searchPlaceholder="Search sales…"
             columns={PURCHASE_COLUMNS}
-            sortField="Date"
-            sortOrder="desc"
-            onSort={() => {}}
+            sortField={sortField}
+            sortOrder={sortOrder}
+            onSort={handleSort}
             isEmpty={sales.length === 0}
             emptyMessage="No sales for this warehouse in the selected period."
           >
-            {sales.map(s => renderSaleRow(s))}
+            {sortedSales.map(s => renderSaleRow(s))}
           </ICTransferDataTableShell>
         ) : null}
 

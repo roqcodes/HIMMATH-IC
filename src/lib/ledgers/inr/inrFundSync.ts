@@ -12,12 +12,6 @@ type DbClient = {
 
 const SYNC_ACTOR = 'INR ledger sync';
 
-function isoDate(value: unknown): string {
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
-  const raw = String(value ?? '');
-  return raw.length >= 10 ? raw.slice(0, 10) : new Date().toISOString().slice(0, 10);
-}
-
 async function lockInrAccounts(client: DbClient, accountIds: string[], branchId: string) {
   const ids = sortedIds(accountIds);
   if (ids.length === 0) return [];

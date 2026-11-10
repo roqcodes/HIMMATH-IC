@@ -274,6 +274,18 @@ export function computePlKpis(summary: ProfitLossSummary, voucherCount?: number)
   ];
 }
 
+function rollupFromRangeStats(stats: ICFundVoucherRangeStats) {
+  return {
+    posted: stats.posted,
+    postedTotal: stats.total,
+    pending: stats.pending,
+    pendingTotal: stats.pendingTotal,
+    voided: stats.voided,
+    largest: stats.largest,
+    activeCount: stats.entries,
+  };
+}
+
 export function computeBooksKpis(input: {
   reportView: ICFundsReportId;
   profitLoss?: ProfitLossSummary;
@@ -281,6 +293,7 @@ export function computeBooksKpis(input: {
   balanceSheet?: BalanceSheetSummary;
   trialBalance?: ICFundTrialBalanceLine[];
   vouchers?: ICFundVoucher[];
+  voucherRangeStats?: ICFundVoucherRangeStats;
   cashBank?: ICFundAccount[];
   receivables?: ICFundAccount[];
   payables?: ICFundAccount[];
@@ -301,6 +314,7 @@ export function computeBooksKpis(input: {
     balanceSheet,
     trialBalance = [],
     vouchers = [],
+    voucherRangeStats,
     cashBank = [],
     receivables = [],
     payables = [],
@@ -611,7 +625,7 @@ export function computeBooksKpis(input: {
   }
 
   if (reportView === 'd-expenses') {
-    const rollup = rollupVouchers(vouchers);
+    const rollup = vouchers.length > 0 ? rollupVouchers(vouchers) : voucherRangeStats ? rollupFromRangeStats(voucherRangeStats) : rollupVouchers(vouchers);
     return [
       {
         label: 'Expense total',
@@ -635,22 +649,42 @@ export function computeBooksKpis(input: {
         label: 'Largest',
         value:
           rollup.posted > 0
-            ? ledgerAedNode(Math.max(...vouchers.filter(v => v.status === 'active').map(v => v.amount), 0))
+            ? ledgerAedNode(
+                vouchers.length > 0
+                  ? Math.max(...vouchers.filter(v => v.status === 'active').map(v => v.amount), 0)
+                  : voucherRangeStats?.largest ?? 0,
+              )
             : '—',
         valueTitle:
           rollup.posted > 0
-            ? fmtLedgerAed(Math.max(...vouchers.filter(v => v.status === 'active').map(v => v.amount), 0))
+            ? fmtLedgerAed(
+                vouchers.length > 0
+                  ? Math.max(...vouchers.filter(v => v.status === 'active').map(v => v.amount), 0)
+                  : voucherRangeStats?.largest ?? 0,
+              )
             : undefined,
         hint: 'Biggest posted voucher',
       },
     ];
   }
 
-  const rollup = rollupVouchers(vouchers);
+  const rollup =
+    vouchers.length > 0
+      ? {
+          ...rollupVouchers(vouchers),
+          largest: Math.max(...vouchers.filter(v => v.status === 'active').map(v => v.amount), 0),
+        }
+      : voucherRangeStats
+        ? rollupFromRangeStats(voucherRangeStats)
+        : { ...rollupVouchers(vouchers), largest: 0 };
+
+  const money = ledgerBook === 'INR' ? ledgerInrNode : ledgerAedNode;
+  const fmtMoney = ledgerBook === 'INR' ? fmtLedgerInr : fmtLedgerAed;
+
   return [
     {
       label: 'Posted value',
-      value: ledgerAedNode(rollup.postedTotal),
+      value: money(rollup.postedTotal),
       hint: `${rollup.posted} active vouchers`,
       tone: 'emerald',
     },
@@ -661,21 +695,15 @@ export function computeBooksKpis(input: {
     },
     {
       label: 'Pending',
-      value: rollup.pending > 0 ? ledgerAedNode(rollup.pendingTotal) : '—',
-      valueTitle: rollup.pending > 0 ? fmtLedgerAed(rollup.pendingTotal) : undefined,
+      value: rollup.pending > 0 ? money(rollup.pendingTotal) : '—',
+      valueTitle: rollup.pending > 0 ? fmtMoney(rollup.pendingTotal) : undefined,
       hint: rollup.pending > 0 ? `${rollup.pending} awaiting approval` : 'Nothing pending',
       tone: rollup.pending > 0 ? 'amber' : 'slate',
     },
     {
       label: 'Largest',
-      value:
-        rollup.posted > 0
-          ? ledgerAedNode(Math.max(...vouchers.filter(v => v.status === 'active').map(v => v.amount), 0))
-          : '—',
-      valueTitle:
-        rollup.posted > 0
-          ? fmtLedgerAed(Math.max(...vouchers.filter(v => v.status === 'active').map(v => v.amount), 0))
-          : undefined,
+      value: rollup.posted > 0 ? money(rollup.largest) : '—',
+      valueTitle: rollup.posted > 0 ? fmtMoney(rollup.largest) : undefined,
       hint: 'Biggest posted voucher',
     },
   ];

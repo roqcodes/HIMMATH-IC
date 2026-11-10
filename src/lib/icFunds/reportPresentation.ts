@@ -1,5 +1,5 @@
 import type { ICFundAccount, ICFundAccountType } from '@/types';
-import { plPeriodMovement } from '@/lib/icFunds/accountBalance';
+import { plPeriodMovementFromLedger } from '@/lib/icFunds/accountBalance';
 import type { AccountPeriodLedger } from '@/lib/icFunds/accountPeriodBalance';
 import type { ICFundVoucher } from '@/types';
 import { isTradePartyLedgerAccount, ledgerAccountTypeCaption } from '@/lib/icFunds/voucherPartyAccounts';
@@ -51,7 +51,7 @@ type ProfitLossTotals = {
 
 export function buildPlStatement(
   ledgers: AccountPeriodLedger[],
-  periodVouchers: ReadonlyArray<ICFundVoucher>,
+  _periodVouchers: ReadonlyArray<ICFundVoucher>,
   totals: ProfitLossTotals,
 ): PlStatement {
   const plAccounts = ledgers.filter(a =>
@@ -64,9 +64,7 @@ export function buildPlStatement(
       .map(a => ({
         accountId: a.accountId,
         accountName: a.accountName,
-        amount: Number(
-          plPeriodMovement(a.accountId, a.accountType, periodVouchers).toFixed(2),
-        ),
+        amount: Number(plPeriodMovementFromLedger(a).toFixed(2)),
       }))
       .filter(l => Math.abs(l.amount) > 0.005)
       .sort((x, y) => x.accountName.localeCompare(y.accountName));

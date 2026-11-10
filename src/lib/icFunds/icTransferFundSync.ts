@@ -20,6 +20,8 @@ import {
 } from '@/lib/icFunds/warehouseProfit';
 import { IC_SALE_VOID_ORDER_STATUSES } from '@/lib/icFunds/icTransferReportFilters';
 import { logger } from '@/lib/logger';
+import { resolveBranchTimeZone } from '@/lib/businessTime';
+import { ledgerVoucherDateFromInstant } from '@/lib/toIsoDateString';
 
 type DbClient = {
   query: (text: string, params?: unknown[]) => Promise<QueryResult>;
@@ -55,10 +57,9 @@ async function lockFundAccounts(
   return accounts.rows;
 }
 
-function isoDate(value: unknown): string {
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
-  const raw = String(value ?? '');
-  return raw.length >= 10 ? raw.slice(0, 10) : new Date().toISOString().slice(0, 10);
+async function loadBranchTimeZone(client: DbClient, branchId: string): Promise<string> {
+  const res = await client.query(`SELECT timezone FROM branches WHERE id = $1 LIMIT 1`, [branchId]);
+  return resolveBranchTimeZone(res.rows[0]?.timezone as string | undefined);
 }
 
 function accountDisplayName(sourceType: ICFundAccountSourceType, name: string): string {
@@ -574,6 +575,7 @@ async function postSaleMarginVouchers(
   client: DbClient,
   sale: Record<string, unknown>,
   branchId: string,
+  branchTz: string,
 ): Promise<void> {
   if (String(sale.settlement_mode || '') === 'metal') {
     return;
@@ -625,7 +627,7 @@ async function postSaleMarginVouchers(
     'ic_sales_profit',
   );
 
-  const voucherDate = isoDate(sale.status_updated_at || sale.created_at);
+  const voucherDate = ledgerVoucherDateFromInstant(sale.status_updated_at || sale.created_at, branchTz);
   const saleRef = String(sale.id);
   const avgLabel = margin.avgPurchaseRate.toFixed(4);
 
@@ -692,6 +694,7 @@ async function repairCompletedCashSaleMarginsForWarehouse(
   client: DbClient,
   warehouseId: string,
   branchId: string,
+  branchTz: string,
 ): Promise<void> {
   const res = await client.query(
     `SELECT *
@@ -703,8 +706,8 @@ async function repairCompletedCashSaleMarginsForWarehouse(
     [warehouseId],
   );
   for (const row of res.rows) {
-    await postCashIcSalePartyVoucher(client, row, branchId);
-    await postSaleMarginVouchers(client, row, branchId);
+    await postCashIcSalePartyVoucher(client, row, branchId, branchTz);
+    await postSaleMarginVouchers(client, row, branchId, branchTz);
   }
 }
 
@@ -716,6 +719,7 @@ async function postCashIcSalePartyVoucher(
   client: DbClient,
   sale: Record<string, unknown>,
   branchId: string,
+  branchTz: string,
 ): Promise<void> {
   const saleId = String(sale.id);
   const orderStatus = String(sale.order_status || '');
@@ -759,7 +763,7 @@ async function postCashIcSalePartyVoucher(
   await postVoucherInTx(client, {
     branchId,
     voucherType: 'journal',
-    voucherDate: isoDate(sale.status_updated_at || sale.created_at),
+    voucherDate: ledgerVoucherDateFromInstant(sale.status_updated_at || sale.created_at, branchTz),
     debitAccountId: customerAccountId,
     creditAccountId: incomeAccountId,
     amount,
@@ -1033,14 +1037,15 @@ export async function syncICPurchaseToICFunds(purchaseId: string): Promise<void>
       if (purchaseRes.rows.length === 0) return;
       const purchase = purchaseRes.rows[0];
       const branchId = await resolvePurchaseBranchId(client, purchaseId);
+      const branchTz = await loadBranchTimeZone(client, branchId);
       const metal = isMetalSettlement(purchase.settlement_mode);
 
       if (metal) {
         const { syncMetalPurchaseLedgers } = await import('@/lib/metal/posting');
-        await syncMetalPurchaseLedgers(client, purchase, branchId);
+        await syncMetalPurchaseLedgers(client, purchase, branchId, branchTz);
         const warehouseId = purchase.warehouse_id ? String(purchase.warehouse_id) : null;
         if (warehouseId) {
-          await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId);
+          await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId, branchTz);
         }
         return;
       }
@@ -1092,7 +1097,7 @@ export async function syncICPurchaseToICFunds(purchaseId: string): Promise<void>
       await postVoucherInTx(client, {
         branchId,
         voucherType: 'journal',
-        voucherDate: isoDate(purchase.created_at),
+        voucherDate: ledgerVoucherDateFromInstant(purchase.created_at, branchTz),
         debitAccountId: inventoryAccountId,
         creditAccountId: supplierAccountId,
         amount,
@@ -1103,7 +1108,7 @@ export async function syncICPurchaseToICFunds(purchaseId: string): Promise<void>
 
       const warehouseId = purchase.warehouse_id ? String(purchase.warehouse_id) : null;
       if (warehouseId) {
-        await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId);
+        await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId, branchTz);
       }
     });
   } catch (err) {
@@ -1141,6 +1146,7 @@ export async function syncICSaleToICFunds(saleId: string): Promise<void> {
       if (saleRes.rows.length === 0) return;
       const sale = saleRes.rows[0];
       const branchId = await resolveSaleBranchId(client, sale);
+      const branchTz = await loadBranchTimeZone(client, branchId);
       const orderStatus = String(sale.order_status || '');
       const metal = isMetalSettlement(sale.settlement_mode);
 
@@ -1157,11 +1163,11 @@ export async function syncICSaleToICFunds(saleId: string): Promise<void> {
 
       if (metal) {
         const { syncMetalSaleLedgers } = await import('@/lib/metal/posting');
-        await syncMetalSaleLedgers(client, sale, branchId);
+        await syncMetalSaleLedgers(client, sale, branchId, branchTz);
         await voidMetalCashIcStockVoucher(client, saleId, branchId);
         const warehouseId = sale.warehouse_id ? String(sale.warehouse_id) : null;
         if (warehouseId) {
-          await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId);
+          await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId, branchTz);
         }
         return;
       }
@@ -1173,14 +1179,14 @@ export async function syncICSaleToICFunds(saleId: string): Promise<void> {
         return;
       }
 
-      await postCashIcSalePartyVoucher(client, sale, branchId);
+      await postCashIcSalePartyVoucher(client, sale, branchId, branchTz);
 
       if (orderStatus === 'completed') {
         const warehouseId = sale.warehouse_id ? String(sale.warehouse_id) : null;
         if (warehouseId) {
-          await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId);
+          await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId, branchTz);
         } else {
-          await postSaleMarginVouchers(client, sale, branchId);
+          await postSaleMarginVouchers(client, sale, branchId, branchTz);
         }
       } else {
         await voidSaleMarginVouchers(client, branchId, saleId);
@@ -1208,70 +1214,6 @@ export async function removeICSaleFromICFunds(saleId: string): Promise<void> {
     });
   } catch (err) {
     logger.error({ err, saleId }, 'Failed to remove IC sale from IC Funds');
-  }
-}
-
-const healLocks = new Map<string, Promise<void>>();
-
-/** Repost cash IC sale/purchase party vouchers that never landed (timeouts, deferred sync). */
-export async function healMissingDealPartyVouchers(counterpartyId?: string): Promise<void> {
-  const key = counterpartyId?.trim() || '*';
-  const existing = healLocks.get(key);
-  if (existing) {
-    await existing;
-    return;
-  }
-  const run = runHealMissingDealPartyVouchers(counterpartyId).finally(() => {
-    healLocks.delete(key);
-  });
-  healLocks.set(key, run);
-  await run;
-}
-
-async function runHealMissingDealPartyVouchers(counterpartyId?: string): Promise<void> {
-  const id = counterpartyId?.trim() || null;
-  const params = id ? [id] : [];
-  const saleFilter = id ? 'AND s.counterparty_id = $1::uuid' : '';
-  const sales = await query(
-    `SELECT s.id FROM ic_sales s
-     WHERE COALESCE(s.settlement_mode, 'cash') <> 'metal'
-       AND s.order_status IN ('completed', 'accepted', 'wh_processing', 'delivery_pending_admin')
-       ${saleFilter}
-       AND NOT EXISTS (
-         SELECT 1 FROM ic_fund_vouchers v
-         WHERE v.reference_type = 'ic_sale'
-           AND CAST(v.reference_id AS text) = CAST(s.id AS text)
-           AND COALESCE(v.status, 'active') <> 'void'
-       )`,
-    params,
-  );
-  for (const row of sales.rows) {
-    try {
-      await syncICSaleToICFunds(String(row.id));
-    } catch (err) {
-      logger.warn({ err, saleId: row.id }, 'Failed to heal missing IC sale ledger');
-    }
-  }
-
-  const purchaseFilter = id ? 'AND p.counterparty_id = $1::uuid' : '';
-  const purchases = await query(
-    `SELECT p.id FROM ic_purchases p
-     WHERE COALESCE(p.settlement_mode, 'cash') <> 'metal'
-       ${purchaseFilter}
-       AND NOT EXISTS (
-         SELECT 1 FROM ic_fund_vouchers v
-         WHERE v.reference_type = 'ic_purchase'
-           AND CAST(v.reference_id AS text) = CAST(p.id AS text)
-           AND COALESCE(v.status, 'active') <> 'void'
-       )`,
-    params,
-  );
-  for (const row of purchases.rows) {
-    try {
-      await syncICPurchaseToICFunds(String(row.id));
-    } catch (err) {
-      logger.warn({ err, purchaseId: row.id }, 'Failed to heal missing IC purchase ledger');
-    }
   }
 }
 

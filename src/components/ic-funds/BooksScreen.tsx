@@ -4,7 +4,10 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useICFundsReportHeaderToolbar } from '@/components/ic-funds/ICFundsReportsChrome';
 import Link from 'next/link';
 import {
-  getICFundReportBundleAction,
+  getICFundBooksReportAction,
+  type ICFundBooksReportData,
+  type ICFundVoucherRangeStats,
+  getICFundProfitLossReportAction,
   getICFundStatementAction,
   getInrFundStatementAction,
   getICSettlementTradeReportAction,
@@ -64,13 +67,12 @@ import { useApp } from '@/context/AppContext';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { logClientActionError } from '@/lib/errors/actionError';
 import { trackLoading } from '@/lib/loadingBar';
+import type { ICFundProfitLossReport } from '@/lib/icFunds/plReportTypes';
 import type { ICWarehousePLReport } from '@/lib/icFunds/warehouseProfit';
 import type { ICSettlementTradeReport } from '@/lib/icFunds/settlementTradeReport';
 import type { ICFundAccount, ICFundStatementLine, ICFundVoucher } from '@/types';
 
-type ReportBundle = NonNullable<
-  Extract<Awaited<ReturnType<typeof getICFundReportBundleAction>>, { success: true }>['data']
->;
+type ReportBundle = ICFundBooksReportData;
 
 function AmountCell({
   n,
@@ -111,8 +113,11 @@ export default function BooksScreen({
     setCustomEndDate,
     startDate,
     endDate,
+    todayAnchor,
   } = useICFundsDateFilter(branch?.timezone, 'this-month');
   const [bundle, setBundle] = useState<ReportBundle | null>(null);
+  const [voucherRangeStats, setVoucherRangeStats] = useState<ICFundVoucherRangeStats | null>(null);
+  const [plReport, setPlReport] = useState<ICFundProfitLossReport | null>(null);
   const [warehousePl, setWarehousePl] = useState<ICWarehousePLReport | null>(null);
   const [settlementTradeReport, setSettlementTradeReport] = useState<ICSettlementTradeReport | null>(null);
   const [accounts, setAccounts] = useState<ICFundAccount[]>([]);
@@ -163,6 +168,26 @@ export default function BooksScreen({
     setLoading(false);
   }, [branchId, endDate, showLoadError, startDate]);
 
+  const loadProfitLoss = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    const result = await trackLoading(() =>
+      getICFundProfitLossReportAction({
+        branchId,
+        startDate,
+        endDate,
+        warehouseId: reportFilters.warehouseId?.trim() || undefined,
+      }),
+    );
+    if (!result.success) {
+      await showLoadError('BooksScreen.loadProfitLoss', result.error);
+      setPlReport(null);
+    } else {
+      setPlReport(result.data);
+    }
+    setLoading(false);
+  }, [branchId, endDate, reportFilters.warehouseId, showLoadError, startDate]);
+
   const loadSettlementTradeReport = useCallback(async () => {
     const mode = reportView === 'metal-trades' ? 'metal' : 'cash';
     setLoading(true);
@@ -186,16 +211,35 @@ export default function BooksScreen({
   }, [branchId, endDate, reportView, reportFilters.includeVoidOrders, showLoadError, startDate]);
 
   const loadBundle = useCallback(async () => {
+    const bundleViews = [
+      'all-vouchers',
+      'cash-bank',
+      'd-expenses',
+      'receivables',
+      'trial-balance',
+      'balance-sheet',
+    ] as const;
+    if (!(bundleViews as readonly string[]).includes(reportView)) return;
     setLoading(true);
     setError(null);
-    const result = await trackLoading(() => getICFundReportBundleAction({ branchId, startDate, endDate }));
+    const ledgerBook = fundLedgerBook === 'inr' ? 'INR' : 'AED';
+    const result = await trackLoading(() =>
+      getICFundBooksReportAction({
+        branchId,
+        startDate,
+        endDate,
+        reportView: reportView as 'all-vouchers' | 'cash-bank' | 'd-expenses' | 'receivables' | 'trial-balance' | 'balance-sheet',
+        ledgerBook: reportView === 'all-vouchers' ? ledgerBook : undefined,
+      }),
+    );
     if (!result.success) {
       await showLoadError('BooksScreen.loadBundle', result.error);
     } else {
       setBundle(result.data);
+      setVoucherRangeStats(result.data.voucherRangeStats ?? null);
     }
     setLoading(false);
-  }, [branchId, endDate, showLoadError, startDate]);
+  }, [branchId, endDate, fundLedgerBook, reportView, showLoadError, startDate]);
 
   const loadStatement = useCallback(async () => {
     if (!accountId) {
@@ -236,16 +280,20 @@ export default function BooksScreen({
       void loadStatement();
       return;
     }
-    if (reportView === 'warehouse-pl' || reportView === 'profit-loss') {
+    if (reportView === 'profit-loss') {
+      void loadProfitLoss();
+      return;
+    }
+    if (reportView === 'warehouse-pl') {
       void loadWarehousePl();
-      if (reportView === 'warehouse-pl') return;
+      return;
     }
     if (reportView === 'fund-trades' || reportView === 'metal-trades') {
       void loadSettlementTradeReport();
       return;
     }
     void loadBundle();
-  }, [loadBundle, loadStatement, loadSettlementTradeReport, loadWarehousePl, reportView]);
+  }, [loadBundle, loadProfitLoss, loadStatement, loadSettlementTradeReport, loadWarehousePl, reportView, fundLedgerBook]);
 
   useEffect(() => {
     if (!accountId) {
@@ -363,27 +411,6 @@ export default function BooksScreen({
     [reportFilters.search, reportFilters.warehouseId, warehousePl],
   );
 
-  /** Metal (INR) roll-up on P&L tab — same INR economics as warehouse statement detail. */
-  const profitLossMetalInrKpis = useMemo(() => {
-    if (!warehousePl) {
-      return { metalSoldG: 0, metalSaleInr: 0, metalCogsInr: 0 };
-    }
-    const lines = filterWarehousePlLines(warehousePl.lines, reportFilters.warehouseId, reportFilters.search);
-    let metalSoldG = 0;
-    let metalSaleInr = 0;
-    let metalCogsInr = 0;
-    for (const line of lines) {
-      if (line.settlementMode !== 'metal' || line.lineKind !== 'sale') continue;
-      metalSoldG += Number(line.metalWeightG ?? line.units) || 0;
-      metalSaleInr +=
-        line.metalDisplayRevenueInr ??
-        (line.bookedCurrency === 'INR' ? line.revenue : 0);
-      metalCogsInr +=
-        line.metalDisplayCostInr ?? (line.bookedCurrency === 'INR' ? line.cogs : 0);
-    }
-    return { metalSoldG, metalSaleInr, metalCogsInr };
-  }, [warehousePl, reportFilters.warehouseId, reportFilters.search]);
-
   const activeLedgerBook = useMemo((): 'AED' | 'INR' => {
     if (reportView === 'statement') return statementBook === 'inr' ? 'INR' : 'AED';
     if (
@@ -474,6 +501,8 @@ export default function BooksScreen({
       if (!activeStatement) return [];
     } else if (reportView === 'warehouse-pl') {
       if (!warehousePl) return [];
+    } else if (reportView === 'profit-loss') {
+      if (!plReport) return [];
     } else if (reportView === 'fund-trades' || reportView === 'metal-trades') {
       if (!filteredSettlementReport) return [];
     } else if (!bundle) {
@@ -482,10 +511,11 @@ export default function BooksScreen({
 
     return computeBooksKpis({
       reportView,
-      profitLoss: bundle?.profitLoss,
-      plStatement: bundle?.plStatement,
+      profitLoss: plReport?.profitLoss ?? bundle?.profitLoss,
+      plStatement: plReport?.plStatement ?? bundle?.plStatement,
       balanceSheet: bundle?.balanceSheet,
       trialBalance: filteredTrialBalance,
+      voucherRangeStats: voucherRangeStats ?? undefined,
       vouchers:
         reportView === 'd-expenses'
           ? filteredExpenseRegister
@@ -518,7 +548,9 @@ export default function BooksScreen({
     filteredTrialBalance,
     filteredWarehouseLines,
     filteredWarehouseSummaries,
+    plReport,
     reportView,
+    voucherRangeStats,
     warehousePl,
   ]);
 
@@ -724,8 +756,8 @@ export default function BooksScreen({
       return;
     }
 
-    if (reportView === 'profit-loss' && bundle.plStatement) {
-      const s = bundle.plStatement;
+    if (reportView === 'profit-loss' && plReport?.plStatement) {
+      const s = plReport.plStatement;
       downloadCsv('profit-and-loss.csv', ['Section', 'Amount (AED)'], [
         ['Sales / income', s.salesTotal],
         ['Direct costs', -s.directCostsTotal],
@@ -999,6 +1031,7 @@ export default function BooksScreen({
             setCustomStartDate,
             customEndDate,
             setCustomEndDate,
+            todayAnchor,
           }}
           filters={{
             reportView,
@@ -1031,8 +1064,15 @@ export default function BooksScreen({
             {exportSubtitle}
           </p>
         ) : null}
-        {loading && reportView !== 'statement' && reportView !== 'warehouse-pl' && !bundle ? (
+        {loading &&
+        reportView !== 'statement' &&
+        reportView !== 'warehouse-pl' &&
+        reportView !== 'profit-loss' &&
+        !bundle ? (
           <ASICTableSkeleton framed={false} cols={7} rows={8} />
+        ) : null}
+        {loading && reportView === 'profit-loss' && !plReport ? (
+          <ASICTableSkeleton framed={false} cols={5} rows={10} />
         ) : null}
         {loading && reportView === 'warehouse-pl' && !warehousePl ? (
           <ASICTableSkeleton framed={false} cols={9} rows={8} />
@@ -1175,16 +1215,16 @@ export default function BooksScreen({
         {reportView === 'capital-register' ? (
           <CapitalRegisterReport />
         ) : null}
-        {bundle && reportView === 'profit-loss' && bundle.plStatement ? (
+        {plReport && reportView === 'profit-loss' ? (
           <ProfitLossReport
-            statement={bundle.plStatement}
+            statement={plReport.plStatement}
             periodLabel={periodLabel}
             slug={slug}
             accounts={accounts}
-            periodMetalPlInr={warehousePl?.totals.metalProfitInr ?? null}
-            metalSoldG={profitLossMetalInrKpis.metalSoldG}
-            metalSaleInr={profitLossMetalInrKpis.metalSaleInr}
-            metalCogsInr={profitLossMetalInrKpis.metalCogsInr}
+            periodMetalPlInr={plReport.metalPl.metalProfitInr}
+            metalSoldG={plReport.metalPl.metalSoldG}
+            metalSaleInr={plReport.metalPl.metalSaleInr}
+            metalCogsInr={plReport.metalPl.metalCogsInr}
             book={profitLossBook}
             onBookChange={setProfitLossBook}
           />

@@ -54,6 +54,11 @@ import { asicCard } from '@/components/asic/ui';
 import type { ICPurchase, ICSale, ICFundVoucher } from '@/types';
 import { voucherPostedTargetsCounterparty } from '@/lib/icFunds/voucherPostedNotify';
 import { useOnIcFundsVoucherPosted } from '@/hooks/useOnIcFundsVoucherPosted';
+import {
+  sortCounterpartyActivity,
+  sortCounterpartyPurchases,
+  sortCounterpartySales,
+} from '@/lib/icTransfer/detailTableSort';
 
 type TabId = 'all' | 'purchases' | 'sales' | 'journals';
 
@@ -95,6 +100,8 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
   const { icPurchases, icSales, icWarehouses } = useApp();
   const [tab, setTab] = useState<TabId>('all');
   const [search, setSearch] = useState('');
+  const [sortField, setSortField] = useState('Date');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [journals, setJournals] = useState<ICFundVoucher[]>([]);
   const [journalsLoading, setJournalsLoading] = useState(false);
   const [journalsLoaded, setJournalsLoaded] = useState(false);
@@ -112,6 +119,18 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
     [icWarehouses],
   );
 
+  const handleSort = useCallback(
+    (field: string) => {
+      if (sortField === field) {
+        setSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'));
+      } else {
+        setSortField(field);
+        setSortOrder(field === 'Date' ? 'desc' : 'asc');
+      }
+    },
+    [sortField],
+  );
+
   const purchases = useMemo(
     () => filterCounterpartyPurchases(icPurchases, counterpartyId, range),
     [icPurchases, counterpartyId, range],
@@ -125,6 +144,21 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
   const activity = useMemo(
     () => mergeCounterpartyActivity(purchases, sales, journals),
     [purchases, sales, journals],
+  );
+
+  const sortedActivity = useMemo(
+    () => sortCounterpartyActivity(activity, sortField, sortOrder, getWarehouseName),
+    [activity, sortField, sortOrder, getWarehouseName],
+  );
+
+  const sortedPurchases = useMemo(
+    () => sortCounterpartyPurchases(purchases, sortField, sortOrder, getWarehouseName),
+    [purchases, sortField, sortOrder, getWarehouseName],
+  );
+
+  const sortedSales = useMemo(
+    () => sortCounterpartySales(sales, sortField, sortOrder, getWarehouseName),
+    [sales, sortField, sortOrder, getWarehouseName],
   );
 
   const loadJournals = useCallback(async () => {
@@ -475,13 +509,13 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
             onSearchChange={setSearch}
             searchPlaceholder="Search activity…"
             columns={ACTIVITY_COLUMNS}
-            sortField="Date"
-            sortOrder="desc"
-            onSort={() => {}}
+            sortField={sortField}
+            sortOrder={sortOrder}
+            onSort={handleSort}
             isEmpty={activity.length === 0 && !journalsLoading}
             emptyMessage="No purchases, sales, payments, or receipts for this counterparty in the selected period."
           >
-            {activity.map(renderActivityRow)}
+            {sortedActivity.map(renderActivityRow)}
           </ICTransferDataTableShell>
         ) : null}
 
@@ -492,13 +526,13 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
             onSearchChange={setSearch}
             searchPlaceholder="Search purchases…"
             columns={PURCHASE_COLUMNS}
-            sortField="Date"
-            sortOrder="desc"
-            onSort={() => {}}
+            sortField={sortField}
+            sortOrder={sortOrder}
+            onSort={handleSort}
             isEmpty={purchases.length === 0}
             emptyMessage="No purchases for this counterparty in the selected period."
           >
-            {purchases.map(p => renderPurchaseRow(p))}
+            {sortedPurchases.map(p => renderPurchaseRow(p))}
           </ICTransferDataTableShell>
         ) : null}
 
@@ -509,13 +543,13 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
             onSearchChange={setSearch}
             searchPlaceholder="Search sales…"
             columns={PURCHASE_COLUMNS}
-            sortField="Date"
-            sortOrder="desc"
-            onSort={() => {}}
+            sortField={sortField}
+            sortOrder={sortOrder}
+            onSort={handleSort}
             isEmpty={sales.length === 0}
             emptyMessage="No sales for this counterparty in the selected period."
           >
-            {sales.map(s => renderSaleRow(s))}
+            {sortedSales.map(s => renderSaleRow(s))}
           </ICTransferDataTableShell>
         ) : null}
 

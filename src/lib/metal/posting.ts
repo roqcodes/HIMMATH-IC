@@ -22,16 +22,11 @@ import {
   planMetalSaleJournals,
   type MetalJournalRole,
 } from '@/lib/metal/journalPlan';
+import { ledgerVoucherDateFromInstant } from '@/lib/toIsoDateString';
 
 type DbClient = {
   query: (text: string, params?: unknown[]) => Promise<QueryResult>;
 };
-
-function isoDate(value: unknown): string {
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
-  const raw = String(value ?? '');
-  return raw.length >= 10 ? raw.slice(0, 10) : new Date().toISOString().slice(0, 10);
-}
 
 async function ensureMetalAedAccount(client: DbClient, branchId: string): Promise<string | null> {
   return ensureLinkedAccount(client, {
@@ -83,6 +78,7 @@ export async function syncMetalPurchaseLedgers(
   client: DbClient,
   purchase: Record<string, unknown>,
   branchId: string,
+  branchTz: string,
 ): Promise<void> {
   const purchaseId = String(purchase.id);
   const paymentMethod = normalizeMetalPaymentMethod(
@@ -90,7 +86,7 @@ export async function syncMetalPurchaseLedgers(
   );
   const grossInr = roundLedgerAmount(Number(purchase.inr_total) || 0);
   const aedTotal = roundLedgerAmount(Number(purchase.aed_total) || 0);
-  const voucherDate = isoDate(purchase.created_at);
+  const voucherDate = ledgerVoucherDateFromInstant(purchase.created_at, branchTz);
 
   await voidVoucherByReference(client, branchId, 'ic_purchase', purchaseId);
   await voidVoucherByReference(client, branchId, 'metal_purchase_aed', purchaseId);
@@ -302,11 +298,12 @@ export async function syncMetalSaleLedgers(
   client: DbClient,
   sale: Record<string, unknown>,
   branchId: string,
+  branchTz: string,
 ): Promise<void> {
   const saleId = String(sale.id);
   const orderStatus = String(sale.order_status || '');
   const paymentMethod = normalizeMetalPaymentMethod(sale.metal_payment_method as string | null);
-  const voucherDate = isoDate(sale.status_updated_at || sale.created_at);
+  const voucherDate = ledgerVoucherDateFromInstant(sale.status_updated_at || sale.created_at, branchTz);
 
   await voidVoucherByReference(client, branchId, 'ic_sale', saleId);
   await voidVoucherByReference(client, branchId, 'metal_sale_aed', saleId);

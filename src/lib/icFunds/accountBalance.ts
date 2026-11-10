@@ -160,6 +160,18 @@ function plVoucherMovementDelta(
   }
 }
 
+/** Period movement from ledger period columns (avoids loading every voucher on P&L). */
+export function plPeriodMovementFromLedger(ledger: {
+  accountType: ICFundAccountType;
+  periodDebit: number;
+  periodCredit: number;
+}): number {
+  return (
+    plVoucherMovementDelta(ledger.accountType, 'debit', ledger.periodDebit) +
+    plVoucherMovementDelta(ledger.accountType, 'credit', ledger.periodCredit)
+  );
+}
+
 /** Period voucher activity for one P&L account, using natural P&L signs. */
 export function plPeriodMovement(
   accountId: string,

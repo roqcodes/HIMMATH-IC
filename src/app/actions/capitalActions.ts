@@ -1,5 +1,6 @@
 'use server';
 
+import { after } from 'next/server';
 import { query, runQueryBatch, withTransaction } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { requireICFundsAccess } from '@/lib/icFunds/requireAccess';
@@ -27,6 +28,14 @@ type ActionErr = { success: false; error: string };
 type ActionResult<T> = ActionOk<T> | ActionErr;
 
 type CapitalWriter = Extract<Awaited<ReturnType<typeof requireICFundsAccess>>, { ok: true }>;
+
+function scheduleCapitalRebalance(): void {
+  after(() => {
+    void import('@/lib/capital/rebalance')
+      .then(m => m.rebalanceHqCapitalProfitSplits())
+      .catch(err => logger.warn({ err }, 'Deferred capital rebalance failed'));
+  });
+}
 
 async function requireCapitalWrite(): Promise<ActionErr | CapitalWriter> {
   const access = await requireICFundsAccess(HQ_IC_FUNDS_BRANCH_ID, 'write');
@@ -204,13 +213,11 @@ export async function getCapitalPageDataAction(
   if (readDenied) return readDenied;
 
   try {
-    const { backfillHqCapitalAllocationsFromProfitVouchers, healMissingMetalFxProfitJournals } = await import('@/lib/icFunds/dealLedgerHeal');
-    await healMissingMetalFxProfitJournals();
-    await backfillHqCapitalAllocationsFromProfitVouchers();
-
-    const loaded = await loadCapitalDashboard(HQ_IC_FUNDS_BRANCH_ID);
-    const movements = await fetchCapitalMovements(movementLimit);
-    const allocations = await fetchCapitalAllocations(allocationLimit);
+    const [loaded, movements, allocations] = await Promise.all([
+      loadCapitalDashboard(HQ_IC_FUNDS_BRANCH_ID),
+      fetchCapitalMovements(movementLimit),
+      fetchCapitalAllocations(allocationLimit),
+    ]);
     return {
       success: true,
       data: {
@@ -251,6 +258,7 @@ export async function createCapitalInvestorAction(input: unknown): Promise<Actio
       after: { name: parsed.data.name },
     });
     revalidatePath('/admin/capital');
+    scheduleCapitalRebalance();
     return { success: true, data: { id } };
   } catch (err) {
     logger.error({ err }, 'createCapitalInvestorAction failed');
@@ -348,6 +356,7 @@ export async function setCapitalOpeningAction(input: unknown): Promise<ActionRes
     });
     revalidatePath('/admin/capital');
     revalidatePath('/admin/entities');
+    scheduleCapitalRebalance();
     return { success: true, data: { locked: true } };
   } catch (err) {
     logger.error({ err }, 'setCapitalOpeningAction failed');
@@ -405,6 +414,7 @@ export async function postCapitalMovementAction(input: unknown): Promise<ActionR
     );
     revalidatePath('/admin/capital');
     revalidatePath('/admin/entities');
+    scheduleCapitalRebalance();
     return { success: true, data: { voucherId: result.voucherId } };
   } catch (err) {
     logger.error({ err }, 'postCapitalMovementAction failed');
@@ -461,19 +471,7 @@ export async function listCapitalBankAccountsBothAction(): Promise<
 }
 
 export async function listCapitalAllocationsAction(limit = 150): Promise<
-  ActionResult<
-    Array<{
-      id: string;
-      voucherDate: string;
-      sourceVoucherId: string;
-      book: string;
-      investorName: string;
-      kind: string;
-      eventAmount: number;
-      allocatedAmount: number;
-      shareBps: number;
-    }>
-  >
+  ActionResult<CapitalAllocationListRow[]>
 > {
   const readDenied = await requireCapitalRead();
   if (readDenied) return readDenied;

@@ -17,6 +17,8 @@ interface DateFilterBarProps {
   setCustomStartDate: (val: string) => void;
   customEndDate: string;
   setCustomEndDate: (val: string) => void;
+  /** Branch calendar today (YYYY-MM-DD). Defaults to UTC “today” when omitted. */
+  todayAnchor?: string;
   children?: React.ReactNode;
   /** Flat layout inside a parent toolbar (no outer card). */
   embedded?: boolean;
@@ -64,10 +66,11 @@ export default function DateFilterBar({
   setCustomStartDate,
   customEndDate,
   setCustomEndDate,
+  todayAnchor,
   children,
   embedded = false,
 }: DateFilterBarProps) {
-  const today = useMemo(() => todayISO(), []);
+  const today = useMemo(() => todayAnchor || todayISO(), [todayAnchor]);
   const [stepUnit, setStepUnit] = useState<DateStepUnit>('D');
 
   const { from, to } = useMemo(
