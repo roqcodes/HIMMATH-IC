@@ -3,7 +3,7 @@ import 'server-only';
 import { query } from '@/lib/db';
 import { isHqIcFundsBranchId } from '@/lib/icFunds/hqBranch';
 import { resolveBranchTimeZone } from '@/lib/businessTime';
-import { isMetalAedPayment } from '@/lib/domain/books';
+import { normalizeMetalPaymentMethod } from '@/lib/domain/books';
 import { allocateMetalLotCostAed, allocateMetalLotCostInr } from '@/lib/icTransfer/metalLotCost';
 import { computeMetalLotProfit } from '@/lib/icTransfer/metalInventory';
 import { sqlExcludeVoidIcSales } from '@/lib/icFunds/icTransferReportFilters';
@@ -115,7 +115,7 @@ export async function queryMetalPlPeriodKpis(opts: {
     const saleAed = (Number(row.aed_amount) || 0) + (Number(row.service_charge) || 0);
     const lotId = row.metal_purchase_id ? String(row.metal_purchase_id) : null;
     const lot = lotId ? lotById.get(lotId) : undefined;
-    const paymentMethod = isMetalAedPayment(row.metal_payment_method) ? 'AED' : 'CASH';
+    const paymentMethod = normalizeMetalPaymentMethod(row.metal_payment_method);
 
     const pl = computeMetalLotProfit({
       paymentMethod,

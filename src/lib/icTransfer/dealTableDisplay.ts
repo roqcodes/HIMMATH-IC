@@ -1,11 +1,11 @@
 import React from 'react';
 import CurrencyAmount from '@/components/currency/CurrencyAmount';
 import { fmtLedgerAed, fmtLedgerInr } from '@/lib/icFunds/format';
-import { isMetalAedPayment } from '@/lib/domain/books';
+import { isMetalAedPayment, isMetalSplitPayment } from '@/lib/domain/books';
 import { dealPurchaseAed, dealSaleAed } from '@/lib/icTransfer/dealBookKpis';
 import { netMetalInr } from '@/lib/icTransfer/labTest';
-import { computeMetalAedFromInr, resolvePurchaseInrDisplay, resolveSaleInrDisplay } from '@/lib/icTransfer/metalSettlement';
-import { computeIcCashAedTotal } from '@/lib/icTransfer/rateCalculations';
+import { computeMetalAedFromInr, computeMetalSheetRateAed, resolvePurchaseInrDisplay, resolveSaleInrDisplay } from '@/lib/icTransfer/metalSettlement';
+import { computeIcCashAedTotal, computeIcCashRateFromTotals, formatRateAmount } from '@/lib/icTransfer/rateCalculations';
 import type { ICPurchase, ICSale } from '@/types';
 import type { SaleLineProfit } from '@/lib/icTransfer/dealProfit';
 
@@ -62,6 +62,78 @@ export function saleTableDisplayAed(s: ICSale): number {
 export function formatDealTableAed(amount: number): React.ReactNode {
   if (Math.abs(Number(amount) || 0) < 0.005) return '—';
   return React.createElement(CurrencyAmount, { currency: 'AED', amount });
+}
+
+/** Cash or metal sheet RATE (~36) — same basis as deal modals (AED = units × rate × 100 or metal INR × rate ÷ 1000). */
+export function purchaseDealSheetRate(p: ICPurchase): number {
+  const stored = Number(p.unitRate);
+  if (stored > 0) return stored;
+  if (p.settlementMode === 'cash') {
+    const units = Number(p.units) || 0;
+    const aed = purchaseDealAed(p);
+    if (units > 0 && aed > 0) return computeIcCashRateFromTotals(units, aed);
+    return 0;
+  }
+  const inr = Number(p.inrTotal) || 0;
+  const aed = Number(p.aedTotal) || 0;
+  if (inr > 0 && aed > 0) return computeMetalSheetRateAed(inr, aed);
+  return 0;
+}
+
+export function saleDealSheetRate(s: ICSale): number {
+  const stored = Number(s.unitRate);
+  if (stored > 0) return stored;
+  if (s.settlementMode === 'cash') {
+    const units = Number(s.units) || 0;
+    const aed = saleTableDisplayAed(s);
+    if (units > 0 && aed > 0) return computeIcCashRateFromTotals(units, aed);
+    return 0;
+  }
+  const inr = Number(s.inrTotal) || 0;
+  const aed = Number(s.aedAmount) || 0;
+  if (inr > 0 && aed > 0) return computeMetalSheetRateAed(inr, aed);
+  return 0;
+}
+
+export function formatDealTableSheetRate(rate: number): React.ReactNode {
+  if (!Number.isFinite(rate) || rate <= 0) return '—';
+  return React.createElement(
+    'span',
+    { className: 'font-mono tabular-nums text-slate-700' },
+    formatRateAmount(rate),
+  );
+}
+
+type SplitPaidFields = {
+  metalPaymentMethod?: string | null;
+  splitInrPaid?: number | null;
+  splitAedPaid?: number | null;
+};
+
+function splitPaidInrAmount(d: SplitPaidFields): number {
+  if (!isMetalSplitPayment(d.metalPaymentMethod)) return 0;
+  return Number(d.splitInrPaid) || 0;
+}
+
+function splitPaidAedAmount(d: SplitPaidFields): number {
+  if (!isMetalSplitPayment(d.metalPaymentMethod)) return 0;
+  return Number(d.splitAedPaid) || 0;
+}
+
+export function formatDealTableSplitPaidInr(d: SplitPaidFields): React.ReactNode {
+  return formatDealTableInr(splitPaidInrAmount(d));
+}
+
+export function formatDealTableSplitPaidAed(d: SplitPaidFields): React.ReactNode {
+  return formatDealTableAed(splitPaidAedAmount(d));
+}
+
+export function tableSplitPaidInr(d: SplitPaidFields): number {
+  return splitPaidInrAmount(d);
+}
+
+export function tableSplitPaidAed(d: SplitPaidFields): number {
+  return splitPaidAedAmount(d);
 }
 
 export function formatSaleLineProfit(line: SaleLineProfit | undefined): React.ReactNode {

@@ -34,30 +34,69 @@ import { getBranchPortalDisplayName } from '@/lib/icTransfer/branchPortalScope';
 import {
   formatDealTableAed,
   formatDealTableInr,
+  formatDealTableSheetRate,
+  formatDealTableSplitPaidAed,
+  formatDealTableSplitPaidInr,
+  formatSaleLineProfit,
   saleDealInr,
+  saleDealSheetRate,
   saleTableDisplayAed,
+  tableSplitPaidAed,
+  tableSplitPaidInr,
 } from '@/lib/icTransfer/dealTableDisplay';
+import { indexSaleLineProfits } from '@/lib/icTransfer/dealProfit';
+import { formatSettlementModeLabel } from '@/lib/icTransfer/metalSettlement';
 import { canEditOrder } from '@/lib/icTransfer/customerOrderReview';
 
 const ORDER_COLUMNS = [
-  'Date', 'ID', SALE_PARTY_COLUMN_LABEL, 'Settlement', 'Units', 'Metal (g)', 'Total INR', 'Total AED', 'Status', 'Actions',
+  'Date',
+  SALE_PARTY_COLUMN_LABEL,
+  'Settlement',
+  'Units',
+  'Metal (g)',
+  'Total INR',
+  'AED rate',
+  'Total AED',
+  'INR paid',
+  'AED paid',
+  'Profit',
+  'Status',
+  'Actions',
 ] as const;
 
-type SortField = 'date' | 'party' | 'units' | 'totalinr' | 'totalaed' | 'metal' | 'settlement';
+type SortField =
+  | 'date'
+  | 'party'
+  | 'units'
+  | 'totalinr'
+  | 'rateaed'
+  | 'totalaed'
+  | 'metal'
+  | 'settlement'
+  | 'inrpaid'
+  | 'aedpaid'
+  | 'profit';
 const SORTABLE_COLUMNS: Record<string, SortField> = {
   date: 'date',
   party: 'party',
   units: 'units',
   totalinr: 'totalinr',
+  rateaed: 'rateaed',
+  'rate(aed)': 'rateaed',
+  aedrate: 'rateaed',
   totalaed: 'totalaed',
   'metal (g)': 'metal',
   'metal(g)': 'metal',
   settlement: 'settlement',
+  inrpaid: 'inrpaid',
+  aedpaid: 'aedpaid',
+  profit: 'profit',
 };
 
 export default function ICTransferBranch() {
   const {
     icSales,
+    icPurchases,
     icWarehouses,
     currentSlug,
     branches,
@@ -142,6 +181,11 @@ export default function ICTransferBranch() {
     return `${cash} IC · ${metal} metal`;
   }, [branchSales, range]);
 
+  const saleProfits = useMemo(
+    () => indexSaleLineProfits({ purchases: icPurchases, sales: icSales, range }),
+    [icPurchases, icSales, range],
+  );
+
   const customerOptions = useMemo(() => {
     const names = new Set<string>();
     branchCustomers.forEach(c => names.add(c.name));
@@ -178,10 +222,18 @@ export default function ICTransferBranch() {
           return (a.units - b.units) * dir;
         case 'totalinr':
           return (saleDealInr(a) - saleDealInr(b)) * dir;
+        case 'rateaed':
+          return (saleDealSheetRate(a) - saleDealSheetRate(b)) * dir;
         case 'totalaed':
           return (saleTableDisplayAed(a) - saleTableDisplayAed(b)) * dir;
         case 'metal':
           return ((a.metalWeightG ?? 0) - (b.metalWeightG ?? 0)) * dir;
+        case 'inrpaid':
+          return (tableSplitPaidInr(a) - tableSplitPaidInr(b)) * dir;
+        case 'aedpaid':
+          return (tableSplitPaidAed(a) - tableSplitPaidAed(b)) * dir;
+        case 'profit':
+          return ((saleProfits.get(a.id)?.amount ?? 0) - (saleProfits.get(b.id)?.amount ?? 0)) * dir;
         case 'settlement': {
           const modeA = a.settlementMode === 'metal' ? 1 : 0;
           const modeB = b.settlementMode === 'metal' ? 1 : 0;
@@ -192,7 +244,7 @@ export default function ICTransferBranch() {
           return (new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()) * dir;
       }
     });
-  }, [branchSales, branches, search, customerFilter, selectedRegionIds, icWarehouses, sortField, sortOrder, branchName, range]);
+  }, [branchSales, branches, search, customerFilter, selectedRegionIds, icWarehouses, sortField, sortOrder, branchName, range, saleProfits]);
 
   const handleHeaderClick = (column: string) => {
     const key = column.toLowerCase().replace(/\s/g, '');
@@ -364,12 +416,13 @@ export default function ICTransferBranch() {
         {filteredSales.map((s) => (
           <tr key={s.id} onClick={() => handleView(s)} className="cursor-pointer hover:bg-slate-50/50 transition-colors border-b border-slate-100 last:border-0 group">
             <td className={icTdClass('left')}>{new Date(s.createdAt || '').toLocaleDateString()}</td>
-            <td className={icTdClass('left')}><span className="font-mono text-slate-500">{getFormattedTxnId(s.id, 'sale', s, branches, branchName)}</span></td>
             <td className={icTdClass('left')}><span className="font-semibold text-slate-900">{getOrderCustomer(s)}</span></td>
             <td className={icTdClass('left')}>
-              {s.settlementMode === 'metal' ? 'Metal' : 'IC'}
+              <span className="text-xs font-medium text-slate-700">
+                {formatSettlementModeLabel(s.settlementMode, s.metalPaymentMethod)}
+              </span>
             </td>
-            <td className={icTdClass('right')}>{s.units.toLocaleString()}</td>
+            <td className={icTdClass('right')}>{s.settlementMode === 'metal' ? '—' : s.units.toLocaleString()}</td>
             <td className={icTdClass('right')}>
               {s.settlementMode === 'metal'
                 ? (s.metalWeightG ?? 0).toLocaleString('en-US', { maximumFractionDigits: 4 })
@@ -378,7 +431,11 @@ export default function ICTransferBranch() {
             <td className={icTdClass('right')}>
               <span className="font-mono tabular-nums text-indigo-900">{formatDealTableInr(saleDealInr(s))}</span>
             </td>
+            <td className={icTdClass('right')}>{formatDealTableSheetRate(saleDealSheetRate(s))}</td>
             <td className={icTdClass('right')}><span className="font-bold text-slate-900">{formatDealTableAed(saleTableDisplayAed(s))}</span></td>
+            <td className={icTdClass('right')}>{formatDealTableSplitPaidInr(s)}</td>
+            <td className={icTdClass('right')}>{formatDealTableSplitPaidAed(s)}</td>
+            <td className={icTdClass('right')}>{formatSaleLineProfit(saleProfits.get(s.id))}</td>
             <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
               <BranchOrderStatusCell sale={s} />
             </td>

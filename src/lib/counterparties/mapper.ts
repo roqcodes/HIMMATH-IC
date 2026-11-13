@@ -1,5 +1,9 @@
 import type { ICSupplier } from '@/types';
-import { normalizeCounterpartyRoles, type CounterpartyRole } from '@/lib/counterparties/roles';
+import {
+  normalizeCounterpartyKind,
+  normalizeCounterpartyRoles,
+  type CounterpartyRole,
+} from '@/lib/counterparties/roles';
 
 /** Unified trading partner (payable on purchase, receivable on sale). */
 export type ICCounterparty = ICSupplier & {
@@ -9,7 +13,7 @@ export type ICCounterparty = ICSupplier & {
 
 export const COUNTERPARTY_SELECT =
   `id, name, code, phone, commission, region_id, email, address, country, subdivision, locality,
-   branch_id, status, roles, opening_aed, opening_inr, created_at`;
+   branch_id, status, kind, home_manager_id, roles, opening_aed, opening_inr, created_at`;
 
 export function mapICCounterpartyRow(row: Record<string, unknown>): ICCounterparty {
   return {
@@ -26,6 +30,8 @@ export function mapICCounterpartyRow(row: Record<string, unknown>): ICCounterpar
     locality: row.locality ? String(row.locality) : undefined,
     branchId: row.branch_id ? String(row.branch_id) : undefined,
     status: row.status === 'inactive' ? 'inactive' : 'active',
+    kind: normalizeCounterpartyKind(row.kind),
+    homeManagerId: row.home_manager_id ? String(row.home_manager_id) : undefined,
     roles: normalizeCounterpartyRoles(row.roles),
     openingAed: row.opening_aed != null ? Number(row.opening_aed) : 0,
     openingInr: row.opening_inr != null ? Number(row.opening_inr) : 0,

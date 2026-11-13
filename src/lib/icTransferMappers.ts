@@ -1,4 +1,5 @@
 import {
+  ICBranch,
   ICRegion,
   ICSupplier,
   ICWarehouse,
@@ -9,8 +10,26 @@ import {
   ICWarehouseTransaction,
 } from '@/types';
 import { resolvePurchaseInrDisplay } from '@/lib/icTransfer/metalSettlement';
+import { normalizeMetalPaymentMethod } from '@/lib/domain/books';
 import { labFieldsFromRecord } from '@/lib/icTransfer/labTest';
 import { mapICCounterpartyRow } from '@/lib/counterparties/mapper';
+import { parseManagerIdsFromRow } from '@/lib/icTransfer/warehouseQueries';
+
+export function mapICBranchRow(row: Record<string, unknown>): ICBranch {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    code: row.code ? String(row.code) : undefined,
+    phone: row.phone ? String(row.phone) : undefined,
+    email: row.email ? String(row.email) : undefined,
+    address: row.address ? String(row.address) : undefined,
+    timezone: row.timezone ? String(row.timezone) : undefined,
+    cashBalance: row.cash_balance != null ? Number(row.cash_balance) : 0,
+    status: row.status === 'inactive' ? 'inactive' : 'active',
+    managerIds: parseManagerIdsFromRow(row),
+    createdAt: row.created_at ? new Date(String(row.created_at)).toISOString() : undefined,
+  };
+}
 
 export function mapICRegionRow(row: any): ICRegion {
   return {
@@ -45,6 +64,8 @@ export function mapICWarehouseRow(row: any): ICWarehouse {
     openingAed: row.opening_aed != null ? parseFloat(row.opening_aed) : 0,
     openingInr: row.opening_inr != null ? parseFloat(row.opening_inr) : 0,
     sendDeliveryProofToCustomer: row.send_delivery_proof_to_customer !== false,
+    deskKind: row.desk_kind === 'branch' ? 'branch' : 'warehouse',
+    managerIds: parseManagerIdsFromRow(row),
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : undefined,
   };
 }
@@ -92,6 +113,7 @@ export function mapICPurchaseRow(row: any): ICPurchase {
   return {
     id: row.id,
     counterpartyId: row.counterparty_id ? String(row.counterparty_id) : undefined,
+    managerId: row.manager_id ? String(row.manager_id) : undefined,
     supplierId: row.supplier_id ? String(row.supplier_id) : undefined,
     locationId: row.location_id,
     warehouseId: row.warehouse_id,
@@ -103,8 +125,10 @@ export function mapICPurchaseRow(row: any): ICPurchase {
     metalRateAedPerG: row.metal_rate_aed_per_g != null ? parseFloat(row.metal_rate_aed_per_g) : null,
     inrTotal,
     metalPaymentMethod: row.metal_payment_method
-      ? (String(row.metal_payment_method) === 'AED' ? 'AED' : 'CASH')
+      ? normalizeMetalPaymentMethod(String(row.metal_payment_method))
       : null,
+    splitInrPaid: row.split_inr_paid != null ? parseFloat(row.split_inr_paid) : null,
+    splitAedPaid: row.split_aed_paid != null ? parseFloat(row.split_aed_paid) : null,
     aedAgentId: row.aed_agent_id ? String(row.aed_agent_id) : null,
     aedAgentCounterpartyId: row.aed_agent_counterparty_id
       ? String(row.aed_agent_counterparty_id)
@@ -142,6 +166,7 @@ export function mapICSaleRow(row: any): ICSale {
     orderCustomerName: row.order_customer_name || undefined,
     orderCustomerId: row.order_customer_id || undefined,
     counterpartyId: row.counterparty_id ? String(row.counterparty_id) : undefined,
+    managerId: row.manager_id ? String(row.manager_id) : undefined,
     subCustomerId: row.sub_customer_id || undefined,
     subCustomerName: row.sub_customer_name || undefined,
     warehouseId: row.warehouse_id,
@@ -154,12 +179,11 @@ export function mapICSaleRow(row: any): ICSale {
     metalRateAedPerG: row.metal_rate_aed_per_g != null ? parseFloat(row.metal_rate_aed_per_g) : null,
     inrTotal,
     metalPurchaseId: row.metal_purchase_id ? String(row.metal_purchase_id) : null,
-    metalPaymentMethod:
-      row.metal_payment_method === 'AED'
-        ? 'AED'
-        : row.metal_payment_method === 'CASH' || row.metal_payment_method === 'INR'
-          ? 'CASH'
-          : null,
+    metalPaymentMethod: row.metal_payment_method
+      ? normalizeMetalPaymentMethod(String(row.metal_payment_method))
+      : null,
+    splitInrPaid: row.split_inr_paid != null ? parseFloat(row.split_inr_paid) : null,
+    splitAedPaid: row.split_aed_paid != null ? parseFloat(row.split_aed_paid) : null,
     aedAgentId: row.aed_agent_id ? String(row.aed_agent_id) : null,
     aedAgentCounterpartyId: row.aed_agent_counterparty_id
       ? String(row.aed_agent_counterparty_id)

@@ -24,7 +24,7 @@ function formatIcAvgAedRate(rate: number): string {
   });
 }
 
-function KpiCell({
+export function WarehouseKpiCell({
   label,
   value,
   tone = 'default',
@@ -85,7 +85,7 @@ export default function WarehouseInventoryKpiGrid({ metrics, books, rangeLabel }
       {/* Container 1: Inventory & Transactions */}
       <section className={`${icfCard} overflow-hidden`} aria-label="Inventory & Transactions">
         <div className="grid grid-cols-2 divide-x divide-y divide-slate-100 border-b border-slate-100 dark:divide-slate-800 dark:border-slate-800 sm:grid-cols-3 lg:grid-cols-6">
-          <KpiCell
+          <WarehouseKpiCell
             label="IC Purchases"
             value={<FmtLedgerInr amount={metrics.cashPurchaseInr} />}
             tone="red"
@@ -98,7 +98,7 @@ export default function WarehouseInventoryKpiGrid({ metrics, books, rangeLabel }
               ) : null
             }
           />
-          <KpiCell
+          <WarehouseKpiCell
             label="IC Sales"
             value={<FmtLedgerInr amount={metrics.cashSaleInr} />}
             tone="emerald"
@@ -111,7 +111,7 @@ export default function WarehouseInventoryKpiGrid({ metrics, books, rangeLabel }
               ) : null
             }
           />
-          <KpiCell
+          <WarehouseKpiCell
             label="IC Stock"
             value={<FmtLedgerInr amount={metrics.currentStock * INR_PER_UNIT} />}
             sub={
@@ -131,19 +131,19 @@ export default function WarehouseInventoryKpiGrid({ metrics, books, rangeLabel }
             }
           />
 
-          <KpiCell 
+          <WarehouseKpiCell 
             label="Metal Purchases" 
             value={<FmtLedgerInr amount={metrics.metalPurchaseInr} />} 
             tone="red"
             count={metrics.metalPurchases}
           />
-          <KpiCell 
+          <WarehouseKpiCell 
             label="Metal Sales" 
             value={<FmtLedgerInr amount={metrics.metalSaleInr} />} 
             tone="emerald"
             count={metrics.metalSales}
           />
-          <KpiCell
+          <WarehouseKpiCell
             label="Metal Stock"
             value={
               <span className="flex flex-col gap-0.5">
@@ -191,22 +191,22 @@ export default function WarehouseInventoryKpiGrid({ metrics, books, rangeLabel }
         
         {/* AED Row */}
         <div className="grid grid-cols-2 divide-x divide-slate-100 border-b border-slate-100 dark:divide-slate-800 dark:border-slate-800 sm:grid-cols-4">
-          <KpiCell
+          <WarehouseKpiCell
             label="AED Opening"
             value={signedLedgerAmountNode('AED', books.aed.opening)}
             tone="slate"
           />
-          <KpiCell 
+          <WarehouseKpiCell 
             label="AED Purchases (Dr)" 
             value={<FmtLedgerAed amount={books.aed.periodDebit} />} 
             tone="red"
           />
-          <KpiCell 
+          <WarehouseKpiCell 
             label="AED Sales (Cr)" 
             value={<FmtLedgerAed amount={books.aed.periodCredit} />} 
             tone="emerald"
           />
-          <KpiCell
+          <WarehouseKpiCell
             label="AED Closing"
             value={signedLedgerAmountNode('AED', books.aed.closing)}
             tone={
@@ -221,22 +221,22 @@ export default function WarehouseInventoryKpiGrid({ metrics, books, rangeLabel }
 
         {/* INR Row */}
         <div className="grid grid-cols-2 divide-x divide-slate-100 dark:divide-slate-800 sm:grid-cols-4">
-          <KpiCell 
+          <WarehouseKpiCell 
             label="INR Opening" 
             value={<FmtLedgerInr amount={books.inr.opening} />} 
             tone="slate"
           />
-          <KpiCell 
+          <WarehouseKpiCell 
             label="INR Purchases (Dr)" 
             value={<FmtLedgerInr amount={books.inr.periodDebit} />} 
             tone="red"
           />
-          <KpiCell 
+          <WarehouseKpiCell 
             label="INR Sales (Cr)" 
             value={<FmtLedgerInr amount={books.inr.periodCredit} />} 
             tone="emerald"
           />
-          <KpiCell 
+          <WarehouseKpiCell 
             label="INR Closing" 
             value={<FmtLedgerInr amount={books.inr.closing} />} 
             tone={books.inr.closing >= 0 ? 'emerald' : 'red'}

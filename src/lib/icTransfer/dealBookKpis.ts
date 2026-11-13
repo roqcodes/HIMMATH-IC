@@ -1,4 +1,6 @@
+import { roundMoney } from '@/lib/icFunds/currencyPolicy';
 import { isMetalAedPayment } from '@/lib/domain/books';
+import { bookedMetalAed, bookedMetalInr } from '@/lib/icTransfer/metalSplit';
 import { isDateInRange, type DateFilterRange } from '@/lib/dateFilterRange';
 import type { LedgerFlowSnapshot } from '@/lib/icFunds/ledgerKpiMetrics';
 import { netMetalInr } from '@/lib/icTransfer/labTest';
@@ -36,41 +38,54 @@ function metalAgentAedNetOfLab(
   const aed = Number(storedAed) || 0;
   if (aed <= 0 || gross <= 0) return aed;
   const netInr = netMetalInr(gross, Number(labTotalInr) || 0);
-  return Number(((aed * netInr) / gross).toFixed(4));
+  return roundMoney((aed * netInr) / gross);
 }
 
-/** AED cash IC + metal paid via AED agent. Cash-metal AED is ignored. */
+/** AED cash IC + metal paid via AED agent / split AED leg. Cash-metal AED is ignored. */
 export function dealPurchaseAed(p: ICPurchase): number {
-  if (p.settlementMode === 'metal' && !isMetalAedPayment(p.metalPaymentMethod)) return 0;
-  const raw = Number(p.aedTotal) || 0;
-  if (p.settlementMode === 'metal' && isMetalAedPayment(p.metalPaymentMethod)) {
-    return metalAgentAedNetOfLab(raw, p.inrTotal, p.labTotalInr);
+  if (p.settlementMode !== 'metal') return Number(p.aedTotal) || 0;
+  if (isMetalAedPayment(p.metalPaymentMethod)) {
+    return metalAgentAedNetOfLab(Number(p.aedTotal) || 0, p.inrTotal, p.labTotalInr);
   }
-  return raw;
+  return bookedMetalAed({
+    paymentMethod: p.metalPaymentMethod,
+    aedTotal: p.aedTotal,
+    splitAedPaid: p.splitAedPaid,
+  });
 }
 
-/** Cash-metal INR payable only (net of lab). AED-agent metal INR is a rate memo, not a liability. */
+/** Cash-metal / split INR payable only (net of lab). AED-agent metal INR is a rate memo, not a liability. */
 export function dealPurchaseInr(p: ICPurchase): number {
   if (p.settlementMode !== 'metal') return 0;
-  if (isMetalAedPayment(p.metalPaymentMethod)) return 0;
-  return netMetalInr(Number(p.inrTotal) || 0, Number(p.labTotalInr) || 0);
+  return bookedMetalInr({
+    paymentMethod: p.metalPaymentMethod,
+    inrTotal: p.inrTotal,
+    labTotalInr: p.labTotalInr,
+    splitInrPaid: p.splitInrPaid,
+  });
 }
 
 export function dealSaleAed(s: ICSale): number {
-  if (s.settlementMode === 'metal' && !isMetalAedPayment(s.metalPaymentMethod)) {
-    return 0;
-  }
   const raw = (Number(s.aedAmount) || 0) + (Number(s.serviceCharge) || 0);
-  if (s.settlementMode === 'metal' && isMetalAedPayment(s.metalPaymentMethod)) {
+  if (s.settlementMode !== 'metal') return raw;
+  if (isMetalAedPayment(s.metalPaymentMethod)) {
     return metalAgentAedNetOfLab(raw, s.inrTotal, s.labTotalInr);
   }
-  return raw;
+  return bookedMetalAed({
+    paymentMethod: s.metalPaymentMethod,
+    aedTotal: raw,
+    splitAedPaid: s.splitAedPaid,
+  });
 }
 
 export function dealSaleInr(s: ICSale): number {
   if (s.settlementMode !== 'metal') return 0;
-  if (isMetalAedPayment(s.metalPaymentMethod)) return 0;
-  return netMetalInr(Number(s.inrTotal) || 0, Number(s.labTotalInr) || 0);
+  return bookedMetalInr({
+    paymentMethod: s.metalPaymentMethod,
+    inrTotal: s.inrTotal,
+    labTotalInr: s.labTotalInr,
+    splitInrPaid: s.splitInrPaid,
+  });
 }
 
 function buildCombinedBookSnapshot(
@@ -131,7 +146,7 @@ export function remainingCashMetalInrCost(
   for (const p of purchases) {
     if (p.settlementMode !== 'metal' || isMetalAedPayment(p.metalPaymentMethod)) continue;
     if (!include(txnDate(p.createdAt))) continue;
-    const net = dealPurchaseInr(p);
+    const net = netMetalInr(Number(p.inrTotal) || 0, Number(p.labTotalInr) || 0);
     if (net <= 0) continue;
     const soldG = sales.reduce((sum, s) => {
       if (!isCompletedMetalSale(s)) return sum;

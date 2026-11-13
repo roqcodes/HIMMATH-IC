@@ -59,6 +59,7 @@ import {
   type MetalWeightEvent,
   type WarehouseInventoryEvent,
 } from '@/lib/icFunds/warehouseProfit';
+import { resolveBranchTimeZone } from '@/lib/businessTime';
 import { queryMetalPlPeriodKpis } from '@/lib/icFunds/metalPlPeriodKpis';
 import type { ICFundProfitLossReport } from '@/lib/icFunds/plReportTypes';
 import {
@@ -69,7 +70,9 @@ import {
   type ICSettlementTradeReport,
 } from '@/lib/icFunds/settlementTradeReport';
 import { sqlExcludeVoidIcSales } from '@/lib/icFunds/icTransferReportFilters';
-import { isMetalAedPayment } from '@/lib/domain/books';
+import { isMetalAedPayment, normalizeMetalPaymentMethod } from '@/lib/domain/books';
+import { bookedMetalAed, bookedMetalInr } from '@/lib/icTransfer/metalSplit';
+import { syncICPurchaseToICFunds, syncICSaleToICFunds } from '@/lib/icFunds/icTransferFundSync';
 import {
   buildIcStockInventoryEvents,
   isDealSaleActive,
@@ -1272,6 +1275,82 @@ export async function listWarehouseDealVouchersAction(params: {
   }
 }
 
+/** HQ AED journals for branch desk customer deposits (reference ic_branch_deposit). */
+export async function listBranchDeskVouchersAction(params: {
+  icBranchId: string;
+  startDate?: string;
+  endDate?: string;
+  limit?: number;
+}): Promise<ICFundVoucher[]> {
+  const icBranchId = String(params.icBranchId || '').trim();
+  if (!icBranchId) return [];
+
+  const access = await requireICFundsAccess(HQ_IC_FUNDS_BRANCH_ID, 'read');
+  if (!access.ok) return [];
+
+  const limit = clampVoucherListLimit(params.limit ?? 500);
+  const startDate = params.startDate?.trim() || null;
+  const endDate = params.endDate?.trim() || null;
+
+  try {
+    const res = await query(
+      `SELECT ${VOUCHER_DETAIL_SELECT_COLUMNS}, 'AED'::text AS book
+       ${VOUCHER_FROM_SQL}
+       WHERE v.branch_id = $2
+         AND v.reference_type = 'ic_branch_deposit'
+         AND EXISTS (
+           SELECT 1 FROM ic_branch_deposits d
+           WHERE d.id::text = v.reference_id
+             AND d.ic_branch_id = $1::uuid
+         )
+         AND ($3::date IS NULL OR v.voucher_date >= $3::date)
+         AND ($4::date IS NULL OR v.voucher_date <= $4::date)
+         AND v.status IS DISTINCT FROM 'void'
+       ORDER BY v.voucher_date DESC, v.voucher_no DESC, v.created_at DESC
+       LIMIT $5`,
+      [icBranchId, HQ_IC_FUNDS_BRANCH_ID, startDate, endDate, limit],
+    );
+    return sortDealJournals(res.rows.map(r => mapVoucher(r as Record<string, unknown>)));
+  } catch (err) {
+    logger.error({ err, icBranchId }, 'Failed to list branch desk vouchers');
+    return [];
+  }
+}
+
+/** HQ till account auto-created for branch cash (Dr on customer deposits). */
+export async function resolveBranchTillAccountAction(
+  icBranchId: string,
+): Promise<{ id: string; name: string } | null> {
+  const branchLockerId = String(icBranchId || '').trim();
+  if (!branchLockerId) return null;
+  const access = await requireICFundsAccess(HQ_IC_FUNDS_BRANCH_ID, 'read');
+  if (!access.ok) return null;
+  try {
+    const { icBranchTillSourceIdsForLookup } = await import('@/lib/icFunds/icBranchTill');
+    const sourceIds = icBranchTillSourceIdsForLookup(branchLockerId);
+    const res = await query<{ id: string; name: string }>(
+      `SELECT id, name FROM ic_fund_accounts
+       WHERE branch_id = $1
+         AND (
+           (source_type = 'ic_branch' AND source_id = ANY($2::text[]))
+           OR (source_type = 'ic_system' AND source_id = ANY($2::text[]))
+         )
+       ORDER BY CASE
+         WHEN source_type = 'ic_branch' AND source_id = $3 THEN 0
+         WHEN source_id = $3 THEN 1
+         ELSE 2
+       END
+       LIMIT 1`,
+      [HQ_IC_FUNDS_BRANCH_ID, sourceIds, branchLockerId],
+    );
+    if (res.rows.length === 0) return null;
+    return { id: String(res.rows[0].id), name: String(res.rows[0].name) };
+  } catch (err) {
+    logger.error({ err, icBranchId: branchLockerId }, 'resolveBranchTillAccountAction');
+    return null;
+  }
+}
+
 const COUNTERPARTY_AED_SALE_REFERENCE_TYPES = ['ic_sale', 'ic_sale_cogs', 'ic_sale_profit', 'metal_sale_aed'] as const;
 const COUNTERPARTY_ACCOUNTING_REFERENCE_TYPES = [
   'ic_fund_payment',
@@ -1365,7 +1444,7 @@ export async function listCounterpartyDealVouchersAction(params: {
     )`;
   const dealIdSql = (alias: string) => `CAST(${alias}.id AS text) = CAST(v.reference_id AS text)`;
   const onPartyAccounts = `($6::varchar[] IS NOT NULL AND (v.debit_account_id = ANY($6::varchar[]) OR v.credit_account_id = ANY($6::varchar[])))`;
-  const onAccountingRef = `(v.reference_type = ANY($7::text[]) AND v.reference_id = $1)`;
+  const onAccountingRef = `(v.reference_type = ANY($7::text[]) AND v.reference_id = $1::text)`;
 
   const aedWhere = `(
       ${onPartyAccounts}
@@ -1394,13 +1473,18 @@ export async function listCounterpartyDealVouchersAction(params: {
         WHERE ${dealIdSql('s')} AND ${agentOnSale}
         ${dealDateSql('s')}
       ))
+      OR (v.reference_type = 'ic_branch_deposit' AND EXISTS (
+        SELECT 1 FROM ic_branch_deposits d
+        WHERE d.id::text = v.reference_id
+          AND (d.customer_id = $1::uuid OR d.manager_id = $1::uuid)
+      ))
     )`;
 
   try {
     const [aedAccounts, inrAccounts] = await Promise.all([
       loadAedCounterpartyAccounts(counterpartyId),
       query(
-        `SELECT id FROM inr_fund_accounts WHERE source_type = 'ic_counterparty' AND source_id = $1`,
+        `SELECT id FROM inr_fund_accounts WHERE source_type = 'ic_counterparty' AND source_id = $1::text`,
         [counterpartyId],
       ),
     ]);
@@ -1431,7 +1515,29 @@ export async function listCounterpartyDealVouchersAction(params: {
         `${INR_VOUCHER_DETAIL_SELECT_SQL}
          WHERE (
            ($4::varchar[] IS NOT NULL AND (v.debit_account_id = ANY($4::varchar[]) OR v.credit_account_id = ANY($4::varchar[])))
-           OR (v.reference_type = ANY($5::text[]) AND v.reference_id = $1)
+           OR (v.reference_type = ANY($5::text[]) AND v.reference_id = $1::text)
+           OR (
+             v.reference_type = 'metal_sale_profit'
+             AND EXISTS (
+               SELECT 1 FROM ic_sales s
+               WHERE s.counterparty_id = $1::uuid
+                 AND (
+                   CAST(s.id AS text) = CAST(v.reference_id AS text)
+                   OR CAST(v.reference_id AS text) LIKE (CAST(s.id AS text) || '#%')
+                 )
+             )
+           )
+           OR (
+             v.reference_type = 'metal_purchase_profit'
+             AND EXISTS (
+               SELECT 1 FROM ic_purchases p
+               WHERE p.counterparty_id = $1::uuid
+                 AND (
+                   CAST(p.id AS text) = CAST(v.reference_id AS text)
+                   OR CAST(v.reference_id AS text) LIKE (CAST(p.id AS text) || '#%')
+                 )
+             )
+           )
          )
            AND ($2::date IS NULL OR v.voucher_date >= $2::date)
            AND ($3::date IS NULL OR v.voucher_date <= $3::date)
@@ -1500,7 +1606,7 @@ async function loadAedCounterpartyAccounts(counterpartyId: string) {
      FROM ic_fund_accounts
      WHERE source_type IN ('ic_counterparty', 'ic_supplier', 'ic_customer')
        AND (
-         source_id = $1
+         source_id = $1::text
          OR source_id IN (
            SELECT 'aed_agent:' || id::text
            FROM ic_aed_agents
@@ -1534,8 +1640,8 @@ async function loadInrBookSnapshot(
   const acc = await query(
     `SELECT id, name, opening_balance
      FROM inr_fund_accounts
-     WHERE source_type = 'ic_counterparty' AND source_id = $1
-     LIMIT 1`,
+     WHERE source_type = 'ic_counterparty' AND source_id = $1::text
+     ORDER BY id`,
     [counterpartyId],
   );
   return finishBookSnapshot(acc.rows as Record<string, unknown>[], 'inr_fund_vouchers', startDate, endDate);
@@ -1610,7 +1716,75 @@ async function finishBookSnapshot(
   };
 }
 
+/** Re-sync split metal deals missing a party INR leg on the books. */
+export async function repairCounterpartyMetalLedgersAction(
+  counterpartyId: string,
+): Promise<{ purchases: number; sales: number }> {
+  const id = String(counterpartyId || '').trim();
+  if (!id) return { purchases: 0, sales: 0 };
+  try {
+    const user = await getSessionUser();
+    if (!user || user.role === 'customer') return { purchases: 0, sales: 0 };
+
+    const [purchaseRes, saleRes] = await Promise.all([
+      query<{ id: string }>(
+        `SELECT p.id::text AS id FROM ic_purchases p
+         WHERE p.settlement_mode = 'metal'
+           AND p.counterparty_id = $1::uuid
+           AND p.metal_payment_method = 'SPLIT'
+           AND COALESCE(p.split_inr_paid, 0) > 0
+           AND NOT EXISTS (
+             SELECT 1 FROM inr_fund_vouchers v
+             INNER JOIN inr_fund_accounts ca ON ca.id = v.credit_account_id
+             WHERE v.status = 'active'
+               AND v.reference_type = 'metal_purchase'
+               AND (
+                 v.reference_id = p.id::text
+                 OR v.reference_id LIKE p.id::text || '#%'
+               )
+               AND ca.source_type = 'ic_counterparty'
+               AND ca.source_id = $1::text
+           )`,
+        [id],
+      ),
+      query<{ id: string }>(
+        `SELECT s.id::text AS id FROM ic_sales s
+         WHERE s.settlement_mode = 'metal'
+           AND COALESCE(s.order_status, '') = 'completed'
+           AND s.metal_payment_method = 'SPLIT'
+           AND COALESCE(s.split_inr_paid, 0) > 0
+           AND s.counterparty_id = $1::uuid`,
+        [id],
+      ),
+    ]);
+
+    let purchases = 0;
+    let sales = 0;
+    for (const row of purchaseRes.rows) {
+      try {
+        await syncICPurchaseToICFunds(String(row.id));
+        purchases += 1;
+      } catch (err) {
+        logger.error({ err, purchaseId: row.id, counterpartyId: id }, 'repairCounterpartyMetalLedgers purchase');
+      }
+    }
+    for (const row of saleRes.rows) {
+      try {
+        await syncICSaleToICFunds(String(row.id));
+        sales += 1;
+      } catch (err) {
+        logger.error({ err, saleId: row.id, counterpartyId: id }, 'repairCounterpartyMetalLedgers sale');
+      }
+    }
+    return { purchases, sales };
+  } catch (err) {
+    logger.error({ err, counterpartyId: id }, 'repairCounterpartyMetalLedgersAction');
+    return { purchases: 0, sales: 0 };
+  }
+}
+
 /** Opening / period Dr-Cr / closing for this counterparty on AED and INR books. */
+
 export async function getCounterpartyLedgerKpisAction(params: {
   counterpartyId: string;
   startDate?: string;
@@ -2319,7 +2493,8 @@ export async function getICFundAccountDetailAction(params: {
       const purchases = await query(
         `SELECT p.id, p.created_at, p.units, p.aed_total,
                 COALESCE(p.metal_payment_method, p.payment_method) AS payment_method,
-                p.settlement_mode, p.inr_total, p.lab_total_inr, w.name AS warehouse_name
+                p.settlement_mode, p.inr_total, p.lab_total_inr,
+                p.split_inr_paid, p.split_aed_paid, w.name AS warehouse_name
          FROM ic_purchases p
          LEFT JOIN ic_warehouses w ON w.id = p.warehouse_id
          WHERE ${RELATED_PURCHASE_PARTY_SQL}
@@ -2327,46 +2502,75 @@ export async function getICFundAccountDetailAction(params: {
          LIMIT 100`,
         [account.sourceId],
       );
-      detail.relatedPurchases = purchases.rows.map(row => ({
-        id: String(row.id),
-        date: row.created_at ? String(row.created_at) : '',
-        units: Number(row.units) || 0,
-        aedAmount:
-          row.settlement_mode === 'metal' && !isMetalAedPayment(row.payment_method)
-            ? 0
+      detail.relatedPurchases = purchases.rows.map(row => {
+        const paymentMethod = row.payment_method ? String(row.payment_method) : undefined;
+        const isMetal = row.settlement_mode === 'metal';
+        return {
+          id: String(row.id),
+          date: row.created_at ? String(row.created_at) : '',
+          units: Number(row.units) || 0,
+          aedAmount: isMetal
+            ? bookedMetalAed({
+                paymentMethod,
+                aedTotal: row.aed_total,
+                splitAedPaid: row.split_aed_paid,
+              })
             : Number(row.aed_total) || 0,
-        inrTotal:
-          row.inr_total != null
-            ? row.settlement_mode === 'metal'
-              ? netMetalInr(Number(row.inr_total) || 0, Number(row.lab_total_inr) || 0)
-              : Number(row.inr_total)
-            : undefined,
-        settlementMode: row.settlement_mode === 'metal' ? 'metal' : 'cash',
-        paymentMethod: row.payment_method ? String(row.payment_method) : undefined,
-        warehouseName: row.warehouse_name ? String(row.warehouse_name) : undefined,
-      })) as ICFundAccountRelatedPurchase[];
+          inrTotal:
+            row.inr_total != null
+              ? isMetal
+                ? bookedMetalInr({
+                    paymentMethod,
+                    inrTotal: row.inr_total,
+                    labTotalInr: row.lab_total_inr,
+                    splitInrPaid: row.split_inr_paid,
+                  })
+                : Number(row.inr_total)
+              : undefined,
+          settlementMode: isMetal ? 'metal' : 'cash',
+          paymentMethod,
+          warehouseName: row.warehouse_name ? String(row.warehouse_name) : undefined,
+        };
+      }) as ICFundAccountRelatedPurchase[];
 
       const sales = await query(
         `SELECT s.id, s.created_at, s.units, s.aed_amount, s.order_status, s.payment_status, s.order_customer_name,
-                s.settlement_mode, s.metal_payment_method
+                s.settlement_mode, s.metal_payment_method, s.inr_total, s.lab_total_inr,
+                s.split_inr_paid, s.split_aed_paid
          FROM ic_sales s
          WHERE ${RELATED_SALE_PARTY_SQL}
          ORDER BY s.created_at DESC
          LIMIT 100`,
         [account.sourceId],
       );
-      detail.relatedSales = sales.rows.map(row => ({
-        id: String(row.id),
-        date: row.created_at ? String(row.created_at) : '',
-        units: Number(row.units) || 0,
-        aedAmount:
-          row.settlement_mode === 'metal' && !isMetalAedPayment(row.metal_payment_method)
-            ? 0
+      detail.relatedSales = sales.rows.map(row => {
+        const paymentMethod = row.metal_payment_method ? String(row.metal_payment_method) : undefined;
+        const isMetal = row.settlement_mode === 'metal';
+        return {
+          id: String(row.id),
+          date: row.created_at ? String(row.created_at) : '',
+          units: Number(row.units) || 0,
+          aedAmount: isMetal
+            ? bookedMetalAed({
+                paymentMethod,
+                aedTotal: row.aed_amount,
+                splitAedPaid: row.split_aed_paid,
+              })
             : Number(row.aed_amount) || 0,
-        orderStatus: row.order_status ? String(row.order_status) : undefined,
-        paymentStatus: row.payment_status ? String(row.payment_status) : undefined,
-        customerName: row.order_customer_name ? String(row.order_customer_name) : undefined,
-      })) as ICFundAccountRelatedSale[];
+          inrTotal:
+            row.inr_total != null && isMetal
+              ? bookedMetalInr({
+                  paymentMethod,
+                  inrTotal: row.inr_total,
+                  labTotalInr: row.lab_total_inr,
+                  splitInrPaid: row.split_inr_paid,
+                })
+              : undefined,
+          orderStatus: row.order_status ? String(row.order_status) : undefined,
+          paymentStatus: row.payment_status ? String(row.payment_status) : undefined,
+          customerName: row.order_customer_name ? String(row.order_customer_name) : undefined,
+        };
+      }) as ICFundAccountRelatedSale[];
 
       const supplier = await query(
         `SELECT cp.commission
@@ -2388,25 +2592,42 @@ export async function getICFundAccountDetailAction(params: {
     if (account.sourceType === 'ic_warehouse' && account.sourceId) {
       const sales = await query(
         `SELECT id, created_at, units, aed_amount, order_status, payment_status, order_customer_name,
-                settlement_mode, metal_payment_method
+                settlement_mode, metal_payment_method, inr_total, lab_total_inr,
+                split_inr_paid, split_aed_paid
          FROM ic_sales
          WHERE warehouse_id = $1
          ORDER BY created_at DESC
          LIMIT 100`,
         [account.sourceId],
       );
-      detail.relatedSales = sales.rows.map(row => ({
-        id: String(row.id),
-        date: row.created_at ? String(row.created_at) : '',
-        units: Number(row.units) || 0,
-        aedAmount:
-          row.settlement_mode === 'metal' && !isMetalAedPayment(row.metal_payment_method)
-            ? 0
+      detail.relatedSales = sales.rows.map(row => {
+        const paymentMethod = row.metal_payment_method ? String(row.metal_payment_method) : undefined;
+        const isMetal = row.settlement_mode === 'metal';
+        return {
+          id: String(row.id),
+          date: row.created_at ? String(row.created_at) : '',
+          units: Number(row.units) || 0,
+          aedAmount: isMetal
+            ? bookedMetalAed({
+                paymentMethod,
+                aedTotal: row.aed_amount,
+                splitAedPaid: row.split_aed_paid,
+              })
             : Number(row.aed_amount) || 0,
-        orderStatus: row.order_status ? String(row.order_status) : undefined,
-        paymentStatus: row.payment_status ? String(row.payment_status) : undefined,
-        customerName: row.order_customer_name ? String(row.order_customer_name) : undefined,
-      })) as ICFundAccountRelatedSale[];
+          inrTotal:
+            row.inr_total != null && isMetal
+              ? bookedMetalInr({
+                  paymentMethod,
+                  inrTotal: row.inr_total,
+                  labTotalInr: row.lab_total_inr,
+                  splitInrPaid: row.split_inr_paid,
+                })
+              : undefined,
+          orderStatus: row.order_status ? String(row.order_status) : undefined,
+          paymentStatus: row.payment_status ? String(row.payment_status) : undefined,
+          customerName: row.order_customer_name ? String(row.order_customer_name) : undefined,
+        };
+      }) as ICFundAccountRelatedSale[];
 
       const warehouse = await query(`SELECT current_stock FROM ic_warehouses WHERE id = $1 LIMIT 1`, [
         account.sourceId,
@@ -2822,8 +3043,9 @@ export async function getICFundProfitLossReportAction(
     const tzRes = await query(`SELECT timezone FROM branches WHERE id = $1 LIMIT 1`, [
       parsed.data.branchId,
     ]);
-    const branchTimeZone =
-      tzRes.rows[0]?.timezone != null ? String(tzRes.rows[0].timezone) : null;
+    const branchTimeZone = resolveBranchTimeZone(
+      tzRes.rows[0]?.timezone != null ? String(tzRes.rows[0].timezone) : null,
+    );
 
     const [accountLedgers, periodPL, metalPl] = await Promise.all([
       fetchAccountPeriodLedgers(parsed.data.branchId, startDate, endDate),
@@ -2990,7 +3212,7 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
         saleInr: number;
         saleAed: number;
         lotId: string | null;
-        paymentMethod: 'INR' | 'AED';
+        paymentMethod: 'INR' | 'AED' | 'SPLIT';
       }>
     >();
 
@@ -3123,7 +3345,7 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
           serviceCharge: Number(row.service_charge) || 0,
           collectedUnits: row.collected_units != null ? Number(row.collected_units) : undefined,
           settlementMode: 'metal',
-          metalPaymentMethod: isMetalAedPayment(row.metal_payment_method) ? 'AED' : 'CASH',
+          metalPaymentMethod: normalizeMetalPaymentMethod(row.metal_payment_method),
           metalWeightG: Number(row.metal_weight_g) || 0,
           metalPurchaseId: row.metal_purchase_id ? String(row.metal_purchase_id) : null,
           orderStatus: 'completed',
@@ -3142,7 +3364,12 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
           saleInr: netMetalInr(Number(row.inr_total) || 0, Number(row.lab_total_inr) || 0),
           saleAed: (Number(row.aed_amount) || 0) + (Number(row.service_charge) || 0),
           lotId: row.metal_purchase_id ? String(row.metal_purchase_id) : null,
-          paymentMethod: isMetalAedPayment(row.metal_payment_method) ? 'AED' : 'INR',
+          paymentMethod:
+            tradeLinePaymentFromDb(row.metal_payment_method) === 'SPLIT'
+              ? 'SPLIT'
+              : normalizeMetalPaymentMethod(row.metal_payment_method) === 'AED'
+                ? 'AED'
+                : 'INR',
         });
         metalSalesByWarehouse.set(warehouseId, metalSales);
         continue;
@@ -3314,8 +3541,14 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
         if (periodStartMs != null && saleMs < periodStartMs) continue;
         if (periodEndMs != null && saleMs > periodEndMs) continue;
         const lot = sale.lotId ? metalLots.get(sale.lotId) : undefined;
+        const salePay =
+          sale.paymentMethod === 'AED'
+            ? 'AED'
+            : sale.paymentMethod === 'SPLIT'
+              ? 'SPLIT'
+              : 'CASH';
         const pl = computeMetalLotProfit({
-          paymentMethod: sale.paymentMethod === 'AED' ? 'AED' : 'CASH',
+          paymentMethod: salePay,
           purchasePaymentMethod: lot?.paymentMethod ?? undefined,
           weightG: sale.saleG,
           purchaseInr: lot
@@ -3512,6 +3745,8 @@ export async function getICSettlementTradeReportAction(params: unknown): Promise
          p.metal_rate_aed_per_g,
          p.payment_method,
          p.metal_payment_method,
+         p.split_inr_paid,
+         p.split_aed_paid,
          p.payment_status,
          p.notes,
          s.name AS supplier_name,
@@ -3546,6 +3781,8 @@ export async function getICSettlementTradeReportAction(params: unknown): Promise
          s.metal_rate_inr_per_g,
          s.metal_rate_aed_per_g,
          s.metal_payment_method,
+         s.split_inr_paid,
+         s.split_aed_paid,
          s.metal_purchase_id,
          s.payment_status,
          s.order_status,
@@ -3619,6 +3856,8 @@ export async function getICSettlementTradeReportAction(params: unknown): Promise
         settlementLabel,
         metalPaymentMethod:
           settlementMode === 'metal' ? tradeLinePaymentFromDb(row.metal_payment_method) : undefined,
+        splitInrPaid: row.split_inr_paid != null ? Number(row.split_inr_paid) : undefined,
+        splitAedPaid: row.split_aed_paid != null ? Number(row.split_aed_paid) : undefined,
         paymentMethod: row.payment_method ? String(row.payment_method) : undefined,
         paymentStatus: row.payment_status ? String(row.payment_status) : undefined,
         notes: row.notes ? String(row.notes) : undefined,
@@ -3647,9 +3886,13 @@ export async function getICSettlementTradeReportAction(params: unknown): Promise
       const pl =
         settlementMode === 'metal'
           ? computeMetalLotProfit({
-              paymentMethod: salePay === 'INR' ? 'CASH' : 'AED',
+              paymentMethod: salePay === 'INR' ? 'CASH' : salePay === 'SPLIT' ? 'SPLIT' : 'AED',
               purchasePaymentMethod:
-                tradeLinePaymentFromDb(row.lot_payment_method) === 'INR' ? 'CASH' : 'AED',
+                tradeLinePaymentFromDb(row.lot_payment_method) === 'INR'
+                  ? 'CASH'
+                  : tradeLinePaymentFromDb(row.lot_payment_method) === 'SPLIT'
+                    ? 'SPLIT'
+                    : 'AED',
               weightG: saleG,
               purchaseInr: allocateMetalLotCostInr(
                 {
@@ -3696,6 +3939,8 @@ export async function getICSettlementTradeReportAction(params: unknown): Promise
         metalRateAedPerG: row.metal_rate_aed_per_g != null ? Number(row.metal_rate_aed_per_g) : undefined,
         settlementLabel,
         metalPaymentMethod: settlementMode === 'metal' ? salePay : undefined,
+        splitInrPaid: row.split_inr_paid != null ? Number(row.split_inr_paid) : undefined,
+        splitAedPaid: row.split_aed_paid != null ? Number(row.split_aed_paid) : undefined,
         bookedProfit: pl?.bookedProfit,
         bookedCurrency: pl?.bookedCurrency,
         bookedProfitAed: pl?.bookedProfitAed,

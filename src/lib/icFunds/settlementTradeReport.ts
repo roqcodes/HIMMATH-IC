@@ -1,4 +1,5 @@
-import { isMetalAedPayment } from '@/lib/domain/books';
+import { roundMoney } from '@/lib/icFunds/currencyPolicy';
+import { isMetalAedPayment, isMetalSplitPayment, normalizeMetalPaymentMethod } from '@/lib/domain/books';
 import { computeIcCashRateFromTotals } from '@/lib/icTransfer/rateCalculations';
 import type { ICSettlementMode } from '@/lib/icTransfer/metalSettlement';
 
@@ -21,7 +22,9 @@ export type ICSettlementTradeLine = {
   metalRateInrPerG?: number;
   metalRateAedPerG?: number;
   settlementLabel: string;
-  metalPaymentMethod?: 'INR' | 'AED';
+  metalPaymentMethod?: 'INR' | 'AED' | 'SPLIT';
+  splitInrPaid?: number;
+  splitAedPaid?: number;
   bookedProfit?: number;
   bookedCurrency?: 'AED' | 'INR';
   bookedProfitAed?: number;
@@ -55,29 +58,37 @@ export type ICSettlementTradeReport = {
   summary: ICSettlementTradeSummary;
 };
 
-function round2(n: number): number {
-  return Number((Number.isFinite(n) ? n : 0).toFixed(2));
+function money(n: number): number {
+  return roundMoney(Number.isFinite(n) ? n : 0);
 }
 
-function round4(n: number): number {
+function roundQty(n: number): number {
   return Number((Number.isFinite(n) ? n : 0).toFixed(4));
 }
 
-/** Cash-metal INR only. AED-agent INR is a rate memo. */
+function roundRate(n: number): number {
+  return Number((Number.isFinite(n) ? n : 0).toFixed(4));
+}
+
+/** Cash-metal / split INR. AED-agent INR is a rate memo. */
 export function tradeLineBookInr(row: ICSettlementTradeLine): number {
+  if (row.metalPaymentMethod === 'SPLIT') return Number(row.splitInrPaid) || 0;
   if (row.metalPaymentMethod === 'AED' || isMetalAedPayment(row.metalPaymentMethod)) return 0;
   return Number(row.inrTotal) || 0;
 }
 
-/** Cash IC + metal AED. Cash-metal AED is ignored. */
+/** Cash IC + metal AED / split AED. Cash-metal AED is ignored. */
 export function tradeLineBookAed(row: ICSettlementTradeLine): number {
+  if (row.metalPaymentMethod === 'SPLIT') return Number(row.splitAedPaid) || 0;
   if (row.metalPaymentMethod === 'INR') return 0;
   return Number(row.aedTotal) || 0;
 }
 
-export function tradeLinePaymentFromDb(value: unknown): 'INR' | 'AED' | undefined {
+export function tradeLinePaymentFromDb(value: unknown): 'INR' | 'AED' | 'SPLIT' | undefined {
   if (value == null || String(value).trim() === '') return undefined;
-  return isMetalAedPayment(String(value)) ? 'AED' : 'INR';
+  const pay = normalizeMetalPaymentMethod(String(value));
+  if (pay === 'SPLIT') return 'SPLIT';
+  return pay === 'AED' ? 'AED' : 'INR';
 }
 
 /**
@@ -90,11 +101,11 @@ export function resolveTradeUnitRateAed(
   _inrNotional?: number | null,
 ): number {
   const rate = Number(unitRate);
-  if (Number.isFinite(rate) && rate > 0) return round4(rate);
+  if (Number.isFinite(rate) && rate > 0) return roundRate(rate);
   const u = Number(units);
   const aed = Number(aedTotal);
   if (Number.isFinite(u) && u > 0 && Number.isFinite(aed) && aed > 0) {
-    return round4(computeIcCashRateFromTotals(u, aed));
+    return roundRate(computeIcCashRateFromTotals(u, aed));
   }
   return 0;
 }
@@ -123,25 +134,33 @@ export function summarizeSettlementTrades(
   return {
     purchaseCount: purchases.length,
     saleCount: sales.length,
-    purchaseUnits: round4(purchaseUnits),
-    saleUnits: round4(saleUnits),
-    purchaseAed: round2(purchaseAed),
-    saleAed: round2(saleAed),
-    purchaseInr: round2(purchaseInr),
-    saleInr: round2(saleInr),
-    metalWeightPurchasedG: round4(metalWeightPurchasedG),
-    metalWeightSoldG: round4(metalWeightSoldG),
-    bookedInrProfit: round2(bookedInrProfit),
-    bookedAedProfit: round2(bookedAedProfit),
+    purchaseUnits: roundQty(purchaseUnits),
+    saleUnits: roundQty(saleUnits),
+    purchaseAed: money(purchaseAed),
+    saleAed: money(saleAed),
+    purchaseInr: money(purchaseInr),
+    saleInr: money(saleInr),
+    metalWeightPurchasedG: roundQty(metalWeightPurchasedG),
+    metalWeightSoldG: roundQty(metalWeightSoldG),
+    bookedInrProfit: money(bookedInrProfit),
+    bookedAedProfit: money(bookedAedProfit),
   };
 }
 
 export function isMetalAgentAedLine(row: ICSettlementTradeLine): boolean {
-  return row.metalPaymentMethod === 'AED' || isMetalAedPayment(row.metalPaymentMethod);
+  return (
+    row.metalPaymentMethod === 'AED' ||
+    row.metalPaymentMethod === 'SPLIT' ||
+    isMetalAedPayment(row.metalPaymentMethod) ||
+    isMetalSplitPayment(row.metalPaymentMethod)
+  );
 }
 
 export function isMetalCashInrLine(row: ICSettlementTradeLine): boolean {
-  return !isMetalAgentAedLine(row);
+  return (
+    row.metalPaymentMethod !== 'AED' &&
+    !isMetalAedPayment(row.metalPaymentMethod)
+  );
 }
 
 export type MetalRegisterBook = 'inr' | 'aed';
@@ -152,8 +171,17 @@ export function sliceSettlementTradeReport(
 ): ICSettlementTradeReport {
   if (report.settlementMode !== 'metal') return report;
   const keep = book === 'aed' ? isMetalAgentAedLine : isMetalCashInrLine;
-  const purchases = report.purchases.filter(keep);
-  const sales = report.sales.filter(keep);
+  const sliceAmounts = (row: ICSettlementTradeLine): ICSettlementTradeLine => {
+    if (row.metalPaymentMethod !== 'SPLIT') return row;
+    if (book === 'aed') {
+      const paid = Number(row.splitAedPaid) || 0;
+      return { ...row, aedTotal: paid, inrTotal: 0, splitInrPaid: 0, splitAedPaid: paid };
+    }
+    const paid = Number(row.splitInrPaid) || 0;
+    return { ...row, inrTotal: paid, aedTotal: 0, splitInrPaid: paid, splitAedPaid: 0 };
+  };
+  const purchases = report.purchases.filter(keep).map(sliceAmounts);
+  const sales = report.sales.filter(keep).map(sliceAmounts);
   return {
     ...report,
     purchases,

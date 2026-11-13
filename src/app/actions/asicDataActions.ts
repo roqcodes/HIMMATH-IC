@@ -21,6 +21,10 @@ import { mapICTransferSettingsRow } from '@/lib/icTransfer/settings';
 import { logger } from '@/lib/logger';
 import type { Branch, User } from '@/types';
 import { ensureHqIcFundsBranch } from '@/lib/icFunds/ensureHqBranch';
+import { IC_WAREHOUSE_SELECT } from '@/lib/icTransfer/warehouseQueries';
+import { IC_BRANCH_SELECT } from '@/lib/icTransfer/icBranchQueries';
+import { mapICBranchRow } from '@/lib/icTransferMappers';
+import { IC_PURCHASE_ROW_SELECT, IC_SALE_ROW_SELECT } from '@/lib/icTransfer/dealRowQueries';
 
 const BRANCHES_SELECT = `
   SELECT id, slug, name, logo_url, address, city, country, trn, phone, email, website, location,
@@ -31,16 +35,8 @@ const BRANCHES_SELECT = `
 
 import { IC_RATE_GROUPS_WITH_MEMBERS_SELECT } from '@/lib/icTransfer/rateGroupQueries';
 
-const IC_PURCHASE_SELECT = `
-  SELECT p.*, aa.counterparty_id AS aed_agent_counterparty_id, aa.name AS aed_agent_name
-  FROM ic_purchases p
-  LEFT JOIN ic_aed_agents aa ON aa.id = p.aed_agent_id`;
-
-const IC_SALES_SELECT = `
-  SELECT s.*, a.name AS delivery_agent_name, aa.counterparty_id AS aed_agent_counterparty_id, aa.name AS aed_agent_name
-  FROM ic_sales s
-  LEFT JOIN ic_delivery_agents a ON s.delivery_agent_id = a.id
-  LEFT JOIN ic_aed_agents aa ON aa.id = s.aed_agent_id`;
+const IC_PURCHASE_SELECT = IC_PURCHASE_ROW_SELECT;
+const IC_SALES_SELECT = IC_SALE_ROW_SELECT;
 
 type FetchContext = {
   currentUser: User | null;
@@ -112,11 +108,17 @@ async function loadSuppliers(branchId: string | null) {
   return query(`SELECT ${COUNTERPARTY_SELECT} FROM ic_counterparties`);
 }
 
+const WAREHOUSE_DESK_FILTER = `COALESCE(w.desk_kind, 'warehouse') <> 'branch'`;
+
 async function loadWarehouses(branchId: string | null) {
   if (branchId) {
-    return query('SELECT * FROM ic_warehouses WHERE branch_id = $1', [branchId]);
+    return query(`${IC_WAREHOUSE_SELECT} WHERE w.branch_id = $1 AND ${WAREHOUSE_DESK_FILTER}`, [branchId]);
   }
-  return query('SELECT * FROM ic_warehouses');
+  return query(`${IC_WAREHOUSE_SELECT} WHERE ${WAREHOUSE_DESK_FILTER}`);
+}
+
+async function loadIcBranches() {
+  return query(`${IC_BRANCH_SELECT} ORDER BY b.name ASC`);
 }
 
 async function loadPurchases(branchId: string | null) {
@@ -213,6 +215,7 @@ export async function fetchAsicInitialDataAction(
       icRegionsRes,
       icSuppliersRes,
       icWarehousesRes,
+      icBranchesRes,
       icTransferSettingsRes,
       icRateGroupsRes,
       icPurchasesRes,
@@ -223,6 +226,7 @@ export async function fetchAsicInitialDataAction(
       () => query('SELECT id, name, country, created_at FROM ic_regions'),
       () => loadSuppliers(ctx.branchId),
       () => loadWarehouses(ctx.branchId),
+      () => loadIcBranches(),
       () =>
         query(
           `SELECT sales_enabled, auto_rate_reset_enabled, warehouse_fulfillment_enabled, updated_at, updated_by
@@ -246,6 +250,7 @@ export async function fetchAsicInitialDataAction(
         icRegions: icRegionsRes.rows.map(r => mapICRegionRow(r)),
         icSuppliers: icSuppliersRes.rows.map(r => mapICCounterpartyRow(r)),
         icWarehouses: icWarehousesRes.rows.map(r => mapICWarehouseRow(r)),
+        icBranches: icBranchesRes.rows.map(r => mapICBranchRow(r)),
         icRateGroups,
         icTransferSettings: mapICTransferSettingsRow(icTransferSettingsRes.rows[0]),
         icPurchases: icPurchasesRes.rows.map(r => mapICPurchaseRow(r)),

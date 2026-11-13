@@ -1,7 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { getICTransferWarehouseDetailHref, type ICTransferPortalMode } from '@/lib/icTransfer/branchPortalScope';
+import {
+  getICTransferBranchDetailHref,
+  getICTransferWarehouseDetailHref,
+  type ICTransferPortalMode,
+} from '@/lib/icTransfer/branchPortalScope';
 
 type Props = {
   warehouseId?: string | null;
@@ -10,6 +14,8 @@ type Props = {
   portalMode?: ICTransferPortalMode;
   className?: string;
   stopPropagation?: boolean;
+  /** UAE branch locker (ic_branches) vs India warehouse. */
+  detailKind?: 'warehouse' | 'branch';
 };
 
 export default function WarehouseLink({
@@ -19,12 +25,16 @@ export default function WarehouseLink({
   portalMode = 'admin',
   className = 'text-slate-700 hover:text-sky-800 hover:underline',
   stopPropagation,
+  detailKind = 'warehouse',
 }: Props) {
   if (!warehouseId?.trim()) {
     return <span className={className}>{name || 'None'}</span>;
   }
 
-  const href = getICTransferWarehouseDetailHref(branchSlug, warehouseId, portalMode);
+  const href =
+    detailKind === 'branch'
+      ? getICTransferBranchDetailHref(branchSlug, warehouseId, portalMode)
+      : getICTransferWarehouseDetailHref(branchSlug, warehouseId, portalMode);
 
   return (
     <Link

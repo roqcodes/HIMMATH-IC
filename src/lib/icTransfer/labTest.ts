@@ -1,4 +1,6 @@
-import { METAL_AMOUNT_DECIMALS, METAL_WEIGHT_DECIMALS } from '@/lib/icTransfer/metalSettlement';
+import { roundMoney } from '@/lib/icFunds/currencyPolicy';
+import { allocateLotAmount } from '@/lib/icTransfer/metalInventory';
+import { IC_RATE_DECIMAL_PLACES, METAL_WEIGHT_DECIMALS } from '@/lib/icTransfer/metalSettlement';
 import type { ICPurchase, ICSale } from '@/types';
 
 export type LabTestFields = {
@@ -14,9 +16,13 @@ function roundWeight(value: number): number {
   return Number(value.toFixed(METAL_WEIGHT_DECIMALS));
 }
 
-function roundInr(value: number): number {
+function roundRate(value: number): number {
   if (!Number.isFinite(value)) return 0;
-  return Number(value.toFixed(METAL_AMOUNT_DECIMALS));
+  return Number(value.toFixed(IC_RATE_DECIMAL_PLACES));
+}
+
+function roundInr(value: number): number {
+  return roundMoney(value);
 }
 
 export const emptyLabFields = (): LabTestFields => ({
@@ -58,7 +64,7 @@ export function applyLabFieldChange(
       };
     }
     case 'charge': {
-      const labChargeInrPerG = roundInr(num);
+      const labChargeInrPerG = roundRate(num);
       return {
         ...value,
         labChargeInrPerG,
@@ -69,12 +75,35 @@ export function applyLabFieldChange(
       const labTotalInr = roundInr(num);
       const labWeightG = value.labWeightG;
       const labChargeInrPerG =
-        labWeightG > 0 && labTotalInr > 0 ? roundInr(labTotalInr / labWeightG) : value.labChargeInrPerG;
+        labWeightG > 0 && labTotalInr > 0 ? roundRate(labTotalInr / labWeightG) : value.labChargeInrPerG;
       return { ...value, labTotalInr, labChargeInrPerG };
     }
     default:
       return value;
   }
+}
+
+/** Pro-rata purchase lab onto grams sold from a metal lot (sale modal lot pick). */
+export function labFieldsFromMetalLotSelection(
+  lot: {
+    metalWeightG: number;
+    labWeightG?: number | null;
+    labChargeInrPerG?: number | null;
+    labTotalInr?: number | null;
+  },
+  sellG: number,
+): LabTestFields {
+  const purchasedG = Number(lot.metalWeightG) || 0;
+  const sell = roundWeight(sellG);
+  if (!hasLab(lot) || sell <= 0 || purchasedG <= 0) {
+    return emptyLabFields();
+  }
+  const labChargeInrPerG = roundRate(Number(lot.labChargeInrPerG) || 0);
+  const labWeightG = roundWeight(allocateLotAmount(Number(lot.labWeightG) || 0, sell, purchasedG));
+  const allocatedTotal = roundInr(allocateLotAmount(Number(lot.labTotalInr) || 0, sell, purchasedG));
+  const labTotalInr =
+    allocatedTotal > 0 ? allocatedTotal : computeLabTotalInr(labWeightG, labChargeInrPerG);
+  return { labWeightG, labChargeInrPerG, labTotalInr };
 }
 
 export function labFieldsFromRecord(input: {
@@ -83,7 +112,7 @@ export function labFieldsFromRecord(input: {
   labTotalInr?: number | null;
 }): LabTestFields {
   const labWeightG = roundWeight(Number(input.labWeightG) || 0);
-  const labChargeInrPerG = roundInr(Number(input.labChargeInrPerG) || 0);
+  const labChargeInrPerG = roundRate(Number(input.labChargeInrPerG) || 0);
   const storedTotal = roundInr(Number(input.labTotalInr) || 0);
   const labTotalInr =
     storedTotal > 0 ? storedTotal : computeLabTotalInr(labWeightG, labChargeInrPerG);
@@ -97,7 +126,7 @@ export function validateLabAgainstGross(labTotalInr: number, grossInr: number): 
   if (gross <= 0) {
     throw new Error('Metal INR total is required before adding a lab test fee.');
   }
-  if (lab - gross > 0.0001) {
+  if (lab - gross > 0.01) {
     throw new Error('Lab test total cannot exceed metal INR total.');
   }
 }

@@ -13,6 +13,7 @@ const ICTransferDashboard = dynamic(() => import('@/components/ic-transfer/dashb
 const ICTransferSales = dynamic(() => import('@/components/ic-transfer/sales/ICTransferSales'));
 const ICTransferPurchase = dynamic(() => import('@/components/ic-transfer/purchase/ICTransferPurchase'));
 const ICTransferWarehouse = dynamic(() => import('@/components/ic-transfer/warehouse/ICTransferWarehouse'));
+const ICTransferBranches = dynamic(() => import('@/components/ic-transfer/branch/ICTransferBranches'));
 const ICTransferRegions = dynamic(() => import('@/components/ic-transfer/regions/ICTransferRegions'));
 const ICTransferRatesPage = dynamic(() => import('@/components/ic-transfer/settings/ICTransferRatesPage'));
 const ICTransferSettingsUsersPage = dynamic(
@@ -76,6 +77,9 @@ export default function ASICSectionRouter({
         break;
       case 'purchases':
         body = <ICTransferPurchase portalMode="admin" />;
+        break;
+      case 'branches':
+        body = <ICTransferBranches />;
         break;
       case 'warehouse':
         body = <ICTransferWarehouse />;

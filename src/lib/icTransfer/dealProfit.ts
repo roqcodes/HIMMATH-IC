@@ -1,9 +1,10 @@
+import { roundMoney } from '@/lib/icFunds/currencyPolicy';
 import {
   computeIcCashAedTotal,
   displayIcSheetRateFromPoolInternalWac,
   INR_PER_UNIT,
 } from '@/lib/icTransfer/rateCalculations';
-import { isMetalAedPayment } from '@/lib/domain/books';
+import { metalInrSaleIcUnitsFromFields } from '@/lib/icTransfer/metalSplit';
 import { isDateInRange, type DateFilterRange } from '@/lib/dateFilterRange';
 import { isVoidIcSaleOrderStatus } from '@/lib/icFunds/icTransferReportFilters';
 import { computeMetalLotProfit } from '@/lib/icTransfer/metalInventory';
@@ -45,10 +46,10 @@ const EMPTY: DealProfitSlice = {
 };
 
 function round2(n: number): number {
-  return Number((Number.isFinite(n) ? n : 0).toFixed(2));
+  return roundMoney(Number.isFinite(n) ? n : 0);
 }
 
-function round4(n: number): number {
+function roundQty(n: number): number {
   return Number((Number.isFinite(n) ? n : 0).toFixed(4));
 }
 
@@ -58,8 +59,14 @@ function isMetal(mode: string | undefined | null): boolean {
 
 /** Metal sold for INR becomes IC units (₹1 lakh = 1 unit). Agent-AED metal stays off the IC pool. */
 function metalInrSaleIcUnits(sale: ICSale): number {
-  if (!isMetal(sale.settlementMode) || isMetalAedPayment(sale.metalPaymentMethod)) return 0;
-  return Number(sale.units) || 0;
+  return metalInrSaleIcUnitsFromFields({
+    settlementMode: sale.settlementMode,
+    metalPaymentMethod: sale.metalPaymentMethod,
+    units: sale.units,
+    inrTotal: sale.inrTotal,
+    labTotalInr: sale.labTotalInr,
+    splitInrPaid: sale.splitInrPaid,
+  });
 }
 
 export function icStockPurchaseEvents(
@@ -95,7 +102,7 @@ function metalInrIcPoolCostAed(sale: ICSale, units: number): number {
   const rate = Number(sale.unitRate) || 0;
   if (u > 0 && rate > 0) return computeIcCashAedTotal(u, rate);
   const aed = Number(sale.aedAmount) || 0;
-  if (aed > 0) return Number(aed.toFixed(4));
+  if (aed > 0) return roundMoney(aed);
   return 0;
 }
 
@@ -200,10 +207,10 @@ export function sumDealProfit(slices: DealProfitSlice[]): DealProfitSlice {
       cashGrossProfitInr: round2(acc.cashGrossProfitInr + s.cashGrossProfitInr),
       cashRevenueAed: round2(acc.cashRevenueAed + s.cashRevenueAed),
       cashCogsAed: round2(acc.cashCogsAed + s.cashCogsAed),
-      cashSaleUnits: round4(acc.cashSaleUnits + s.cashSaleUnits),
+      cashSaleUnits: roundQty(acc.cashSaleUnits + s.cashSaleUnits),
       metalProfitAed: round2(acc.metalProfitAed + s.metalProfitAed),
       metalProfitInr: round2(acc.metalProfitInr + s.metalProfitInr),
-      metalSoldG: round4(acc.metalSoldG + s.metalSoldG),
+      metalSoldG: roundQty(acc.metalSoldG + s.metalSoldG),
       metalSaleCount: acc.metalSaleCount + s.metalSaleCount,
     }),
     emptyDealProfit(),
@@ -388,10 +395,10 @@ function computeOneWarehouse(
     cashGrossProfitInr: round2(cashGrossProfitInr),
     cashRevenueAed: round2(cashRevenueAed),
     cashCogsAed: round2(cashCogsAed),
-    cashSaleUnits: round4(cashSaleUnits),
+    cashSaleUnits: roundQty(cashSaleUnits),
     metalProfitAed: round2(metalProfitAed),
     metalProfitInr: round2(metalProfitInr),
-    metalSoldG: round4(metalSoldG),
+    metalSoldG: roundQty(metalSoldG),
     metalSaleCount,
   };
 }

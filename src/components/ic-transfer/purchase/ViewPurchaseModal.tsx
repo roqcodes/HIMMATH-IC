@@ -11,9 +11,10 @@ import { ConfirmModal } from '@/components/warehouse/shared';
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
 import { formatAmount } from '@/lib/icTransfer/rateCalculations';
 import { computeMetalSheetRateAed, formatSettlementModeLabel } from '@/lib/icTransfer/metalSettlement';
-import { isMetalAedPayment } from '@/lib/domain/books';
+import { isMetalSplitPayment, needsMetalAedAgent } from '@/lib/domain/books';
+import { metalPaymentShortLabel } from '@/lib/icTransfer/metalSplit';
 import { hasLab } from '@/lib/icTransfer/labTest';
-import { fmtLedgerInr, FmtLedgerInr } from '@/lib/icFunds/format';
+import { fmtLedgerInr, FmtLedgerAed, FmtLedgerInr } from '@/lib/icFunds/format';
 import InrAmountInWords from '../shared/InrAmountInWords';
 import {
   ModalCalcLabel,
@@ -49,7 +50,7 @@ export default function ViewPurchaseModal({ open, onClose, purchase }: Props) {
   if (!purchase || !amounts) return null;
 
   const isMetal = purchase.settlementMode === 'metal';
-  const metalPaidAed = isMetal && isMetalAedPayment(purchase.metalPaymentMethod);
+  const metalPaidAed = isMetal && needsMetalAedAgent(purchase.metalPaymentMethod);
 
   const getSupplierName = (id?: string) => icSuppliers.find(s => s.id === id)?.name || id || 'Unknown';
   const getWarehouseName = (id?: string) => {
@@ -143,10 +144,10 @@ export default function ViewPurchaseModal({ open, onClose, purchase }: Props) {
               {isMetal ? (
                 <ModalDetailRow
                   label="Paid in"
-                  value={purchase.metalPaymentMethod === 'AED' ? 'AED via agent' : 'Cash (INR)'}
+                  value={metalPaymentShortLabel(purchase.metalPaymentMethod)}
                 />
               ) : null}
-              {isMetal && purchase.metalPaymentMethod === 'AED' ? (
+              {isMetal && needsMetalAedAgent(purchase.metalPaymentMethod) ? (
                 <ModalDetailRow
                   label="AED agent"
                   value={
@@ -163,6 +164,18 @@ export default function ViewPurchaseModal({ open, onClose, purchase }: Props) {
                     )
                   }
                 />
+              ) : null}
+              {isMetal && isMetalSplitPayment(purchase.metalPaymentMethod) ? (
+                <>
+                  <ModalDetailRow
+                    label="INR paid"
+                    value={<FmtLedgerInr amount={purchase.splitInrPaid ?? 0} />}
+                  />
+                  <ModalDetailRow
+                    label="AED paid"
+                    value={<FmtLedgerAed amount={purchase.splitAedPaid ?? 0} />}
+                  />
+                </>
               ) : null}
             </div>
           </div>

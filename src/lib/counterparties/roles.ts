@@ -1,5 +1,8 @@
 import type { ICSupplier } from '@/types';
 
+export const COUNTERPARTY_KINDS = ['manager', 'customer'] as const;
+export type CounterpartyKind = (typeof COUNTERPARTY_KINDS)[number];
+
 export const COUNTERPARTY_ROLES = ['supplier', 'party', 'agent'] as const;
 export type CounterpartyRole = (typeof COUNTERPARTY_ROLES)[number];
 
@@ -39,4 +42,43 @@ export function formatCounterpartyRolesLabel(roles: CounterpartyRole[] | null | 
   return normalized
     .map(r => (r === 'party' ? 'Party' : r === 'supplier' ? 'Supplier' : 'Agent'))
     .join(' · ');
+}
+
+export function normalizeCounterpartyKind(value: unknown): CounterpartyKind {
+  return String(value) === 'manager' ? 'manager' : 'customer';
+}
+
+export function rolesForCounterpartyKind(
+  kind: CounterpartyKind,
+  roles: CounterpartyRole[] | undefined,
+): CounterpartyRole[] {
+  if (kind === 'manager') return [];
+  return normalizeCounterpartyRoles(roles);
+}
+
+export function counterpartyIsManager(cp: Pick<ICSupplier, 'kind'>): boolean {
+  return normalizeCounterpartyKind(cp.kind) === 'manager';
+}
+
+export function counterpartyIsCustomer(cp: Pick<ICSupplier, 'kind'>): boolean {
+  return normalizeCounterpartyKind(cp.kind) === 'customer';
+}
+
+export function filterCounterpartiesByKind<T extends Pick<ICSupplier, 'kind' | 'status'>>(
+  list: T[],
+  kind: CounterpartyKind,
+): T[] {
+  return list.filter(cp => cp.status !== 'inactive' && normalizeCounterpartyKind(cp.kind) === kind);
+}
+
+export function filterCustomersUnderManager<T extends Pick<ICSupplier, 'kind' | 'status' | 'homeManagerId'>>(
+  list: T[],
+  managerId: string,
+): T[] {
+  if (!managerId) return [];
+  return filterCounterpartiesByKind(list, 'customer').filter(cp => cp.homeManagerId === managerId);
+}
+
+export function formatCounterpartyKindLabel(kind: CounterpartyKind | null | undefined): string {
+  return normalizeCounterpartyKind(kind) === 'manager' ? 'Manager' : 'Customer';
 }

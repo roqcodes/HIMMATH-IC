@@ -1,5 +1,5 @@
 import { TRADE_ADDRESS, TRADE_LOGO_URL, TRADE_NAME, TRADE_PHONE } from '@/lib/brand';
-import { isMetalAedPayment } from '@/lib/domain/books';
+import { isMetalAedPayment, isMetalSplitPayment } from '@/lib/domain/books';
 import { dealPurchaseAed, dealSaleAed } from '@/lib/icTransfer/dealBookKpis';
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
 import { hasLab, netMetalInr } from '@/lib/icTransfer/labTest';
@@ -160,7 +160,8 @@ export function buildPurchaseInvoice(
 ): DealInvoiceDoc {
   const isMetal = purchase.settlementMode === 'metal';
   const agentAed = isMetal && isMetalAedPayment(purchase.metalPaymentMethod);
-  const currency: DealInvoiceCurrency = isMetal && !agentAed ? 'INR' : 'AED';
+  const splitPay = isMetal && isMetalSplitPayment(purchase.metalPaymentMethod);
+  const currency: DealInvoiceCurrency = isMetal ? (agentAed ? 'AED' : 'INR') : 'AED';
   const number = getFormattedTxnId(purchase.id, 'purchase', purchase);
 
   const grossInrMetal = metalGrossInr(purchase);
@@ -263,6 +264,11 @@ export function buildPurchaseInvoice(
       'Unfixed lines show their original provisional receipt valuation. Final agreed prices are recorded separately when fixed. This goods receipt is not a supplier tax invoice or proof of payment.',
       'Every figure is the stored, once-rounded document fact.',
       'Tax treatment pending professional sign-off; this document carries no VAT.',
+      ...(splitPay
+        ? [
+            `Split payment: INR ${Number(purchase.splitInrPaid || 0).toLocaleString()} with the supplier, AED ${Number(purchase.splitAedPaid || 0).toLocaleString()} with the agent.`,
+          ]
+        : []),
     ],
     footerLeft: `${TRADE_NAME} - ${TRADE_ADDRESS}`,
     footerRight: number,
@@ -272,7 +278,8 @@ export function buildPurchaseInvoice(
 export function buildSaleInvoice(sale: ICSale, ctx: DealInvoiceBuildContext): DealInvoiceDoc {
   const isMetal = sale.settlementMode === 'metal';
   const agentAed = isMetal && isMetalAedPayment(sale.metalPaymentMethod);
-  const currency: DealInvoiceCurrency = isMetal && !agentAed ? 'INR' : 'AED';
+  const splitPay = isMetal && isMetalSplitPayment(sale.metalPaymentMethod);
+  const currency: DealInvoiceCurrency = isMetal ? (agentAed ? 'AED' : 'INR') : 'AED';
   const number = getFormattedTxnId(sale.id, 'sale', sale);
 
   const grossInrMetal = metalGrossInr(sale);
@@ -377,6 +384,11 @@ export function buildSaleInvoice(sale: ICSale, ctx: DealInvoiceBuildContext): De
       'Unfixed lines show their original provisional receipt valuation. Final agreed prices are recorded separately when fixed. This goods receipt is not a tax invoice or proof of payment.',
       'Every figure is the stored, once-rounded document fact.',
       'Tax treatment pending professional sign-off; this document carries no VAT.',
+      ...(splitPay
+        ? [
+            `Split payment: INR ${Number(sale.splitInrPaid || 0).toLocaleString()} with the customer, AED ${Number(sale.splitAedPaid || 0).toLocaleString()} with the agent.`,
+          ]
+        : []),
     ],
     footerLeft: `${TRADE_NAME} - ${TRADE_ADDRESS}`,
     footerRight: number,

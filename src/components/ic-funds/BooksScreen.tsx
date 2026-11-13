@@ -391,7 +391,9 @@ export default function BooksScreen({
   const settlementTradeReportVariant = useMemo<SettlementTradeReportVariant>(() => {
     const report = filteredSettlementReport ?? settlementTradeReport;
     if (!report || report.settlementMode !== 'metal') return 'fund';
-    const hasAgentAed = [...report.purchases, ...report.sales].some(r => r.metalPaymentMethod === 'AED');
+    const hasAgentAed = [...report.purchases, ...report.sales].some(
+      r => r.metalPaymentMethod === 'AED' || r.metalPaymentMethod === 'SPLIT',
+    );
     return hasAgentAed ? 'metal-agent' : 'metal-inr';
   }, [filteredSettlementReport, settlementTradeReport]);
 

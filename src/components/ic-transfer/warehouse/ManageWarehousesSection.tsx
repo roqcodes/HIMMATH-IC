@@ -10,6 +10,7 @@ import ICTransferDataTableShell, {
 import WarehouseModal from '@/components/ic-transfer/settings/WarehouseModal';
 import type { ICWarehouse } from '@/types';
 import {
+  getICTransferBranchDetailHref,
   getICTransferWarehouseDetailHref,
   type ICTransferPortalMode,
 } from '@/lib/icTransfer/branchPortalScope';
@@ -20,14 +21,16 @@ import {
   type WarehouseMatrixRow,
 } from '@/lib/icTransfer/warehouseMatrixMetrics';
 
-const LIST_COLUMNS: ICTransferTableColumn[] = [
-  { id: 'Name', label: 'Warehouse', align: 'left' },
-  ...WAREHOUSE_MATRIX_COLUMNS.map(label => ({
+function listColumns(kind: 'warehouse' | 'branch'): ICTransferTableColumn[] {
+  return [
+    { id: 'Name', label: kind === 'branch' ? 'Branch' : 'Warehouse', align: 'left' },
+    ...WAREHOUSE_MATRIX_COLUMNS.map(label => ({
     id: label,
     label,
     align: 'right' as const,
   })),
-];
+  ];
+}
 
 type Props = {
   portalMode?: ICTransferPortalMode;
@@ -35,6 +38,8 @@ type Props = {
   warehouses: ICWarehouse[];
   matrixRows: WarehouseMatrixRow[];
   rangeLabel: string;
+  /** Branch shop list (UAE) vs India warehouse list. */
+  deskListKind?: 'warehouse' | 'branch';
   registerOpenAdd?: (openAdd: (() => void) | null) => void;
 };
 
@@ -72,8 +77,10 @@ export default function ManageWarehousesSection({
   warehouses,
   matrixRows,
   rangeLabel,
+  deskListKind = 'warehouse',
   registerOpenAdd,
 }: Props) {
+  const listColumnsMemo = useMemo(() => listColumns(deskListKind), [deskListKind]);
   const router = useRouter();
   const pathname = usePathname();
   const params = useParams();
@@ -166,37 +173,38 @@ export default function ManageWarehousesSection({
     return () => registerOpenAdd?.(null);
   }, [registerOpenAdd, openAdd]);
 
+  const detailHref = (warehouseId: string) =>
+    deskListKind === 'branch'
+      ? getICTransferBranchDetailHref(workspace.slug ?? '', warehouseId, workspace.mode)
+      : getICTransferWarehouseDetailHref(workspace.slug ?? '', warehouseId, workspace.mode);
+
   const openDetail = (warehouseId: string) => {
-    const href = getICTransferWarehouseDetailHref(workspace.slug ?? '', warehouseId, workspace.mode);
-    router.push(href);
+    router.push(detailHref(warehouseId));
   };
 
+  const entityLabel = deskListKind === 'branch' ? 'branch' : 'warehouse';
   const tableEmpty =
     warehouses.length === 0
-      ? 'No warehouses configured yet.'
-      : 'No warehouses match your search.';
+      ? `No ${entityLabel === 'branch' ? 'branches' : 'warehouses'} configured yet.`
+      : `No ${entityLabel === 'branch' ? 'branches' : 'warehouses'} match your search.`;
 
   return (
     <>
       <div className="mb-3 min-h-0 flex-1">
         <ICTransferDataTableShell
-          title={`Warehouses · ${rangeLabel}`}
+          title={`${deskListKind === 'branch' ? 'Branches' : 'Warehouses'} · ${rangeLabel}`}
           search={search}
           onSearchChange={setSearch}
-          searchPlaceholder="Search warehouse…"
+          searchPlaceholder={deskListKind === 'branch' ? 'Search branch…' : 'Search warehouse…'}
           sortField={sortField}
           sortOrder={sortOrder}
           onSort={handleSort}
-          columns={LIST_COLUMNS}
+          columns={listColumnsMemo}
           isEmpty={sortedWarehouses.length === 0}
           emptyMessage={tableEmpty}
         >
           {sortedWarehouses.map(warehouse => {
-            const href = getICTransferWarehouseDetailHref(
-              workspace.slug ?? '',
-              warehouse.id,
-              workspace.mode,
-            );
+            const href = detailHref(warehouse.id);
             const matrix = matrixById.get(warehouse.id) ?? emptyMatrixRow(warehouse);
             const cells = matrixRowToCells(matrix);
             return (
@@ -229,6 +237,7 @@ export default function ManageWarehousesSection({
         open={formOpen}
         warehouse={null}
         branchId={branchId ?? null}
+        defaultDeskKind={deskListKind === 'branch' ? 'branch' : 'warehouse'}
         onClose={() => setFormOpen(false)}
         onSaved={() => setFormOpen(false)}
       />

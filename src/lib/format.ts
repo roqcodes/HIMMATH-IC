@@ -25,7 +25,7 @@ export function formatAED(amount: number, showPlus = false): React.ReactNode {
 }
 
 export function formatAEDStr(amount: number, showPlus = false): string {
-  return formatNumber(amount, { maximumFractionDigits: 2, minimumFractionDigits: 0 }, showPlus);
+  return formatNumber(amount, { maximumFractionDigits: 2, minimumFractionDigits: 2 }, showPlus);
 }
 
 export function formatMoneyValue(amount: number, _currency?: Currency, showPlus = false): string {

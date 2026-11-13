@@ -1,24 +1,23 @@
 import { isVoidIcSaleOrderStatus } from '../icFunds/icTransferReportFilters';
 import { type MetalSettlementInput, normalizeMetalSale } from './metalSettlement';
-import { normalizeMetalPaymentMethod } from '@/lib/domain/books';
+import {
+  METAL_PAYMENT_METHODS,
+  normalizeMetalPaymentMethod,
+  type MetalPaymentMethod,
+} from '@/lib/domain/books';
+
+export { METAL_PAYMENT_METHODS, type MetalPaymentMethod };
 import {
   computeMetalLotProfit as computeMetalLotProfitCore,
   splitMetalBookedPl,
 } from '@/lib/metal/profit';
 
-export const METAL_PAYMENT_METHODS = ['CASH', 'AED'] as const;
-export type MetalPaymentMethod = (typeof METAL_PAYMENT_METHODS)[number];
+import { roundMoney } from '@/lib/icFunds/currencyPolicy';
 
 const WEIGHT_EPS = 0.0001;
-const AMOUNT_DECIMALS = 4;
-
-function round4(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Number(value.toFixed(AMOUNT_DECIMALS));
-}
 
 export function isMetalPaymentMethod(value: string | null | undefined): value is MetalPaymentMethod {
-  return value === 'CASH' || value === 'AED' || value === 'INR';
+  return value === 'CASH' || value === 'AED' || value === 'SPLIT';
 }
 
 export type MetalLotSaleSlice = {
@@ -46,7 +45,7 @@ export function remainingMetalGramsOnLot(
     if (isVoidIcSaleOrderStatus(sale.orderStatus)) return sum;
     return sum + (Number(sale.metalWeightG) || 0);
   }, 0);
-  return round4(Math.max(0, (Number(purchasedG) || 0) - sold));
+  return Number(Math.max(0, (Number(purchasedG) || 0) - sold).toFixed(4));
 }
 
 export function isFullLotSell(purchasedG: number, remainingG: number): boolean {
@@ -57,7 +56,7 @@ export function isFullLotSell(purchasedG: number, remainingG: number): boolean {
 export function allocateLotAmount(lotTotal: number, sellG: number, purchasedG: number): number {
   const purchased = Number(purchasedG) || 0;
   if (purchased <= 0) return 0;
-  return round4((Number(lotTotal) || 0) * ((Number(sellG) || 0) / purchased));
+  return roundMoney((Number(lotTotal) || 0) * ((Number(sellG) || 0) / purchased));
 }
 
 export function isFullRemainingSell(sellG: number, remainingG: number): boolean {
@@ -128,6 +127,8 @@ export type NormalizedMetalLotSale = {
   aedAmount: number;
   units: number;
   unitRate: number;
+  splitInrPaid?: number | null;
+  splitAedPaid?: number | null;
 };
 
 /**
@@ -138,6 +139,8 @@ export function normalizeMetalLotSale(params: {
   input: MetalSettlementInput;
   paymentMethod?: string | null;
   aedAgentId?: string | null;
+  splitInrPaid?: number | null;
+  splitAedPaid?: number | null;
 }): NormalizedMetalLotSale {
   if (!params.metalPurchaseId.trim()) {
     throw new Error('Select the metal purchase to sell.');
@@ -147,6 +150,8 @@ export function normalizeMetalLotSale(params: {
       ? normalizeMetalPaymentMethod(params.paymentMethod)
       : undefined,
     aedAgentId: params.aedAgentId,
+    splitInrPaid: params.splitInrPaid,
+    splitAedPaid: params.splitAedPaid,
   });
   return {
     settlementMode: 'metal',
@@ -161,6 +166,8 @@ export function normalizeMetalLotSale(params: {
     aedAmount: sale.aedAmount,
     units: sale.units,
     unitRate: sale.unitRate,
+    splitInrPaid: sale.splitInrPaid ?? null,
+    splitAedPaid: sale.splitAedPaid ?? null,
   };
 }
 

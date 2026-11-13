@@ -18,6 +18,7 @@ import {
   ICRegion,
   ICSupplier,
   ICWarehouse,
+  ICBranch,
   ICRateGroup,
   ICRateGroupPricingConfig,
   ICTransferSettings,
@@ -25,7 +26,7 @@ import {
   ICSale,
   ICWarehouseTransaction,
 } from '@/types';
-import type { CounterpartyRole } from '@/lib/counterparties/roles';
+import type { CounterpartyKind, CounterpartyRole } from '@/lib/counterparties/roles';
 import type { AedInrOpenings, WarehouseOpenings } from '@/lib/icFunds/entityOpenings';
 import { getCurrentUserAction, logoutAction } from '@/app/actions/auth';
 import { fetchAsicInitialDataAction, fetchAsicTransactionalDataAction } from '@/app/actions/asicDataActions';
@@ -59,6 +60,11 @@ import {
   branchDeleteICSaleAction,
   branchRequestCancelICSaleAction,
 } from '@/app/actions/icTransferActions';
+import {
+  dbAddICBranchAction,
+  dbUpdateICBranchAction,
+  dbDeleteICBranchAction,
+} from '@/app/actions/icBranchActions';
 import {
   updateICTransferSalesEnabledAction,
   updateICTransferAutoRateResetAction,
@@ -96,6 +102,7 @@ interface AppState {
   icRegions: ICRegion[];
   icSuppliers: ICSupplier[];
   icWarehouses: ICWarehouse[];
+  icBranches: ICBranch[];
   icRateGroups: ICRateGroup[];
   icTransferSettings: ICTransferSettings;
   icPurchases: ICPurchase[];
@@ -134,6 +141,8 @@ interface AppContextType extends AppState {
     branchId?: string | null,
     roles?: CounterpartyRole[],
     openings?: Partial<AedInrOpenings> | null,
+    kind?: CounterpartyKind,
+    homeManagerId?: string | null,
   ) => Promise<boolean>;
   updateICSupplier: (
     id: string,
@@ -149,6 +158,8 @@ interface AppContextType extends AppState {
     locality: string,
     roles?: CounterpartyRole[],
     openings?: Partial<AedInrOpenings> | null,
+    kind?: CounterpartyKind,
+    homeManagerId?: string | null,
   ) => Promise<boolean>;
   deleteICSupplier: (id: string) => Promise<boolean>;
   addICWarehouse: (
@@ -164,6 +175,8 @@ interface AppContextType extends AppState {
     sendDeliveryProofToCustomer?: boolean,
     branchId?: string | null,
     openings?: Partial<WarehouseOpenings> | null,
+    deskKind?: 'warehouse' | 'branch',
+    managerIds?: string[],
   ) => Promise<boolean>;
   updateICWarehouse: (
     id: string,
@@ -178,8 +191,29 @@ interface AppContextType extends AppState {
     indiaCity: string,
     sendDeliveryProofToCustomer?: boolean,
     openings?: Partial<WarehouseOpenings> | null,
+    managerIds?: string[],
   ) => Promise<boolean>;
   deleteICWarehouse: (id: string) => Promise<boolean>;
+  addICBranch: (
+    name: string,
+    code: string,
+    phone: string,
+    email: string,
+    address: string,
+    timezone: string,
+    managerIds?: string[],
+  ) => Promise<boolean>;
+  updateICBranch: (
+    id: string,
+    name: string,
+    code: string,
+    phone: string,
+    email: string,
+    address: string,
+    timezone: string,
+    managerIds?: string[],
+  ) => Promise<boolean>;
+  deleteICBranch: (id: string) => Promise<boolean>;
   addICRateGroup: (
     name: string,
     country: string,
@@ -270,6 +304,7 @@ function icStateFromAsicData(data: AsicData): Pick<
   | 'icRegions'
   | 'icSuppliers'
   | 'icWarehouses'
+  | 'icBranches'
   | 'icRateGroups'
   | 'icTransferSettings'
   | 'icPurchases'
@@ -282,6 +317,7 @@ function icStateFromAsicData(data: AsicData): Pick<
     icRegions: data.icRegions || [],
     icSuppliers: data.icSuppliers || [],
     icWarehouses: data.icWarehouses || [],
+    icBranches: data.icBranches || [],
     icRateGroups: data.icRateGroups || [],
     icTransferSettings: data.icTransferSettings || { ...DEFAULT_IC_TRANSFER_SETTINGS },
     icPurchases: data.icPurchases || [],
@@ -307,6 +343,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     icRegions: [],
     icSuppliers: [],
     icWarehouses: [],
+    icBranches: [],
     icRateGroups: [],
     icTransferSettings: { ...DEFAULT_IC_TRANSFER_SETTINGS },
     icPurchases: [],
@@ -532,6 +569,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     branchId?: string | null,
     roles?: CounterpartyRole[],
     openings?: Partial<AedInrOpenings> | null,
+    kind?: CounterpartyKind,
+    homeManagerId?: string | null,
   ) => {
     try {
       const res = await dbAddICSupplierAction(
@@ -549,6 +588,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         branchId ? currentSlug ?? undefined : undefined,
         roles,
         openings,
+        kind,
+        homeManagerId,
       );
       if (res.success && res.data) {
         setState(s => ({ ...s, icSuppliers: [...s.icSuppliers, res.data!] }));
@@ -577,6 +618,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     locality: string,
     roles?: CounterpartyRole[],
     openings?: Partial<AedInrOpenings> | null,
+    kind?: CounterpartyKind,
+    homeManagerId?: string | null,
   ) => {
     try {
       const res = await dbUpdateICSupplierAction(
@@ -594,6 +637,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         currentSlug ?? undefined,
         roles,
         openings,
+        kind,
+        homeManagerId,
       );
       if (res.success && res.data) {
         setState(s => ({ ...s, icSuppliers: s.icSuppliers.map(sup => sup.id === id ? res.data! : sup) }));
@@ -637,6 +682,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     sendDeliveryProofToCustomer: boolean = true,
     branchId?: string | null,
     openings?: Partial<WarehouseOpenings> | null,
+    deskKind?: 'warehouse' | 'branch',
+    managerIds?: string[],
   ) => {
     try {
       const res = await dbAddICWarehouseAction(
@@ -652,6 +699,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         sendDeliveryProofToCustomer,
         branchId,
         openings,
+        deskKind,
+        managerIds,
       );
       if (res.success && res.data) {
         setState(s => ({ ...s, icWarehouses: [...s.icWarehouses, res.data!] }));
@@ -679,6 +728,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     indiaCity: string,
     sendDeliveryProofToCustomer: boolean = true,
     openings?: Partial<WarehouseOpenings> | null,
+    managerIds?: string[],
   ) => {
     try {
       const res = await dbUpdateICWarehouseAction(
@@ -694,6 +744,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         indiaCity,
         sendDeliveryProofToCustomer,
         openings,
+        managerIds,
       );
       if (res.success && res.data) {
         setState(s => ({ ...s, icWarehouses: s.icWarehouses.map(w => w.id === id ? res.data! : w) }));
@@ -720,6 +771,88 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return false;
     } catch {
       showToast('Error deleting warehouse', 'error');
+      return false;
+    }
+  }, [showToast]);
+
+  const addICBranch = useTrackedCallback(async (
+    name: string,
+    code: string,
+    phone: string,
+    email: string,
+    address: string,
+    timezone: string,
+    managerIds?: string[],
+  ) => {
+    try {
+      const res = await dbAddICBranchAction(
+        name,
+        code.trim() || null,
+        phone,
+        email,
+        address,
+        timezone,
+        managerIds,
+      );
+      if (res.success && res.data) {
+        setState(s => ({ ...s, icBranches: [...s.icBranches, res.data!] }));
+        showToast('Branch added successfully');
+        return true;
+      }
+      showToast(res.error || 'Failed to add branch', 'error');
+      return false;
+    } catch {
+      showToast('Error adding branch', 'error');
+      return false;
+    }
+  }, [showToast]);
+
+  const updateICBranch = useTrackedCallback(async (
+    id: string,
+    name: string,
+    code: string,
+    phone: string,
+    email: string,
+    address: string,
+    timezone: string,
+    managerIds?: string[],
+  ) => {
+    try {
+      const res = await dbUpdateICBranchAction(
+        id,
+        name,
+        code.trim() || null,
+        phone,
+        email,
+        address,
+        timezone,
+        managerIds,
+      );
+      if (res.success && res.data) {
+        setState(s => ({ ...s, icBranches: s.icBranches.map(b => (b.id === id ? res.data! : b)) }));
+        showToast('Branch updated successfully');
+        return true;
+      }
+      showToast(res.error || 'Failed to update branch', 'error');
+      return false;
+    } catch {
+      showToast('Error updating branch', 'error');
+      return false;
+    }
+  }, [showToast]);
+
+  const deleteICBranch = useTrackedCallback(async (id: string) => {
+    try {
+      const res = await dbDeleteICBranchAction(id);
+      if (res.success) {
+        setState(s => ({ ...s, icBranches: s.icBranches.filter(b => b.id !== id) }));
+        showToast('Branch deleted successfully');
+        return true;
+      }
+      showToast(res.error || 'Failed to delete branch', 'error');
+      return false;
+    } catch {
+      showToast('Error deleting branch', 'error');
       return false;
     }
   }, [showToast]);
@@ -1247,6 +1380,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addICWarehouse,
       updateICWarehouse,
       deleteICWarehouse,
+      addICBranch,
+      updateICBranch,
+      deleteICBranch,
       addICRateGroup,
       updateICRateGroup,
       bulkUpdateICRateGroupRates,
@@ -1286,6 +1422,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addICWarehouse,
     updateICWarehouse,
     deleteICWarehouse,
+    addICBranch,
+    updateICBranch,
+    deleteICBranch,
     addICRateGroup,
     updateICRateGroup,
     bulkUpdateICRateGroupRates,

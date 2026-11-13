@@ -64,7 +64,7 @@ export function toTrialBalanceRow(ledger: AccountPeriodLedger): TrialBalanceRow 
   };
 }
 
-/** Trial balance columns keep ledger fil precision; UI formats to 2 dp separately. */
+/** Trial balance columns keep ledger money precision (2 dp); UI matches. */
 function roundMoneyColumn(n: number): number {
   return roundLedgerAmount(n);
 }

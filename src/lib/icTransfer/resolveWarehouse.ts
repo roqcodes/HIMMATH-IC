@@ -1,5 +1,6 @@
 import { query } from '@/lib/db';
 import { mapICWarehouseRow } from '@/lib/icTransferMappers';
+import { IC_WAREHOUSE_SELECT } from '@/lib/icTransfer/warehouseQueries';
 import type { ICWarehouse } from '@/types';
 import {
   isFullWarehouseUuid,
@@ -11,7 +12,7 @@ export async function fetchWarehouseByRouteParam(param: string): Promise<ICWareh
   if (!param) return null;
 
   if (isFullWarehouseUuid(param)) {
-    const res = await query(`SELECT * FROM ic_warehouses WHERE id = $1 LIMIT 1`, [param]);
+    const res = await query(`${IC_WAREHOUSE_SELECT} WHERE w.id = $1 LIMIT 1`, [param]);
     return res.rows[0] ? mapICWarehouseRow(res.rows[0]) : null;
   }
 
@@ -19,8 +20,8 @@ export async function fetchWarehouseByRouteParam(param: string): Promise<ICWareh
   if (!isWarehouseRouteShortSlug(slug)) return null;
 
   const res = await query(
-    `SELECT * FROM ic_warehouses
-     WHERE ${WAREHOUSE_ROUTE_SLUG_SQL} = $1
+    `${IC_WAREHOUSE_SELECT}
+     WHERE lower(substring(replace(w.id::text, '-', ''), 1, 8)) = $1
      LIMIT 2`,
     [slug],
   );

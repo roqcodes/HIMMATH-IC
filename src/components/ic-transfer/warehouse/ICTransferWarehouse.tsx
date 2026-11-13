@@ -8,6 +8,7 @@ import { computeWarehouseMatrix } from '@/lib/icTransfer/warehouseMatrixMetrics'
 import {
   filterSalesForBranchPortal,
   filterPurchasesForBranchPortal,
+  filterIndiaWarehouses,
   filterWarehousesForBranchPortal,
   filterWarehousesForAdminPortal,
   type ICTransferPortalMode,
@@ -50,8 +51,10 @@ export default function ICTransferWarehouse({
   const isBranchPortal = portalMode === 'branch' && !!branchId;
 
   const scopedWarehouses = useMemo(() => {
-    if (!isBranchPortal) return filterWarehousesForAdminPortal(icWarehouses);
-    return filterWarehousesForBranchPortal(icWarehouses, branchId!);
+    const base = isBranchPortal
+      ? filterWarehousesForBranchPortal(icWarehouses, branchId!)
+      : filterWarehousesForAdminPortal(icWarehouses);
+    return filterIndiaWarehouses(base);
   }, [icWarehouses, isBranchPortal, branchId]);
 
   const branchCustomerIdSet = useMemo(

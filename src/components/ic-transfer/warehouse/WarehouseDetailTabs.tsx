@@ -22,12 +22,20 @@ import { fmtLedgerAmount, FmtLedgerAmount } from '@/lib/icFunds/format';
 import {
   formatDealTableAed,
   formatDealTableInr,
+  formatDealTableSheetRate,
+  formatDealTableSplitPaidAed,
+  formatDealTableSplitPaidInr,
   purchaseDealAed,
   purchaseDealInr,
+  purchaseDealSheetRate,
   formatSaleLineProfit,
   saleDealInr,
+  saleDealSheetRate,
   saleTableDisplayAed,
 } from '@/lib/icTransfer/dealTableDisplay';
+import {
+  icWarehouseDealTableColumns,
+} from '@/lib/icTransfer/dealTableColumns';
 import { indexSaleLineProfits } from '@/lib/icTransfer/dealProfit';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import JournalVoucherDetailModal from '@/components/ic-transfer/journal/JournalVoucherDetailModal';
@@ -41,7 +49,6 @@ import {
 } from '@/components/ic-funds/ui';
 import ICTransferDataTableShell, {
   icTdClass,
-  type ICTransferTableColumn,
 } from '@/components/ic-transfer/shared/ICTransferDataTableShell';
 import { ICTransferEditIconButton, ICTransferViewIconButton } from '@/components/ic-transfer/shared/ICTransferTableActions';
 import { DealInvoiceIconButtons } from '@/components/ic-transfer/invoice/DealInvoiceButtons';
@@ -70,21 +77,8 @@ import type { ICPurchase, ICSale, ICFundVoucher } from '@/types';
 
 type TabId = 'all' | 'purchases' | 'sales' | 'labTests' | 'journals';
 
-const ACTIVITY_COLUMNS: ICTransferTableColumn[] = [
-  { id: 'Date', label: 'Date', align: 'left' },
-  { id: 'Type', label: 'Type', align: 'left' },
-  { id: 'ID', label: 'ID', align: 'left' },
-  { id: 'Party', label: 'Party', align: 'left' },
-  { id: 'Settlement', label: 'Settlement', align: 'left' },
-  { id: 'Units', label: 'Units', align: 'right' },
-  { id: 'Metal (g)', label: 'Metal (g)', align: 'right' },
-  { id: 'INR', label: 'INR', align: 'right' },
-  { id: 'AED', label: 'AED', align: 'right' },
-  { id: 'Profit', label: 'Profit', align: 'right' },
-  { id: 'Actions', label: 'Actions', align: 'center', sortable: false },
-];
-
-const PURCHASE_COLUMNS: ICTransferTableColumn[] = ACTIVITY_COLUMNS.filter(c => c.id !== 'Type');
+const ACTIVITY_COLUMNS = icWarehouseDealTableColumns(true);
+const PURCHASE_COLUMNS = icWarehouseDealTableColumns(false);
 
 function DateCell({ iso }: { iso?: string }) {
   if (!iso) return <span className="text-slate-400">—</span>;
@@ -320,9 +314,6 @@ export default function WarehouseDetailTabs({
         </td>
       ) : null}
       <td className={icTdClass('left')}>
-        <span className="font-mono text-xs text-slate-500">{getFormattedTxnId(p.id, 'purchase', p)}</span>
-      </td>
-      <td className={icTdClass('left')}>
         <div className="min-w-[120px]">
           <CounterpartyLink
             counterpartyId={effectivePurchaseCounterpartyId(p)}
@@ -353,11 +344,14 @@ export default function WarehouseDetailTabs({
           {formatDealTableInr(purchaseDealInr(p))}
         </span>
       </td>
+      <td className={icTdClass('right')}>{formatDealTableSheetRate(purchaseDealSheetRate(p))}</td>
       <td className={icTdClass('right')}>
         <span className="font-mono font-medium tabular-nums text-slate-900">
           {formatDealTableAed(purchaseDealAed(p))}
         </span>
       </td>
+      <td className={icTdClass('right')}>{formatDealTableSplitPaidInr(p)}</td>
+      <td className={icTdClass('right')}>{formatDealTableSplitPaidAed(p)}</td>
       <td className={icTdClass('right')}>
         <span className="text-slate-400">—</span>
       </td>
@@ -387,9 +381,6 @@ export default function WarehouseDetailTabs({
           </span>
         </td>
       ) : null}
-      <td className={icTdClass('left')}>
-        <span className="font-mono text-xs text-slate-500">{getFormattedTxnId(s.id, 'sale', s)}</span>
-      </td>
       <td className={icTdClass('left')}>
         <div className="min-w-[120px]">
           <CounterpartyLink
@@ -423,11 +414,14 @@ export default function WarehouseDetailTabs({
           {formatDealTableInr(saleDealInr(s))}
         </span>
       </td>
+      <td className={icTdClass('right')}>{formatDealTableSheetRate(saleDealSheetRate(s))}</td>
       <td className={icTdClass('right')}>
         <span className="font-mono font-medium tabular-nums text-slate-900">
           {formatDealTableAed(saleTableDisplayAed(s))}
         </span>
       </td>
+      <td className={icTdClass('right')}>{formatDealTableSplitPaidInr(s)}</td>
+      <td className={icTdClass('right')}>{formatDealTableSplitPaidAed(s)}</td>
       <td className={icTdClass('right')}>{formatSaleLineProfit(saleProfits.get(s.id))}</td>
       <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-center gap-0.5">
@@ -700,6 +694,8 @@ export default function WarehouseDetailTabs({
         open={!!editSale}
         onClose={() => setEditSale(null)}
         initialData={editSale || undefined}
+        branchId={purchaseBranchId}
+        warehouses={warehouse ? [warehouse] : undefined}
         lockedWarehouseId={warehouseId}
       />
     </>

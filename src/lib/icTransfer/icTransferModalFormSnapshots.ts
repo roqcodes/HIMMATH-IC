@@ -17,6 +17,8 @@ export type ICPurchaseFormSnapshot = {
   aedAgentId: string;
   metal: MetalSettlementFields;
   lab: LabTestFields;
+  splitInrPaid?: number;
+  splitAedPaid?: number;
 };
 
 export type ICSaleFormSnapshot = {
@@ -37,6 +39,8 @@ export type ICSaleFormSnapshot = {
   deleteToken: string;
   metal: MetalSettlementFields;
   lab: LabTestFields;
+  splitInrPaid?: number;
+  splitAedPaid?: number;
 };
 
 export function stringifyIcPurchaseFormSnapshot(s: ICPurchaseFormSnapshot): string {

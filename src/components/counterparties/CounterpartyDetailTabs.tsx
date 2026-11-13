@@ -4,8 +4,13 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import AsicTabBar from '@/components/asic/AsicTabBar';
 import { useApp } from '@/context/AppContext';
 import { listCounterpartyDealVouchersAction } from '@/app/actions/icFundsActions';
-import { getFormattedTxnId } from '@/lib/icTransferMappers';
 import {
+  listDepositsByCustomerAction,
+  repairCustomerDepositLedgersAction,
+} from '@/app/actions/branchDepositActions';
+import { repairCounterpartyMetalLedgersAction } from '@/app/actions/icFundsActions';
+import {
+  filterCounterpartyDeposits,
   filterCounterpartyPurchases,
   filterCounterpartySales,
   mergeCounterpartyActivity,
@@ -17,11 +22,20 @@ import { fmtICDate, fmtLedgerAmount, FmtLedgerAmount } from '@/lib/icFunds/forma
 import {
   formatDealTableAed,
   formatDealTableInr,
+  formatDealTableSheetRate,
+  formatDealTableSplitPaidAed,
+  formatDealTableSplitPaidInr,
+  formatSaleLineProfit,
   purchaseDealAed,
   purchaseDealInr,
+  purchaseDealSheetRate,
   saleDealInr,
+  saleDealSheetRate,
   saleTableDisplayAed,
 } from '@/lib/icTransfer/dealTableDisplay';
+import { indexSaleLineProfits } from '@/lib/icTransfer/dealProfit';
+import { icCounterpartyDealTableColumns } from '@/lib/icTransfer/dealTableColumns';
+import { formatSettlementModeLabel } from '@/lib/icTransfer/metalSettlement';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import { ASICTableRowsSkeleton } from '@/components/asic/ASICTableSkeleton';
 import {
@@ -33,7 +47,6 @@ import {
 } from '@/components/ic-funds/ui';
 import ICTransferDataTableShell, {
   icTdClass,
-  type ICTransferTableColumn,
 } from '@/components/ic-transfer/shared/ICTransferDataTableShell';
 import { ICTransferEditIconButton, ICTransferViewIconButton } from '@/components/ic-transfer/shared/ICTransferTableActions';
 import { DealInvoiceIconButtons } from '@/components/ic-transfer/invoice/DealInvoiceButtons';
@@ -51,7 +64,8 @@ import {
 } from '@/lib/icTransfer/warehouseJournalLabels';
 import SearchInput from '@/components/ic-transfer/ui/SearchInput';
 import { asicCard } from '@/components/asic/ui';
-import type { ICPurchase, ICSale, ICFundVoucher } from '@/types';
+import type { ICBranchDeposit, ICPurchase, ICSale, ICFundVoucher } from '@/types';
+import { FmtLedgerAed } from '@/lib/icFunds/format';
 import { voucherPostedTargetsCounterparty } from '@/lib/icFunds/voucherPostedNotify';
 import { useOnIcFundsVoucherPosted } from '@/hooks/useOnIcFundsVoucherPosted';
 import {
@@ -59,22 +73,15 @@ import {
   sortCounterpartyPurchases,
   sortCounterpartySales,
 } from '@/lib/icTransfer/detailTableSort';
+import {
+  augmentPartyJournalsWithMetalProfit,
+  isPartyProfitMemoVoucher,
+} from '@/lib/counterparties/counterpartyPartyJournals';
 
-type TabId = 'all' | 'purchases' | 'sales' | 'journals';
+type TabId = 'all' | 'purchases' | 'sales' | 'deposits' | 'journals';
 
-const ACTIVITY_COLUMNS: ICTransferTableColumn[] = [
-  { id: 'Date', label: 'Date', align: 'left' },
-  { id: 'Type', label: 'Type', align: 'left' },
-  { id: 'ID', label: 'ID', align: 'left' },
-  { id: 'Warehouse', label: 'Warehouse', align: 'left' },
-  { id: 'Book', label: 'Book', align: 'left' },
-  { id: 'Qty', label: 'Qty', align: 'right' },
-  { id: 'INR', label: 'INR', align: 'right' },
-  { id: 'AED', label: 'AED', align: 'right' },
-  { id: 'Actions', label: 'Actions', align: 'center', sortable: false },
-];
-
-const PURCHASE_COLUMNS: ICTransferTableColumn[] = ACTIVITY_COLUMNS.filter(c => c.id !== 'Type');
+const ACTIVITY_COLUMNS = icCounterpartyDealTableColumns(true);
+const PURCHASE_COLUMNS = icCounterpartyDealTableColumns(false);
 
 function DateCell({ iso }: { iso?: string }) {
   if (!iso) return <span className="text-slate-400">—</span>;
@@ -94,10 +101,19 @@ type Props = {
   counterpartyId: string;
   range: DateFilterRange;
   branchSlug?: string;
+  /** UAE branch deposit rows (customer wallets). */
+  showDeposits?: boolean;
+  onLedgerRepaired?: () => void;
 };
 
-export default function CounterpartyDetailTabs({ counterpartyId, range, branchSlug }: Props) {
-  const { icPurchases, icSales, icWarehouses } = useApp();
+export default function CounterpartyDetailTabs({
+  counterpartyId,
+  range,
+  branchSlug,
+  showDeposits = true,
+  onLedgerRepaired,
+}: Props) {
+  const { icPurchases, icSales, icWarehouses, icBranches } = useApp();
   const [tab, setTab] = useState<TabId>('all');
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState('Date');
@@ -105,6 +121,8 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
   const [journals, setJournals] = useState<ICFundVoucher[]>([]);
   const [journalsLoading, setJournalsLoading] = useState(false);
   const [journalsLoaded, setJournalsLoaded] = useState(false);
+  const [deposits, setDeposits] = useState<ICBranchDeposit[]>([]);
+  const [depositsLoading, setDepositsLoading] = useState(false);
 
   const [viewPurchase, setViewPurchase] = useState<ICPurchase | null>(null);
   const [editPurchase, setEditPurchase] = useState<ICPurchase | null>(null);
@@ -117,6 +135,20 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
   const getWarehouseName = useCallback(
     (id?: string) => icWarehouses.find(w => w.id === id)?.name || 'None',
     [icWarehouses],
+  );
+
+  const getBranchLockerName = useCallback(
+    (deposit: ICBranchDeposit) => {
+      const id = deposit.icBranchId || deposit.warehouseId || undefined;
+      if (!id) return '—';
+      return icBranches.find(b => b.id === id)?.name || icWarehouses.find(w => w.id === id)?.name || '—';
+    },
+    [icBranches, icWarehouses],
+  );
+
+  const getBranchLockerId = useCallback(
+    (deposit: ICBranchDeposit) => deposit.icBranchId || deposit.warehouseId || undefined,
+    [],
   );
 
   const handleSort = useCallback(
@@ -141,14 +173,24 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
     [icSales, counterpartyId, range],
   );
 
+  const periodDeposits = useMemo(
+    () => (showDeposits ? filterCounterpartyDeposits(deposits, range) : []),
+    [deposits, range, showDeposits],
+  );
+
   const activity = useMemo(
-    () => mergeCounterpartyActivity(purchases, sales, journals),
-    [purchases, sales, journals],
+    () => mergeCounterpartyActivity(purchases, sales, journals, periodDeposits),
+    [purchases, sales, journals, periodDeposits],
+  );
+
+  const saleProfits = useMemo(
+    () => indexSaleLineProfits({ purchases: icPurchases, sales: icSales, range }),
+    [icPurchases, icSales, range],
   );
 
   const sortedActivity = useMemo(
-    () => sortCounterpartyActivity(activity, sortField, sortOrder, getWarehouseName),
-    [activity, sortField, sortOrder, getWarehouseName],
+    () => sortCounterpartyActivity(activity, sortField, sortOrder, getWarehouseName, saleProfits),
+    [activity, sortField, sortOrder, getWarehouseName, saleProfits],
   );
 
   const sortedPurchases = useMemo(
@@ -157,8 +199,8 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
   );
 
   const sortedSales = useMemo(
-    () => sortCounterpartySales(sales, sortField, sortOrder, getWarehouseName),
-    [sales, sortField, sortOrder, getWarehouseName],
+    () => sortCounterpartySales(sales, sortField, sortOrder, getWarehouseName, saleProfits),
+    [sales, sortField, sortOrder, getWarehouseName, saleProfits],
   );
 
   const loadJournals = useCallback(async () => {
@@ -177,34 +219,75 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
     }
   }, [counterpartyId, range.startDate, range.endDate]);
 
+  const loadDeposits = useCallback(async () => {
+    if (!showDeposits) {
+      setDeposits([]);
+      return;
+    }
+    setDepositsLoading(true);
+    try {
+      const { repaired } = await repairCustomerDepositLedgersAction(counterpartyId);
+      if (repaired > 0) {
+        onLedgerRepaired?.();
+        void loadJournals();
+      }
+      const rows = await listDepositsByCustomerAction({
+        customerId: counterpartyId,
+        startDate: range.startDate,
+        endDate: range.endDate,
+        limit: 500,
+      });
+      setDeposits(rows);
+    } finally {
+      setDepositsLoading(false);
+    }
+  }, [counterpartyId, range.startDate, range.endDate, showDeposits, onLedgerRepaired, loadJournals]);
+
   useEffect(() => {
     setJournalsLoaded(false);
     setJournals([]);
     void loadJournals();
   }, [loadJournals]);
 
+  useEffect(() => {
+    void repairCounterpartyMetalLedgersAction(counterpartyId).then(() => {
+      onLedgerRepaired?.();
+      void loadJournals();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resync once per counterparty visit
+  }, [counterpartyId]);
+
+  useEffect(() => {
+    void loadDeposits();
+  }, [loadDeposits]);
+
   useOnIcFundsVoucherPosted(detail => {
     if (!voucherPostedTargetsCounterparty(detail, counterpartyId)) return;
     void loadJournals();
+    void loadDeposits();
   });
 
-  const tabs = useMemo(
-    () => [
+  const tabs = useMemo(() => {
+    const base = [
       { id: 'all', label: 'All', count: activity.length },
       { id: 'purchases', label: 'Purchases', count: purchases.length },
       { id: 'sales', label: 'Sales', count: sales.length },
-      {
-        id: 'journals',
-        label: 'Journals',
-        count: journalsLoaded ? journals.filter(v => v.status !== 'void').length : undefined,
-      },
-    ],
-    [activity.length, purchases.length, sales.length, journals, journalsLoaded],
-  );
+    ];
+    if (showDeposits) {
+      base.push({ id: 'deposits', label: 'Deposits', count: periodDeposits.length });
+    }
+    base.push({
+      id: 'journals',
+      label: 'Journals',
+      count: journalsLoaded ? journals.filter(v => v.status !== 'void').length : 0,
+    });
+    return base;
+  }, [activity.length, purchases.length, sales.length, periodDeposits.length, journals, journalsLoaded, showDeposits]);
 
   const filteredJournals = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const active = journals.filter(v => v.status !== 'void');
+    const withProfit = augmentPartyJournalsWithMetalProfit(journals, sales, saleProfits, counterpartyId);
+    const active = withProfit.filter(v => v.status !== 'void');
     const rows = !q
       ? active
       : active.filter(v => {
@@ -220,18 +303,9 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
           );
         });
     return sortDealJournals(rows);
-  }, [journals, search, icPurchases, icSales]);
+  }, [journals, search, icPurchases, icSales, sales, saleProfits, counterpartyId]);
 
-  const renderPurchaseRow = (p: ICPurchase, showType?: boolean) => {
-    const metalPurchase = p.settlementMode === 'metal';
-    const pay = p.metalPaymentMethod === 'AED' ? 'AED' : 'CASH';
-    const bookLabel = metalPurchase ? (pay === 'AED' ? 'Metal · AED' : 'Metal · INR') : 'IC · AED';
-    const qty = metalPurchase
-      ? `${(p.metalWeightG ?? 0).toLocaleString('en-US', { maximumFractionDigits: 4 })} g`
-      : `${p.units.toLocaleString()} u`;
-    const amountAed = formatDealTableAed(purchaseDealAed(p));
-
-    return (
+  const renderPurchaseRow = (p: ICPurchase, showType?: boolean) => (
     <tr
       key={p.id}
       onClick={() => setViewPurchase(p)}
@@ -248,9 +322,6 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
         </td>
       ) : null}
       <td className={icTdClass('left')}>
-        <span className="font-mono text-xs text-slate-500">{getFormattedTxnId(p.id, 'purchase', p)}</span>
-      </td>
-      <td className={icTdClass('left')}>
         <WarehouseLink
           warehouseId={p.warehouseId}
           name={getWarehouseName(p.warehouseId)}
@@ -259,16 +330,33 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
         />
       </td>
       <td className={icTdClass('left')}>
-        <span className="text-xs font-medium text-slate-700">{bookLabel}</span>
+        <span className="text-xs font-medium text-slate-700">
+          {formatSettlementModeLabel(p.settlementMode, p.metalPaymentMethod)}
+        </span>
       </td>
       <td className={icTdClass('right')}>
-        <span className="font-mono tabular-nums">{qty}</span>
+        <span className="font-mono tabular-nums">{p.settlementMode === 'metal' ? '—' : p.units.toLocaleString()}</span>
+      </td>
+      <td className={icTdClass('right')}>
+        <span className="font-mono tabular-nums text-amber-800">
+          {p.settlementMode === 'metal'
+            ? (p.metalWeightG ?? 0).toLocaleString('en-US', { maximumFractionDigits: 4 })
+            : '—'}
+        </span>
       </td>
       <td className={icTdClass('right')}>
         <span className="font-mono tabular-nums text-indigo-900">{formatDealTableInr(purchaseDealInr(p))}</span>
       </td>
+      <td className={icTdClass('right')}>{formatDealTableSheetRate(purchaseDealSheetRate(p))}</td>
       <td className={icTdClass('right')}>
-        <span className="font-mono font-medium tabular-nums text-slate-900">{amountAed}</span>
+        <span className="font-mono font-medium tabular-nums text-slate-900">
+          {formatDealTableAed(purchaseDealAed(p))}
+        </span>
+      </td>
+      <td className={icTdClass('right')}>{formatDealTableSplitPaidInr(p)}</td>
+      <td className={icTdClass('right')}>{formatDealTableSplitPaidAed(p)}</td>
+      <td className={icTdClass('right')}>
+        <span className="text-slate-400">—</span>
       </td>
       <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-center gap-0.5">
@@ -278,19 +366,9 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
         </div>
       </td>
     </tr>
-    );
-  };
+  );
 
-  const renderSaleRow = (s: ICSale, showType?: boolean) => {
-    const metalSale = s.settlementMode === 'metal';
-  const pay = s.metalPaymentMethod === 'AED' ? 'AED' : 'CASH';
-  const bookLabel = metalSale ? (pay === 'AED' ? 'Metal · AED' : 'Metal · INR') : 'IC · AED';
-  const qty = metalSale
-    ? `${(s.metalWeightG ?? 0).toLocaleString('en-US', { maximumFractionDigits: 4 })} g`
-    : `${(s.units ?? 0).toLocaleString()} u`;
-  const amountAed = formatDealTableAed(saleTableDisplayAed(s));
-
-  return (
+  const renderSaleRow = (s: ICSale, showType?: boolean) => (
     <tr
       key={s.id}
       onClick={() => setViewSale(s)}
@@ -307,9 +385,6 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
         </td>
       ) : null}
       <td className={icTdClass('left')}>
-        <span className="font-mono text-xs text-slate-500">{getFormattedTxnId(s.id, 'sale', s)}</span>
-      </td>
-      <td className={icTdClass('left')}>
         <WarehouseLink
           warehouseId={s.warehouseId}
           name={getWarehouseName(s.warehouseId)}
@@ -318,17 +393,32 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
         />
       </td>
       <td className={icTdClass('left')}>
-        <span className="text-xs font-medium text-slate-700">{bookLabel}</span>
+        <span className="text-xs font-medium text-slate-700">
+          {formatSettlementModeLabel(s.settlementMode, s.metalPaymentMethod)}
+        </span>
       </td>
       <td className={icTdClass('right')}>
-        <span className="font-mono tabular-nums">{qty}</span>
+        <span className="font-mono tabular-nums">{s.settlementMode === 'metal' ? '—' : (s.units ?? 0).toLocaleString()}</span>
+      </td>
+      <td className={icTdClass('right')}>
+        <span className="font-mono tabular-nums text-amber-800">
+          {s.settlementMode === 'metal'
+            ? (s.metalWeightG ?? 0).toLocaleString('en-US', { maximumFractionDigits: 4 })
+            : '—'}
+        </span>
       </td>
       <td className={icTdClass('right')}>
         <span className="font-mono tabular-nums text-indigo-900">{formatDealTableInr(saleDealInr(s))}</span>
       </td>
+      <td className={icTdClass('right')}>{formatDealTableSheetRate(saleDealSheetRate(s))}</td>
       <td className={icTdClass('right')}>
-        <span className="font-mono font-medium tabular-nums text-slate-900">{amountAed}</span>
+        <span className="font-mono font-medium tabular-nums text-slate-900">
+          {formatDealTableAed(saleTableDisplayAed(s))}
+        </span>
       </td>
+      <td className={icTdClass('right')}>{formatDealTableSplitPaidInr(s)}</td>
+      <td className={icTdClass('right')}>{formatDealTableSplitPaidAed(s)}</td>
+      <td className={icTdClass('right')}>{formatSaleLineProfit(saleProfits.get(s.id))}</td>
       <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-center gap-0.5">
           <ICTransferViewIconButton onClick={() => setViewSale(s)} />
@@ -337,8 +427,69 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
         </div>
       </td>
     </tr>
-    );
-  };
+  );
+
+  const renderDepositRow = (d: ICBranchDeposit, showType?: boolean) => (
+    <tr key={d.id} className="border-b border-slate-100 transition-colors hover:bg-slate-50/80">
+      <td className={icTdClass('left')}>
+        <DateCell iso={d.depositDate || d.createdAt} />
+      </td>
+      {showType ? (
+        <td className={icTdClass('left')}>
+          <span className="rounded-md bg-violet-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-violet-800">
+            Deposit
+          </span>
+        </td>
+      ) : null}
+      <td className={icTdClass('left')}>
+        <WarehouseLink
+          warehouseId={getBranchLockerId(d)}
+          name={getBranchLockerName(d)}
+          branchSlug={branchSlug}
+          detailKind="branch"
+          stopPropagation
+        />
+      </td>
+      <td className={icTdClass('left')}>
+        <span className="text-xs font-medium text-slate-700">
+          {d.settlementMode === 'metal' ? 'Metal · AED wallet' : 'Cash · AED wallet'}
+        </span>
+      </td>
+      <td className={icTdClass('right')}>
+        <span className="text-slate-400">—</span>
+      </td>
+      <td className={icTdClass('right')}>
+        <span className="font-mono tabular-nums text-amber-800">
+          {d.settlementMode === 'metal' && d.metalWeightG != null
+            ? d.metalWeightG.toLocaleString('en-US', { maximumFractionDigits: 4 })
+            : '—'}
+        </span>
+      </td>
+      <td className={icTdClass('right')}>
+        <span className="text-slate-400">—</span>
+      </td>
+      <td className={icTdClass('right')}>
+        <span className="text-slate-400">—</span>
+      </td>
+      <td className={icTdClass('right')}>
+        <span className="font-mono font-medium tabular-nums text-slate-900">
+          <FmtLedgerAed amount={d.amountAed} />
+        </span>
+      </td>
+      <td className={icTdClass('right')}>
+        <span className="text-slate-400">—</span>
+      </td>
+      <td className={icTdClass('right')}>
+        <span className="text-slate-400">—</span>
+      </td>
+      <td className={icTdClass('right')}>
+        <span className="text-slate-400">—</span>
+      </td>
+      <td className={icTdClass('center')}>
+        <span className="text-slate-400">—</span>
+      </td>
+    </tr>
+  );
 
   const renderVoucherRow = (v: ICFundVoucher) => {
     const typeLabel =
@@ -368,9 +519,6 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
           </span>
         </td>
         <td className={icTdClass('left')}>
-          <span className="font-mono text-xs text-slate-500">#{v.voucherNo}</span>
-        </td>
-        <td className={icTdClass('left')}>
           <span className="text-xs text-slate-400">—</span>
         </td>
         <td className={icTdClass('left')}>
@@ -380,10 +528,25 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
           <span className="text-slate-400">—</span>
         </td>
         <td className={icTdClass('right')}>
+          <span className="text-slate-400">—</span>
+        </td>
+        <td className={icTdClass('right')}>
           <span className="font-mono tabular-nums text-indigo-900">{amountInr}</span>
         </td>
         <td className={icTdClass('right')}>
+          <span className="text-slate-400">—</span>
+        </td>
+        <td className={icTdClass('right')}>
           <span className="font-mono font-medium tabular-nums text-slate-900">{amountAed}</span>
+        </td>
+        <td className={icTdClass('right')}>
+          <span className="text-slate-400">—</span>
+        </td>
+        <td className={icTdClass('right')}>
+          <span className="text-slate-400">—</span>
+        </td>
+        <td className={icTdClass('right')}>
+          <span className="text-slate-400">—</span>
         </td>
         <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
           <ICTransferViewIconButton onClick={() => setViewJournal(v)} />
@@ -392,12 +555,12 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
     );
   };
 
-  const renderActivityRow = (row: CounterpartyActivityRow) =>
-    row.kind === 'purchase'
-      ? renderPurchaseRow(row.purchase, true)
-      : row.kind === 'sale'
-        ? renderSaleRow(row.sale, true)
-        : renderVoucherRow(row.voucher);
+  const renderActivityRow = (row: CounterpartyActivityRow) => {
+    if (row.kind === 'purchase') return renderPurchaseRow(row.purchase, true);
+    if (row.kind === 'sale') return renderSaleRow(row.sale, true);
+    if (row.kind === 'deposit') return renderDepositRow(row.deposit, true);
+    return renderVoucherRow(row.voucher);
+  };
 
   const journalTable = (
     <div className={icfTableWrap}>
@@ -430,10 +593,14 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
                 key={row.id}
                 role="button"
                 tabIndex={0}
-                onClick={() => setViewJournal(row)}
+                onClick={() => {
+                  if (isPartyProfitMemoVoucher(row.id)) return;
+                  setViewJournal(row);
+                }}
                 onKeyDown={e => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
+                    if (isPartyProfitMemoVoucher(row.id)) return;
                     setViewJournal(row);
                   }
                 }}
@@ -512,8 +679,8 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
             sortField={sortField}
             sortOrder={sortOrder}
             onSort={handleSort}
-            isEmpty={activity.length === 0 && !journalsLoading}
-            emptyMessage="No purchases, sales, payments, or receipts for this counterparty in the selected period."
+            isEmpty={activity.length === 0 && !journalsLoading && !depositsLoading}
+            emptyMessage="No purchases, sales, deposits, payments, or receipts for this counterparty in the selected period."
           >
             {sortedActivity.map(renderActivityRow)}
           </ICTransferDataTableShell>
@@ -533,6 +700,27 @@ export default function CounterpartyDetailTabs({ counterpartyId, range, branchSl
             emptyMessage="No purchases for this counterparty in the selected period."
           >
             {sortedPurchases.map(p => renderPurchaseRow(p))}
+          </ICTransferDataTableShell>
+        ) : null}
+
+        {tab === 'deposits' && showDeposits ? (
+          <ICTransferDataTableShell
+            title="UAE branch deposits"
+            search={search}
+            onSearchChange={setSearch}
+            searchPlaceholder="Search deposits…"
+            columns={PURCHASE_COLUMNS}
+            sortField={sortField}
+            sortOrder={sortOrder}
+            onSort={handleSort}
+            isEmpty={!depositsLoading && periodDeposits.length === 0}
+            emptyMessage="No branch deposits crediting this customer in the selected period."
+          >
+            {depositsLoading ? (
+              <ASICTableRowsSkeleton rows={5} cols={PURCHASE_COLUMNS.length} />
+            ) : (
+              periodDeposits.map(d => renderDepositRow(d))
+            )}
           </ICTransferDataTableShell>
         ) : null}
 

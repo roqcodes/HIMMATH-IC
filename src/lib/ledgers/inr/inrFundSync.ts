@@ -170,6 +170,62 @@ export async function ensureInrCounterpartyAccount(
   return ensureInrLinkedAccount(client, branchId, 'ic_counterparty', counterpartyId, name);
 }
 
+/** Compact role suffix so `{uuid}#xxxx` stays within varchar(50). */
+const METAL_INR_ROLE_CODE: Record<string, string> = {
+  customer: 'cu',
+  supplier: 'su',
+  aed_settlement: 'as',
+  metal_stock: 'st',
+  metal_sales: 'sl',
+  metal_cost: 'cs',
+  metal_profit: 'pr',
+};
+
+function metalInrRoleCode(role: string): string {
+  const code = METAL_INR_ROLE_CODE[role];
+  if (!code) throw new Error(`Unknown metal INR journal role: ${role}`);
+  return code;
+}
+
+/** One active INR journal per (type, ref) — split metal uses `{dealId}#{debit}{credit}` (41 chars). */
+export function metalInrJournalReferenceId(
+  dealId: string,
+  line: { debit: string; credit: string },
+): string {
+  return `${dealId}#${metalInrRoleCode(line.debit)}${metalInrRoleCode(line.credit)}`;
+}
+
+export async function voidInrMetalDealVouchers(
+  client: DbClient,
+  branchId: string,
+  dealId: string,
+  referenceTypes: readonly string[],
+): Promise<void> {
+  const { voidCapitalAllocationsForVoucher } = await import('@/lib/capital/allocation');
+  const existing = await client.query(
+    `SELECT id FROM inr_fund_vouchers
+     WHERE branch_id = $1 AND status = 'active'
+       AND (
+         (reference_type = ANY($2::text[]) AND reference_id = $3)
+         OR reference_id LIKE $4
+       )`,
+    [branchId, referenceTypes, dealId, `${dealId}#%`],
+  );
+  for (const row of existing.rows) {
+    await voidCapitalAllocationsForVoucher(client, String(row.id), 'INR');
+  }
+  await client.query(
+    `UPDATE inr_fund_vouchers
+     SET status = 'void', voided_at = CURRENT_TIMESTAMP
+     WHERE branch_id = $1 AND status = 'active'
+       AND (
+         (reference_type = ANY($2::text[]) AND reference_id = $3)
+         OR reference_id LIKE $4
+       )`,
+    [branchId, referenceTypes, dealId, `${dealId}#%`],
+  );
+}
+
 export async function voidInrVoucherByReference(
   client: DbClient,
   branchId: string,
@@ -210,13 +266,16 @@ export async function postInrVoucherInTx(
     referenceType?: string | null;
     referenceId?: string | null;
     createdByName?: string | null;
+    /** When false, allow multiple active journals with the same reference (metal split legs). Default true. */
+    dedupeReference?: boolean;
   },
 ): Promise<string | null> {
   const amount = roundLedgerAmount(Number(params.amount));
   if (amount <= 0) return null;
   const voucherType = params.voucherType ?? 'journal';
+  const dedupeReference = params.dedupeReference !== false;
 
-  if (voucherType === 'journal' && params.referenceType && params.referenceId) {
+  if (dedupeReference && voucherType === 'journal' && params.referenceType && params.referenceId) {
     const existing = await client.query(
       `SELECT id FROM inr_fund_vouchers
        WHERE branch_id = $1 AND reference_type = $2 AND reference_id = $3 AND status = 'active'
@@ -293,11 +352,13 @@ export async function postInrJournalInTx(
     notes: string;
     referenceType: string;
     referenceId: string;
+    dedupeReference?: boolean;
   },
 ): Promise<string | null> {
   return postInrVoucherInTx(client, {
     ...params,
     voucherType: 'journal',
+    dedupeReference: params.dedupeReference,
   });
 }
 

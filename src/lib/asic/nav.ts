@@ -57,6 +57,7 @@ export type AsicAdminMobileNavItem = { id: string; label: string; href: string }
 /** Admin sidebar — primary navigation (replaces former top toolbar menu). */
 export const ADMIN_SIDEBAR_NAV: AsicAdminSidebarEntry[] = [
   { type: 'link', id: 'dashboard', label: L('dashboard') },
+  { type: 'link', id: 'branches', label: L('branches') },
   { type: 'link', id: 'warehouse', label: L('warehouse') },
   { type: 'link', id: 'purchases', label: L('purchases') },
   { type: 'link', id: 'sales', label: L('sales') },
@@ -101,6 +102,7 @@ export const ADMIN_NAV: readonly AsicNavItem[] = [
   { id: 'dashboard', label: L('dashboard'), group: 'operations' },
   { id: 'sales', label: L('sales'), group: 'operations' },
   { id: 'purchases', label: L('purchases'), group: 'operations' },
+  { id: 'branches', label: L('branches'), group: 'operations' },
   { id: 'warehouse', label: L('warehouse'), group: 'operations' },
   { id: 'payments', label: L('payments'), group: 'finance' },
   { id: 'receipts', label: L('receipts'), group: 'finance' },

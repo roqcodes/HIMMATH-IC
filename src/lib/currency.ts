@@ -21,8 +21,8 @@ export function formatConvertedAmount(
 ): string {
   const absAmount = Math.abs(amountAed);
   const numStr = absAmount.toLocaleString('en-US', {
-    maximumFractionDigits: 4,
-    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
   });
   const sign = amountAed < 0 ? '-' : options?.showPlus && amountAed > 0 ? '+' : '';
   const suffix = options?.suffix !== false ? ` ${currency}` : '';

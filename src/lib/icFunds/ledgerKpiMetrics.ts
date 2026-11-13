@@ -61,13 +61,14 @@ export function buildLedgerAccountMetrics(params: {
       label: `${currency} period Dr`,
       value: hasAccount ? amountNode(book.periodDebit) : dash,
       valueTitle: hasAccount ? fmtPlain(book.periodDebit) : undefined,
-      hint: rangeLabel,
+      hint: `${rangeLabel} · they owe you`,
+      tone: book.periodDebit > 0 ? 'emerald' : 'slate',
     },
     {
       label: `${currency} period Cr`,
       value: hasAccount ? amountNode(book.periodCredit) : dash,
       valueTitle: hasAccount ? fmtPlain(book.periodCredit) : undefined,
-      hint: rangeLabel,
+      hint: `${rangeLabel} · paid / credits`,
       tone: book.periodCredit > 0 ? 'amber' : 'slate',
     },
     {

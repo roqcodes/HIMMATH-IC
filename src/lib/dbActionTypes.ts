@@ -3,6 +3,7 @@ import type {
   ICRegion,
   ICSupplier,
   ICWarehouse,
+  ICBranch,
   ICRateGroup,
   ICTransferSettings,
   ICPurchase,
@@ -22,6 +23,7 @@ export interface InitialDataPayload {
   icRegions: ICRegion[];
   icSuppliers: ICSupplier[];
   icWarehouses: ICWarehouse[];
+  icBranches: ICBranch[];
   icRateGroups: ICRateGroup[];
   icTransferSettings: ICTransferSettings;
   icPurchases: ICPurchase[];

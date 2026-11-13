@@ -19,7 +19,7 @@ export type CurrencyAmountProps = {
 function formatInrNumber(amount: number, showPlus: boolean): string {
   if (!Number.isFinite(amount)) return '0';
   const abs = Math.abs(amount);
-  const numStr = abs.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+  const numStr = abs.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const sign = amount < 0 ? '-' : showPlus && amount > 0 ? '+' : '';
   return `${sign}${numStr}`;
 }
@@ -27,9 +27,10 @@ function formatInrNumber(amount: number, showPlus: boolean): string {
 function formatAedNumber(amount: number, showPlus: boolean, maxFractionDigits: number): string {
   if (!Number.isFinite(amount)) return '0';
   const absAmount = Math.abs(amount);
+  const digits = maxFractionDigits <= 2 ? 2 : maxFractionDigits;
   const numStr = absAmount.toLocaleString('en-US', {
-    maximumFractionDigits: maxFractionDigits,
-    minimumFractionDigits: 0,
+    maximumFractionDigits: digits,
+    minimumFractionDigits: digits <= 2 ? 2 : 0,
   });
   const sign = amount < 0 ? '-' : showPlus && amount > 0 ? '+' : '';
   return `${sign}${numStr}`;

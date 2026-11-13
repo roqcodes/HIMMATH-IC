@@ -40,7 +40,19 @@ export const addSupplierSchema = z.object({
   subdivision: z.string().optional().nullable().or(z.literal('')),
   locality: z.string().optional().nullable().or(z.literal('')),
   branchId: z.string().optional().nullable(),
-  roles: z.array(z.enum(['supplier', 'party', 'agent'])).min(1).optional(),
+  kind: z.enum(['manager', 'customer']).optional().default('customer'),
+  homeManagerId: z.string().uuid().optional().nullable(),
+  roles: z.array(z.enum(['supplier', 'party', 'agent'])).optional(),
+}).superRefine((data, ctx) => {
+  const kind = data.kind ?? 'customer';
+  if (kind === 'manager') return;
+  const roles = data.roles ?? [];
+  if (roles.length < 1) {
+    ctx.addIssue({ code: 'custom', message: 'Pick at least one customer role', path: ['roles'] });
+  }
+  if (!data.homeManagerId?.trim()) {
+    ctx.addIssue({ code: 'custom', message: 'Home manager is required for customers', path: ['homeManagerId'] });
+  }
 });
 
 export const updateSupplierSchema = addSupplierSchema.extend({
@@ -58,6 +70,7 @@ export const addWarehouseSchema = z.object({
   indiaState: z.string().optional().nullable().or(z.literal('')),
   indiaCity: z.string().optional().nullable().or(z.literal('')),
   sendDeliveryProofToCustomer: z.boolean().optional().default(true),
+  deskKind: z.enum(['warehouse', 'branch']).optional().default('warehouse'),
   branchId: z.string().optional().nullable(),
 });
 
@@ -148,6 +161,7 @@ export const icSettlementModeSchema = z.enum(['cash', 'metal']);
 
 const purchaseFieldsBaseSchema = z.object({
   counterpartyId: z.string().min(1).optional(),
+  managerId: z.string().uuid().optional().nullable(),
   supplierId: z.string().min(1).optional(),
   locationId: z.string().optional().nullable(),
   warehouseId: z.string().optional().nullable(),
@@ -158,8 +172,10 @@ const purchaseFieldsBaseSchema = z.object({
   metalRateInrPerG: z.number().positive().optional(),
   metalRateAedPerG: z.number().nonnegative().optional(),
   inrTotal: z.number().positive().optional(),
-  metalPaymentMethod: z.enum(['CASH', 'AED', 'INR']).optional(),
+  metalPaymentMethod: z.enum(['CASH', 'AED', 'INR', 'SPLIT']).optional(),
   aedAgentId: z.string().uuid().optional().nullable(),
+  splitInrPaid: z.number().nonnegative().optional().nullable(),
+  splitAedPaid: z.number().nonnegative().optional().nullable(),
   paymentMethod: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
   aedTotal: z.number().nonnegative().optional().nullable(),
@@ -196,8 +212,10 @@ export const addPurchaseSchema = purchaseFieldsSchema.superRefine((data, ctx) =>
     if (data.inrTotal == null || data.inrTotal <= 0) {
       ctx.addIssue({ code: 'custom', message: 'Total INR required', path: ['inrTotal'] });
     }
-    const pay = data.metalPaymentMethod === 'AED' ? 'AED' : 'CASH';
-    if (pay === 'AED') {
+    const pay = data.metalPaymentMethod === 'AED' || data.metalPaymentMethod === 'SPLIT'
+      ? data.metalPaymentMethod
+      : 'CASH';
+    if (pay === 'AED' || pay === 'SPLIT') {
       if (data.metalRateAedPerG == null || data.metalRateAedPerG <= 0) {
         ctx.addIssue({ code: 'custom', message: 'AED rate required for AED payment', path: ['metalRateAedPerG'] });
       }
@@ -208,8 +226,17 @@ export const addPurchaseSchema = purchaseFieldsSchema.superRefine((data, ctx) =>
         ctx.addIssue({ code: 'custom', message: 'AED agent required', path: ['aedAgentId'] });
       }
     }
+    if (pay === 'SPLIT') {
+      if (data.splitInrPaid == null || data.splitInrPaid <= 0) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Enter INR paid with the counterparty for split',
+          path: ['splitInrPaid'],
+        });
+      }
+    }
     const labTotal = Number(data.labTotalInr) || 0;
-    if (labTotal > 0 && data.inrTotal != null && labTotal - data.inrTotal > 0.0001) {
+    if (labTotal > 0 && data.inrTotal != null && labTotal - data.inrTotal > 0.01) {
       ctx.addIssue({
         code: 'custom',
         message: 'Lab test total cannot exceed metal INR total',
@@ -218,13 +245,37 @@ export const addPurchaseSchema = purchaseFieldsSchema.superRefine((data, ctx) =>
     }
   });
 
-export const updatePurchaseSchema = purchaseFieldsBaseSchema.partial();
+function refineMetalSplitUpdatePurchase(
+  data: Partial<z.infer<typeof purchaseFieldsBaseSchema>>,
+  ctx: z.RefinementCtx,
+) {
+  if (data.settlementMode === 'cash') return;
+  if (data.metalPaymentMethod !== 'SPLIT') return;
+  if (!data.aedAgentId?.trim()) {
+    ctx.addIssue({ code: 'custom', message: 'AED agent required', path: ['aedAgentId'] });
+  }
+  if (data.aedTotal == null || data.aedTotal <= 0) {
+    ctx.addIssue({ code: 'custom', message: 'Total AED required', path: ['aedTotal'] });
+  }
+  if (data.splitInrPaid == null || data.splitInrPaid <= 0) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'Enter INR paid with the counterparty for split',
+      path: ['splitInrPaid'],
+    });
+  }
+}
+
+export const updatePurchaseSchema = purchaseFieldsBaseSchema
+  .partial()
+  .superRefine((data, ctx) => refineMetalSplitUpdatePurchase(data, ctx));
 
 const saleFieldsSchema = z.object({
   customerName: nameSchema,
   orderCustomerName: z.string().optional().nullable(),
   orderCustomerId: z.string().optional().nullable(),
   counterpartyId: z.string().optional().nullable(),
+  managerId: z.string().uuid().optional().nullable(),
   subCustomerId: z.string().optional().nullable(),
   subCustomerName: z.string().optional().nullable(),
   warehouseId: z.string().optional().nullable(),
@@ -237,8 +288,10 @@ const saleFieldsSchema = z.object({
   metalRateAedPerG: z.number().nonnegative().optional(),
   inrTotal: z.number().positive().optional(),
   metalPurchaseId: z.string().uuid().optional().nullable(),
-  metalPaymentMethod: z.enum(['CASH', 'AED', 'INR']).optional().nullable(),
+  metalPaymentMethod: z.enum(['CASH', 'AED', 'INR', 'SPLIT']).optional().nullable(),
   aedAgentId: z.string().uuid().optional().nullable(),
+  splitInrPaid: z.number().nonnegative().optional().nullable(),
+  splitAedPaid: z.number().nonnegative().optional().nullable(),
   aedAmount: z.number().nonnegative().optional().nullable(),
   bank: z.string().optional().nullable(),
   address: z.string().optional().nullable(),
@@ -289,12 +342,24 @@ export const addSaleSchema = saleFieldsSchema.superRefine((data, ctx) => {
         path: ['unitRate'],
       });
     }
-    const pay = data.metalPaymentMethod === 'AED' ? 'AED' : 'CASH';
-    if (pay === 'AED' && !data.aedAgentId?.trim()) {
+    const pay =
+      data.metalPaymentMethod === 'AED' || data.metalPaymentMethod === 'SPLIT'
+        ? data.metalPaymentMethod
+        : 'CASH';
+    if ((pay === 'AED' || pay === 'SPLIT') && !data.aedAgentId?.trim()) {
       ctx.addIssue({ code: 'custom', message: 'AED agent required', path: ['aedAgentId'] });
     }
+    if (pay === 'SPLIT') {
+      if (data.splitInrPaid == null || data.splitInrPaid <= 0) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Enter INR paid with the counterparty for split',
+          path: ['splitInrPaid'],
+        });
+      }
+    }
     const labTotal = Number(data.labTotalInr) || 0;
-    if (labTotal > 0 && data.inrTotal != null && labTotal - data.inrTotal > 0.0001) {
+    if (labTotal > 0 && data.inrTotal != null && labTotal - data.inrTotal > 0.01) {
       ctx.addIssue({
         code: 'custom',
         message: 'Lab test total cannot exceed metal INR total',
@@ -303,7 +368,30 @@ export const addSaleSchema = saleFieldsSchema.superRefine((data, ctx) => {
     }
   });
 
-export const updateSaleSchema = saleFieldsSchema.partial();
+function refineMetalSplitUpdateSale(
+  data: Partial<z.infer<typeof saleFieldsSchema>>,
+  ctx: z.RefinementCtx,
+) {
+  if (data.settlementMode === 'cash') return;
+  if (data.metalPaymentMethod !== 'SPLIT') return;
+  if (!data.aedAgentId?.trim()) {
+    ctx.addIssue({ code: 'custom', message: 'AED agent required', path: ['aedAgentId'] });
+  }
+  if (data.aedAmount == null || data.aedAmount <= 0) {
+    ctx.addIssue({ code: 'custom', message: 'AED total required (unit rate × units)', path: ['aedAmount'] });
+  }
+  if (data.splitInrPaid == null || data.splitInrPaid <= 0) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'Enter INR paid with the counterparty for split',
+      path: ['splitInrPaid'],
+    });
+  }
+}
+
+export const updateSaleSchema = saleFieldsSchema
+  .partial()
+  .superRefine((data, ctx) => refineMetalSplitUpdateSale(data, ctx));
 
 export const saveSubCustomerSchema = z.object({
   id: z.string().optional(),

@@ -8,8 +8,9 @@ export const STAFF_SECTION_LABELS: Record<AsicSectionId, string> = {
   orders: 'Sales Orders',
   sales: 'Sales',
   purchases: 'Purchases',
+  branches: 'Branches',
   warehouse: 'Warehouses',
-  counterparties: 'Counterparties',
+  counterparties: 'Managers & Customers',
   suppliers: 'Suppliers',
   payments: 'Payments',
   receipts: 'Receipts',
@@ -47,6 +48,7 @@ export const BRANCH_STAFF_PERMISSION_SECTIONS: AsicSectionId[] = STAFF_MANAGED_S
 export const ADMIN_STAFF_PERMISSION_SECTIONS: AsicSectionId[] = [
   'sales',
   'purchases',
+  'branches',
   'warehouse',
   'payments',
   'receipts',
@@ -92,7 +94,7 @@ export type StaffPermissionGroup = {
 
 const ADMIN_STAFF_PERMISSION_GROUPS: StaffPermissionGroup[] = [
   { id: 'general', label: 'General', sections: ['dashboard'] },
-  { id: 'operations', label: 'Operations', sections: ['sales', 'purchases', 'warehouse'] },
+  { id: 'operations', label: 'Operations', sections: ['sales', 'purchases', 'branches', 'warehouse'] },
   {
     id: 'finance',
     label: 'Finance & funds',
@@ -127,6 +129,7 @@ const SECTION_TO_LEGACY_KEYS: Partial<Record<AsicSectionId, BranchPageId[]>> = {
   orders: ['ic-transfer'],
   sales: ['ic-transfer-admin'],
   purchases: ['ic-transfer-admin'],
+  branches: ['warehouse'],
   warehouse: ['warehouse'],
   payments: ['ic-funds'],
   receipts: ['ic-funds'],

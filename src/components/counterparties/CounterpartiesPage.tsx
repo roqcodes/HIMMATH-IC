@@ -18,7 +18,7 @@ import {
   filterSuppliersForAdminPortal,
   filterSuppliersForBranchPortal,
 } from '@/lib/icTransfer/branchPortalScope';
-import { formatCounterpartyRolesLabel } from '@/lib/counterparties/roles';
+import { formatCounterpartyKindLabel, formatCounterpartyRolesLabel } from '@/lib/counterparties/roles';
 import { COUNTERPARTIES_PAGE_TITLE } from '@/lib/counterparties/labels';
 import { counterpartiesFromRegistry } from '@/lib/counterparties/list';
 import { counterpartyDetailPath } from '@/lib/counterparties/navigation';
@@ -121,7 +121,7 @@ export default function CounterpartiesPage() {
               {...wp()}
               className={`${asicBtnPrimary} gap-1.5${!canWrite ? ' cursor-not-allowed opacity-50' : ''}`}
             >
-              Add counterparty
+              Add party
             </button>
           }
         />
@@ -157,6 +157,7 @@ export default function CounterpartiesPage() {
                 <tr className={asicTheadRow}>
                   <th className={asicTh}>Name</th>
                   <th className={asicTh}>Code</th>
+                  <th className={asicTh}>Kind</th>
                   <th className={asicTh}>Roles</th>
                   <th className={asicTh}>Phone</th>
                   <th className={asicTh}>Location</th>
@@ -188,6 +189,9 @@ export default function CounterpartiesPage() {
                       )}
                     </td>
                     <td className={`${asicTd} font-mono text-xs text-slate-600`}>{row.code || '—'}</td>
+                    <td className={`${asicTd} text-slate-600`}>
+                      {formatCounterpartyKindLabel(row.supplier?.kind)}
+                    </td>
                     <td className={`${asicTd} text-slate-600`}>
                       {formatCounterpartyRolesLabel(row.supplier?.roles)}
                     </td>
@@ -236,7 +240,7 @@ export default function CounterpartiesPage() {
         open={modalOpen}
         counterparty={editing}
         branchId={branchSlug ? branchId : undefined}
-        branchSlug={branchSlug ?? (isHqAdmin ? undefined : writeSlug)}
+        branchSlug={branchSlug || writeSlug || undefined}
         onClose={() => {
           setModalOpen(false);
           setEditing(null);

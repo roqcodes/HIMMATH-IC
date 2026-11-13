@@ -5,6 +5,7 @@ import {
   resolveTradeUnitRateAed,
   sliceSettlementTradeReport,
   summarizeSettlementTrades,
+  tradeLineBookInr,
   type ICSettlementTradeLine,
   type ICSettlementTradeReport,
 } from '@/lib/icFunds/settlementTradeReport';
@@ -107,6 +108,57 @@ describe('sliceSettlementTradeReport', () => {
     assert.equal(aed.summary.saleAed, 90);
     assert.equal(aed.summary.purchaseInr, 0);
     assert.equal(aed.summary.saleInr, 0);
+  });
+
+  const splitBuy = line({
+    id: 'p-split',
+    txnKind: 'purchase',
+    metalPaymentMethod: 'SPLIT',
+    inrTotal: 10_000_000,
+    aedTotal: 350_000,
+    splitInrPaid: 4_000_000,
+    splitAedPaid: 140_000,
+    metalWeightG: 100,
+  });
+  const splitSell = line({
+    id: 's-split',
+    txnKind: 'sale',
+    metalPaymentMethod: 'SPLIT',
+    inrTotal: 12_000_000,
+    aedTotal: 400_000,
+    splitInrPaid: 5_000_000,
+    splitAedPaid: 175_000,
+    metalWeightG: 100,
+  });
+
+  it('tradeLineBookInr uses split leg not deal net for SPLIT rows', () => {
+    const row = line({
+      id: 's-split',
+      txnKind: 'sale',
+      metalPaymentMethod: 'SPLIT',
+      inrTotal: 9_900_000,
+      splitInrPaid: 5_000_000,
+      splitAedPaid: 175_000,
+    });
+    assert.equal(tradeLineBookInr(row), 5_000_000);
+    assert.notEqual(tradeLineBookInr(row), row.inrTotal);
+  });
+
+  it('split rows use INR paid and AED paid legs per book', () => {
+    const report: ICSettlementTradeReport = {
+      settlementMode: 'metal',
+      purchases: [splitBuy],
+      sales: [splitSell],
+      summary: summarizeSettlementTrades([splitBuy], [splitSell]),
+    };
+    const inr = sliceSettlementTradeReport(report, 'inr');
+    assert.equal(inr.summary.purchaseInr, 4_000_000);
+    assert.equal(inr.summary.saleInr, 5_000_000);
+    assert.equal(inr.summary.purchaseAed, 0);
+    const aed = sliceSettlementTradeReport(report, 'aed');
+    assert.equal(aed.summary.purchaseAed, 140_000);
+    assert.equal(aed.summary.saleAed, 175_000);
+    assert.equal(aed.summary.purchaseInr, 0);
   });
 
   it('leaves cash IC fund reports unchanged', () => {

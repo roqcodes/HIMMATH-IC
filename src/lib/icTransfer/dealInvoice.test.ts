@@ -47,8 +47,8 @@ describe('deal invoices', () => {
       id: 'bbbb2222-cccc-dddd-eeee-ffff00001111',
       customerName: 'Ronak',
       settlementMode: 'cash',
-      units: 10,
-      unitRate: 100,
+      units: 1,
+      unitRate: 10,
       aedAmount: 1000,
     };
     const doc = buildSaleInvoice(sale, { ...ctx, partyName: 'Ronak' });

@@ -45,6 +45,43 @@ const ronakSell: ICSale = {
   createdAt: '2026-11-05T08:04:00.000Z',
 };
 
+describe('remainingCashMetalInrCost', () => {
+  it('uses full lot net for SPLIT purchase, not INR-paid leg only', () => {
+    const splitBuy: ICPurchase = {
+      id: 'p-split',
+      warehouseId: 'wh',
+      units: 0,
+      settlementMode: 'metal',
+      metalPaymentMethod: 'SPLIT',
+      inrTotal: 10_000_000,
+      labTotalInr: 0,
+      metalWeightG: 1000,
+      splitInrPaid: 5_000_000,
+      splitAedPaid: 175_000,
+      aedTotal: 350_000,
+      createdAt: '2026-11-01',
+    };
+    assert.equal(remainingCashMetalInrCost([splitBuy], [], { through: '2026-11-30' }), 10_000_000);
+    const partialSale: ICSale = {
+      id: 's1',
+      customerName: 'c',
+      warehouseId: 'wh',
+      units: 0,
+      unitRate: 0,
+      aedAmount: 0,
+      settlementMode: 'metal',
+      metalPaymentMethod: 'CASH',
+      metalPurchaseId: 'p-split',
+      inrTotal: 5_000_000,
+      metalWeightG: 500,
+      orderStatus: 'completed',
+      createdAt: '2026-11-02',
+    };
+    const remaining = remainingCashMetalInrCost([splitBuy], [partialSale], { through: '2026-11-30' });
+    assert.ok(Math.abs(remaining - 5_000_000) < 0.02);
+  });
+});
+
 describe('warehouse KPI fixture Zak buy + Ronak sell', () => {
   it('hides cash-metal memo AED', () => {
     assert.equal(dealPurchaseAed(zakBuy), 0);

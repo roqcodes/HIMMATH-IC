@@ -9,18 +9,27 @@ import { asicBtnOutline, asicBtnPrimary, asicInput } from '@/components/asic/ui'
 import { useApp } from '@/context/AppContext';
 import { parseFormAmount } from '@/lib/parseFormAmount';
 import type { ICWarehouse } from '@/types';
+import WarehouseManagersField from '@/components/ic-transfer/settings/WarehouseManagersField';
 
 type Props = {
   open: boolean;
   warehouse?: ICWarehouse | null;
   branchId?: string | null;
+  defaultDeskKind?: 'warehouse' | 'branch';
   onClose: () => void;
   onSaved?: () => void;
 };
 
 const fieldClass = 'w-full max-w-none';
 
-export default function WarehouseModal({ open, warehouse, branchId, onClose, onSaved }: Props) {
+export default function WarehouseModal({
+  open,
+  warehouse,
+  branchId,
+  defaultDeskKind = 'warehouse',
+  onClose,
+  onSaved,
+}: Props) {
   const { addICWarehouse, updateICWarehouse } = useApp();
   const isEdit = Boolean(warehouse?.id);
 
@@ -35,7 +44,11 @@ export default function WarehouseModal({ open, warehouse, branchId, onClose, onS
   const [openingAed, setOpeningAed] = useState('0');
   const [openingInr, setOpeningInr] = useState('0');
   const [openingStock, setOpeningStock] = useState('0');
+  const [managerIds, setManagerIds] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+
+  const deskKind = warehouse?.deskKind ?? defaultDeskKind;
+  const isBranchDesk = deskKind === 'branch';
 
   useEffect(() => {
     if (!open) return;
@@ -51,6 +64,7 @@ export default function WarehouseModal({ open, warehouse, branchId, onClose, onS
       setOpeningAed(String(warehouse.openingAed ?? 0));
       setOpeningInr(String(warehouse.openingInr ?? 0));
       setOpeningStock(String(warehouse.openingStock ?? 0));
+      setManagerIds(warehouse.managerIds ? [...warehouse.managerIds] : []);
     } else {
       setName('');
       setCode('');
@@ -63,10 +77,12 @@ export default function WarehouseModal({ open, warehouse, branchId, onClose, onS
       setOpeningAed('0');
       setOpeningInr('0');
       setOpeningStock('0');
+      setManagerIds([]);
     }
   }, [open, warehouse]);
 
-  const canSubmit = name.trim().length > 0;
+  const canSubmit =
+    name.trim().length > 0 && (!isBranchDesk || managerIds.length > 0);
 
   const handleSave = async () => {
     if (!canSubmit) return;
@@ -112,6 +128,7 @@ export default function WarehouseModal({ open, warehouse, branchId, onClose, onS
         cityTrim,
         sendDeliveryProofToCustomer,
         openings,
+        managerIds,
       );
     } else {
       ok = await addICWarehouse(
@@ -127,6 +144,8 @@ export default function WarehouseModal({ open, warehouse, branchId, onClose, onS
         sendDeliveryProofToCustomer,
         branchId ?? null,
         openings,
+        defaultDeskKind,
+        managerIds,
       );
     }
 
@@ -141,7 +160,15 @@ export default function WarehouseModal({ open, warehouse, branchId, onClose, onS
     <Modal
       open={open}
       onClose={onClose}
-      title={isEdit ? 'Edit warehouse' : 'Add warehouse'}
+      title={
+        isEdit
+          ? defaultDeskKind === 'branch'
+            ? 'Edit branch'
+            : 'Edit warehouse'
+          : defaultDeskKind === 'branch'
+            ? 'Add branch'
+            : 'Add warehouse'
+      }
       maxWidth="max-w-4xl w-[min(95vw,56rem)]"
       footer={
         <>
@@ -206,6 +233,15 @@ export default function WarehouseModal({ open, warehouse, branchId, onClose, onS
                 onChange={e => setEmail(e.target.value)}
               />
             </AsicFormField>
+            <WarehouseManagersField
+              branchId={branchId ?? warehouse?.branchId}
+              selectedIds={managerIds}
+              onChange={setManagerIds}
+              required={isBranchDesk}
+              variant={isBranchDesk ? 'branch' : 'warehouse'}
+              disabled={isSaving}
+              className={fieldClass}
+            />
           </ModalFormSection>
         }
         right={

@@ -31,4 +31,5 @@ export const CAPITAL_SKIP_ALLOCATION_REFERENCE_TYPES = new Set([
   'capital_deposit',
   'capital_withdraw',
   'capital_payout',
+  'ic_branch_deposit',
 ]);

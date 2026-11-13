@@ -1,12 +1,14 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  formatGroupedNumberInputDraft,
+  mapCaretThroughNumericFormat,
   formatNumericInputDisplay,
-  formatNumericInputPlain,
   parseGroupedNumberInput,
   type NumericInputBook,
 } from '@/lib/icTransfer/numberInputFormat';
+import { LEDGER_MONEY_DECIMAL_PLACES, roundMoney } from '@/lib/icFunds/currencyPolicy';
 import { RATE_DECIMAL_PLACES } from '@/lib/icTransfer/rateCalculations';
 
 type Props = {
@@ -38,6 +40,8 @@ export default function FormattedNumberInput({
 }: Props) {
   const [focused, setFocused] = useState(false);
   const [draft, setDraft] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+  const caretAfterFormatRef = useRef<number | null>(null);
 
   const syncDraftFromValue = useCallback(() => {
     setDraft(formatNumericInputDisplay(value, book, maxFractionDigits));
@@ -58,13 +62,16 @@ export default function FormattedNumberInput({
   const handleFocus = () => {
     if (readOnly || disabled) return;
     setFocused(true);
-    setDraft(formatNumericInputPlain(value, maxFractionDigits));
+    setDraft(formatNumericInputDisplay(value, book, maxFractionDigits));
   };
 
   const handleBlur = () => {
     if (readOnly || disabled) return;
     setFocused(false);
-    const parsed = parseGroupedNumberInput(draft);
+    let parsed = parseGroupedNumberInput(draft);
+    if (maxFractionDigits <= LEDGER_MONEY_DECIMAL_PLACES) {
+      parsed = roundMoney(parsed);
+    }
     onNumericChange(parsed);
     setDraft(formatNumericInputDisplay(parsed, book, maxFractionDigits));
   };
@@ -72,12 +79,26 @@ export default function FormattedNumberInput({
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (readOnly || disabled) return;
     const raw = e.target.value;
-    setDraft(raw);
-    onNumericChange(parseGroupedNumberInput(raw));
+    const caret = e.target.selectionStart ?? raw.length;
+    const formatted = formatGroupedNumberInputDraft(raw, book, maxFractionDigits);
+    caretAfterFormatRef.current = mapCaretThroughNumericFormat(raw, formatted, caret);
+    setDraft(formatted);
+    onNumericChange(parseGroupedNumberInput(formatted));
   };
+
+  useEffect(() => {
+    const el = inputRef.current;
+    const nextCaret = caretAfterFormatRef.current;
+    if (!el || nextCaret == null || !focused) return;
+    caretAfterFormatRef.current = null;
+    requestAnimationFrame(() => {
+      el.setSelectionRange(nextCaret, nextCaret);
+    });
+  }, [draft, focused]);
 
   return (
     <input
+      ref={inputRef}
       id={id}
       type="text"
       inputMode="decimal"

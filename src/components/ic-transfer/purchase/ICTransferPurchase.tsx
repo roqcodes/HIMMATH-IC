@@ -25,7 +25,18 @@ import {
 } from '@/lib/icTransfer/branchPortalScope';
 import { portalMobileCardFooterClass } from '@/lib/icTransfer/layoutConstants';
 import { effectivePurchaseCounterpartyId } from '@/lib/counterparties/effectiveId';
-import { formatDealTableAed, formatDealTableInr, purchaseDealAed, purchaseDealInr } from '@/lib/icTransfer/dealTableDisplay';
+import {
+  formatDealTableAed,
+  formatDealTableInr,
+  formatDealTableSheetRate,
+  formatDealTableSplitPaidAed,
+  formatDealTableSplitPaidInr,
+  purchaseDealAed,
+  purchaseDealInr,
+  purchaseDealSheetRate,
+  tableSplitPaidAed,
+  tableSplitPaidInr,
+} from '@/lib/icTransfer/dealTableDisplay';
 import { formatSettlementModeLabel } from '@/lib/icTransfer/metalSettlement';
 import { dealAgentDisplayName, dealAgentPartyId } from '@/lib/counterparties/dealAgent';
 import DealAgentHint from '@/components/ic-transfer/shared/DealAgentHint';
@@ -46,14 +57,17 @@ const fmt = (n: number) => `AED ${n.toLocaleString('en-AE', { minimumFractionDig
 
 const PURCHASE_TABLE_COLUMNS: ICTransferTableColumn[] = [
   { id: 'Date', label: 'Date', align: 'left' },
-  { id: 'ID', label: 'ID', align: 'left' },
   { id: 'Supplier', label: 'Supplier', align: 'left' },
   { id: 'Warehouse', label: 'Warehouse', align: 'left' },
   { id: 'Settlement', label: 'Settlement', align: 'left' },
   { id: 'Units', label: 'Units', align: 'right' },
   { id: 'Metal (g)', label: 'Metal (g)', align: 'right' },
-  { id: 'Total INR', label: 'INR', align: 'right' },
-  { id: 'Total AED', label: 'AED', align: 'right' },
+  { id: 'Total INR', label: 'Total INR', align: 'right' },
+  { id: 'Rate (AED)', label: 'AED rate', align: 'right' },
+  { id: 'Total AED', label: 'Total AED', align: 'right' },
+  { id: 'INR paid', label: 'INR paid', align: 'right' },
+  { id: 'AED paid', label: 'AED paid', align: 'right' },
+  { id: 'Profit', label: 'Profit', align: 'right', sortable: false },
   { id: 'Actions', label: 'Actions', align: 'center', sortable: false },
 ];
 
@@ -206,10 +220,6 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
       let valB: string | number;
 
       switch (sortField) {
-        case 'ID':
-          valA = getFormattedTxnId(a.id, 'purchase', a);
-          valB = getFormattedTxnId(b.id, 'purchase', b);
-          break;
         case 'Supplier':
           valA = getSupplierName(effectivePurchaseCounterpartyId(a));
           valB = getSupplierName(effectivePurchaseCounterpartyId(b));
@@ -234,9 +244,21 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
           valA = purchaseDealAed(a);
           valB = purchaseDealAed(b);
           break;
+        case 'Rate (AED)':
+          valA = purchaseDealSheetRate(a);
+          valB = purchaseDealSheetRate(b);
+          break;
         case 'Total INR':
           valA = purchaseDealInr(a);
           valB = purchaseDealInr(b);
+          break;
+        case 'INR paid':
+          valA = tableSplitPaidInr(a);
+          valB = tableSplitPaidInr(b);
+          break;
+        case 'AED paid':
+          valA = tableSplitPaidAed(a);
+          valB = tableSplitPaidAed(b);
           break;
         case 'Date':
         default:
@@ -428,9 +450,6 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
               </div>
             </td>
             <td className={icTdClass('left')}>
-              <span className="font-mono text-xs text-slate-500">{getFormattedTxnId(p.id, 'purchase', p)}</span>
-            </td>
-            <td className={icTdClass('left')}>
               <div className="min-w-[120px]">
                 <CounterpartyLink
                   counterpartyId={effectivePurchaseCounterpartyId(p)}
@@ -471,10 +490,16 @@ export default function ICTransferPurchase({ portalMode = 'admin', branchId }: P
                 {formatDealTableInr(purchaseDealInr(p))}
               </span>
             </td>
+            <td className={icTdClass('right')}>{formatDealTableSheetRate(purchaseDealSheetRate(p))}</td>
             <td className={icTdClass('right')}>
               <span className="font-mono font-medium tabular-nums text-slate-900">
                 {formatDealTableAed(purchaseDealAed(p))}
               </span>
+            </td>
+            <td className={icTdClass('right')}>{formatDealTableSplitPaidInr(p)}</td>
+            <td className={icTdClass('right')}>{formatDealTableSplitPaidAed(p)}</td>
+            <td className={icTdClass('right')}>
+              <span className="text-slate-300">—</span>
             </td>
             <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-center gap-0.5">

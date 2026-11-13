@@ -16,6 +16,7 @@ const LEGACY_PAGE_TO_SECTION: Record<string, AsicSectionId> = {
   'ic-funds': 'payments',
   customers: 'customers',
   counterparties: 'counterparties',
+  branches: 'branches',
   warehouse: 'warehouse',
   settings: 'rates',
 };
@@ -33,6 +34,9 @@ export function getEffectiveSectionAccess(
   section: AsicSectionId,
   portal: AsicPortal,
 ): PageAccessLevel {
+  if (section === 'branches') {
+    return getEffectiveSectionAccess(user, 'warehouse', portal);
+  }
   if (section === 'counterparties') {
     return mergeSectionAccess(
       getEffectiveSectionAccessInner(user, 'customers', portal),

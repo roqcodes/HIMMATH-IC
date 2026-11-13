@@ -209,4 +209,126 @@ describe('planMetalSaleJournals', () => {
     assert.equal(lines.find(l => l.referenceType === 'metal_fx_profit')?.debit, 'metal_aed');
     assert.equal(lines.find(l => l.referenceType === 'metal_fx_profit')?.credit, 'metal_fx');
   });
+
+  it('SPLIT sale without agent still posts party INR leg', () => {
+    const lines = planMetalSaleJournals({
+      completed: true,
+      paymentMethod: 'SPLIT',
+      hasLot: false,
+      saleGrossInr: 14_000_000,
+      saleLabInr: 1_000,
+      saleAed: 350_000,
+      lotCostInrAllocated: 0,
+      hasAgent: false,
+      splitInrPaid: 3_999_000,
+      splitAedPaid: 175_000,
+    });
+    assert.ok(
+      lines.some(
+        l =>
+          l.book === 'INR' &&
+          l.referenceType === 'metal_sale_receipt' &&
+          l.debit === 'customer' &&
+          l.amount === 3_999_000,
+      ),
+    );
+    assert.ok(!lines.some(l => l.book === 'AED'));
+    assert.ok(
+      lines.some(
+        l => l.referenceType === 'lab_test_sale' && l.debit === 'metal_sales' && l.credit === 'aed_settlement',
+      ),
+    );
+    assert.ok(!lines.some(l => l.credit === 'customer' && l.referenceType === 'lab_test_sale'));
+  });
+
+  it('SPLIT sale with lab keeps full split_inr_paid on customer', () => {
+    const lines = planMetalSaleJournals({
+      completed: true,
+      paymentMethod: 'SPLIT',
+      hasLot: true,
+      saleGrossInr: 14_000_000,
+      saleLabInr: 1_000,
+      saleAed: 365_036.5,
+      lotCostInrAllocated: 13_999_000,
+      hasAgent: true,
+      splitInrPaid: 3_999_000,
+      splitAedPaid: 365_036.5,
+    });
+    const customerReceipt = lines.find(
+      l => l.referenceType === 'metal_sale_receipt' && l.debit === 'customer',
+    );
+    assert.equal(customerReceipt?.amount, 3_999_000);
+    assert.equal(lines.find(l => l.referenceType === 'lab_test_sale')?.amount, 1_000);
+    assert.ok(!lines.some(l => l.credit === 'customer' && l.referenceType === 'lab_test_sale'));
+    assert.ok(!lines.some(l => l.referenceType === 'metal_sale_profit'));
+  });
+
+  it('SPLIT sale: customer INR + agent AED + full INR P&L', () => {
+    const lines = planMetalSaleJournals({
+      completed: true,
+      paymentMethod: 'SPLIT',
+      lotPaymentMethod: 'CASH',
+      hasLot: true,
+      saleGrossInr: 10_000_000,
+      saleLabInr: 0,
+      saleAed: 350_000,
+      lotCostInrAllocated: 9_000_000,
+      hasAgent: true,
+      splitInrPaid: 5_000_000,
+      splitAedPaid: 175_000,
+    });
+    assert.deepEqual(
+      lines.map(l => [l.referenceType, l.debit, l.credit, l.amount, l.book]),
+      [
+        ['metal_sale_aed', 'agent', 'metal_aed_proceeds', 175_000, 'AED'],
+        ['metal_sale_receipt', 'customer', 'metal_sales', 5_000_000, 'INR'],
+        ['metal_sale_receipt', 'aed_settlement', 'metal_sales', 5_000_000, 'INR'],
+        ['metal_sale_cogs', 'metal_cost', 'metal_stock', 9_000_000, 'INR'],
+        ['metal_sale_profit', 'metal_sales', 'metal_profit', 1_000_000, 'INR'],
+      ],
+    );
+  });
+});
+
+describe('planMetalPurchaseJournals split', () => {
+  it('SPLIT buy with lab: full lab on settlement', () => {
+    const lines = planMetalPurchaseJournals({
+      paymentMethod: 'SPLIT',
+      grossInr: 10_000_000,
+      labInr: 12_000,
+      aedTotal: 350_000,
+      hasAgent: true,
+      splitInrPaid: 5_000_000,
+      splitAedPaid: 175_000,
+    });
+    assert.deepEqual(
+      lines.map(l => [l.referenceType, l.debit, l.credit, l.amount, l.book]),
+      [
+        ['metal_purchase', 'metal_stock', 'supplier', 5_000_000, 'INR'],
+        ['metal_purchase', 'metal_stock', 'aed_settlement', 5_000_000, 'INR'],
+        ['lab_test_purchase', 'aed_settlement', 'metal_stock', 12_000, 'INR'],
+        ['metal_purchase_aed', 'metal_aed', 'agent', 175_000, 'AED'],
+      ],
+    );
+  });
+
+  it('SPLIT buy: supplier INR + agent AED', () => {
+    const lines = planMetalPurchaseJournals({
+      paymentMethod: 'SPLIT',
+      grossInr: 10_000_000,
+      labInr: 0,
+      aedTotal: 350_000,
+      hasAgent: true,
+      splitInrPaid: 5_000_000,
+      splitAedPaid: 175_000,
+    });
+    assert.deepEqual(
+      lines.map(l => [l.referenceType, l.debit, l.credit, l.amount, l.book]),
+      [
+        ['metal_purchase', 'metal_stock', 'supplier', 5_000_000, 'INR'],
+        ['metal_purchase', 'metal_stock', 'aed_settlement', 5_000_000, 'INR'],
+        ['metal_purchase_aed', 'metal_aed', 'agent', 175_000, 'AED'],
+      ],
+    );
+  });
 });

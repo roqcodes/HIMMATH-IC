@@ -9,9 +9,17 @@ import { syncICCounterpartyFundAccount } from '@/lib/icFunds/icTransferFundSync'
 import { entityCodeSchema, entityCodeConflictMessage } from '@/lib/validations/entityCode';
 import { COUNTERPARTY_SELECT } from '@/lib/counterparties/mapper';
 import { mapICCounterpartyRow } from '@/lib/counterparties/mapper';
-import { normalizeCounterpartyRoles, type CounterpartyRole } from '@/lib/counterparties/roles';
+import {
+  normalizeCounterpartyKind,
+  normalizeCounterpartyRoles,
+  rolesForCounterpartyKind,
+  type CounterpartyKind,
+  type CounterpartyRole,
+} from '@/lib/counterparties/roles';
 import { syncCounterpartyAedAgent } from '@/lib/counterparties/aedAgentSync';
 import { parseAedInrOpenings } from '@/lib/icFunds/entityOpenings';
+import { HQ_IC_FUNDS_BRANCH_SLUG } from '@/lib/icFunds/hqBranch';
+import { resolveHqBranchIds } from '@/lib/icFunds/resolveHqBranchIds';
 
 function revalidateCounterpartyPaths(slug: string) {
   revalidatePath(`/${slug}/counterparties`);
@@ -21,7 +29,10 @@ function revalidateCounterpartyPaths(slug: string) {
 }
 
 async function assertCounterpartyWriteAccess(slug: string) {
-  const user = await getSessionUser(slug);
+  let user = await getSessionUser(slug);
+  if (!user && slug === HQ_IC_FUNDS_BRANCH_SLUG) {
+    user = await getSessionUser();
+  }
   if (!user) return { error: 'You must be signed in.' as const, user: null };
   if (user.role === 'customer') {
     return { error: 'Not authorized.' as const, user: null };
@@ -31,7 +42,14 @@ async function assertCounterpartyWriteAccess(slug: string) {
     return { error: 'Branch not found' as const, user: null };
   }
   const branchId = String(branchRes.rows[0].id);
-  if (user.branchId && user.branchId !== branchId) {
+  const hqIds = await resolveHqBranchIds();
+  const onHqSlug = slug === HQ_IC_FUNDS_BRANCH_SLUG;
+  if (
+    user.branchId &&
+    user.branchId !== branchId &&
+    !(onHqSlug && user.role === 'admin') &&
+    !(onHqSlug && hqIds.has(user.branchId))
+  ) {
     return { error: 'You are not authorized for this branch.' as const, user: null };
   }
   const denied = await assertStaffWriteAccess(user, 'customers', branchId);
@@ -57,6 +75,8 @@ export async function saveCounterpartyAction(
     subdivision?: string;
     locality?: string;
     code?: string | null;
+    kind?: CounterpartyKind;
+    homeManagerId?: string | null;
     roles?: CounterpartyRole[];
     openingAed?: number;
     openingInr?: number;
@@ -76,24 +96,46 @@ export async function saveCounterpartyAction(
     }
     const parsedCode = codeResult.data;
     const status = data.status === 'inactive' ? 'inactive' : 'active';
-    const roles = normalizeCounterpartyRoles(data.roles);
+    const kind = normalizeCounterpartyKind(data.kind);
+    const homeManagerId =
+      kind === 'customer' && data.homeManagerId?.trim() ? data.homeManagerId.trim() : null;
+    if (kind === 'customer' && !homeManagerId) {
+      return { success: false, error: 'Customers must belong to a home manager.' };
+    }
+    const roles = rolesForCounterpartyKind(kind, data.roles);
     const hasOpenings = data.openingAed !== undefined || data.openingInr !== undefined;
     const opening = hasOpenings
       ? parseAedInrOpenings({ openingAed: data.openingAed, openingInr: data.openingInr })
       : null;
 
     if (data.id) {
+      const existingRes = await query(
+        `SELECT branch_id::text AS branch_id FROM ic_counterparties WHERE id = $1 LIMIT 1`,
+        [data.id],
+      );
+      if (existingRes.rows.length === 0) {
+        return { success: false, error: 'Counterparty not found' };
+      }
+      const hqIds = await resolveHqBranchIds();
+      const rowBranchId = existingRes.rows[0].branch_id
+        ? String(existingRes.rows[0].branch_id)
+        : branchId;
+      const scopedBranchId =
+        rowBranchId === branchId || hqIds.has(rowBranchId) ? rowBranchId : branchId;
+
       const res = await query(
         opening
           ? `UPDATE ic_counterparties
              SET name = $1, code = $2, phone = $3, email = $4, address = $5, country = $6,
                  subdivision = $7, locality = $8, status = $9, roles = $10,
-                 opening_aed = $13, opening_inr = $14
+                 kind = $13, home_manager_id = $14,
+                 opening_aed = $15, opening_inr = $16
              WHERE id = $11 AND branch_id = $12
              RETURNING *`
           : `UPDATE ic_counterparties
              SET name = $1, code = $2, phone = $3, email = $4, address = $5, country = $6,
-                 subdivision = $7, locality = $8, status = $9, roles = $10
+                 subdivision = $7, locality = $8, status = $9, roles = $10,
+                 kind = $13, home_manager_id = $14
              WHERE id = $11 AND branch_id = $12
              RETURNING *`,
         opening
@@ -109,7 +151,9 @@ export async function saveCounterpartyAction(
               status,
               roles,
               data.id,
-              branchId,
+              scopedBranchId,
+              kind,
+              homeManagerId,
               opening.openingAed,
               opening.openingInr,
             ]
@@ -125,14 +169,16 @@ export async function saveCounterpartyAction(
               status,
               roles,
               data.id,
-              branchId,
+              scopedBranchId,
+              kind,
+              homeManagerId,
             ],
       );
       if (res.rowCount === 0) return { success: false, error: 'Counterparty not found' };
       await syncCounterpartyAedAgent({ query }, {
         counterpartyId: data.id,
         name: data.name.trim(),
-        hasAgentRole: roles.includes('agent'),
+        hasAgentRole: kind === 'customer' && roles.includes('agent'),
       });
       await syncICCounterpartyFundAccount(data.id);
       revalidateCounterpartyPaths(slug);
@@ -143,8 +189,8 @@ export async function saveCounterpartyAction(
     await query(
       `INSERT INTO ic_counterparties (
          id, branch_id, name, code, phone, email, address, country, subdivision, locality, status, roles,
-         opening_aed, opening_inr
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+         kind, home_manager_id, opening_aed, opening_inr
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
       [
         id,
         branchId,
@@ -158,6 +204,8 @@ export async function saveCounterpartyAction(
         data.locality?.trim() || null,
         status,
         roles,
+        kind,
+        homeManagerId,
         (opening ?? parseAedInrOpenings(null)).openingAed,
         (opening ?? parseAedInrOpenings(null)).openingInr,
       ],
@@ -165,7 +213,7 @@ export async function saveCounterpartyAction(
     await syncCounterpartyAedAgent({ query }, {
       counterpartyId: id,
       name: data.name.trim(),
-      hasAgentRole: roles.includes('agent'),
+      hasAgentRole: kind === 'customer' && roles.includes('agent'),
     });
     await syncICCounterpartyFundAccount(id);
     revalidateCounterpartyPaths(slug);

@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
-import { notFound } from 'next/navigation';
+import React, { useEffect, useMemo, useState } from 'react';
+import { notFound, useRouter } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
 import WarehouseModal from '@/components/ic-transfer/settings/WarehouseModal';
 import { findWarehouseByRouteParam } from '@/lib/icTransfer/warehouseSlug';
@@ -10,7 +10,9 @@ import { computeCombinedTradeBookKpis } from '@/lib/icTransfer/dealBookKpis';
 import WarehouseInventoryKpiGrid from '@/components/warehouse/WarehouseInventoryKpiGrid';
 import WarehouseDetailTabs from '@/components/ic-transfer/warehouse/WarehouseDetailTabs';
 import {
+  getICTransferBranchDetailHref,
   getICTransferWarehouseBase,
+  isBranchDeskWarehouse,
   type ICTransferPortalMode,
 } from '@/lib/icTransfer/branchPortalScope';
 import { resolveDateFilterRange, getDateFilterLabel } from '@/lib/dateFilterRange';
@@ -21,6 +23,7 @@ import AddPurchaseModal from '@/components/ic-transfer/purchase/AddPurchaseModal
 import AddSaleModal from '@/components/ic-transfer/sales/AddSaleModal';
 import { asicBtnOutline } from '@/components/asic/ui';
 import { useWriteAccess } from '@/context/RbacWriteContext';
+import { formatStreetCityState } from '@/lib/geo/simpleAddress';
 
 interface Props {
   branchSlug: string;
@@ -42,6 +45,7 @@ export default function WarehouseDetailsClient({
 }: Props) {
   const { icWarehouses, icRegions, icSales, icPurchases, icTransferSettings } = useApp();
   const { canWrite, buttonProps: wp } = useWriteAccess();
+  const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
   const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
   const [saleModalOpen, setSaleModalOpen] = useState(false);
@@ -118,11 +122,28 @@ export default function WarehouseDetailsClient({
   const purchaseBranchId =
     portalMode === 'branch' && warehouse?.branchId ? warehouse.branchId : undefined;
 
+  const isBranchDesk = warehouse ? isBranchDeskWarehouse(warehouse) : false;
+
+  useEffect(() => {
+    if (warehouse && isBranchDesk) {
+      router.replace(getICTransferBranchDetailHref(branchSlug, warehouse.id, portalMode));
+    }
+  }, [warehouse, isBranchDesk, branchSlug, portalMode, router]);
+
+  const warehouseSubtitle = useMemo(() => {
+    if (!warehouse) return undefined;
+    const parts = [
+      formatStreetCityState(warehouse.address, warehouse.indiaCity, warehouse.indiaState),
+      warehouse.phone?.trim(),
+    ].filter(Boolean);
+    return parts.length > 0 ? parts.join(' · ') : undefined;
+  }, [warehouse]);
+
   if (!warehouse && icWarehouses.length > 0) {
     return notFound();
   }
 
-  if (!warehouse) return null;
+  if (!warehouse || isBranchDesk) return null;
 
   const warehouseListHref = getICTransferWarehouseBase(portalMode, branchSlug);
 
@@ -132,10 +153,8 @@ export default function WarehouseDetailsClient({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <AsicPageHeader
-        breadcrumbs={[
-          { label: 'Warehouses', href: warehouseListHref },
-          { label: warehouse.name },
-        ]}
+        breadcrumbs={[{ label: 'Warehouses', href: warehouseListHref }, { label: warehouse.name }]}
+        subtitle={warehouseSubtitle}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -177,12 +196,7 @@ export default function WarehouseDetailsClient({
         setCustomEndDate={setCustomEndDate}
       />
 
-      <WarehouseInventoryKpiGrid
-        metrics={kpiMetrics}
-        books={tradeBookKpis}
-        rangeLabel={rangeLabel}
-      />
-
+      <WarehouseInventoryKpiGrid metrics={kpiMetrics} books={tradeBookKpis} rangeLabel={rangeLabel} />
       <WarehouseDetailTabs
         warehouseId={warehouse.id}
         range={range}
@@ -208,6 +222,8 @@ export default function WarehouseDetailsClient({
       <AddSaleModal
         open={saleModalOpen}
         onClose={() => setSaleModalOpen(false)}
+        branchId={purchaseBranchId}
+        warehouses={warehouse ? [warehouse] : undefined}
         lockedWarehouseId={warehouse.id}
       />
     </div>

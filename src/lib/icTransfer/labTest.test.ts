@@ -6,6 +6,7 @@ import {
   validateLabAgainstGross,
   applyLabFieldChange,
   emptyLabFields,
+  labFieldsFromMetalLotSelection,
 } from './labTest';
 import { dealPurchaseInr, dealSaleInr } from './dealBookKpis';
 import type { ICPurchase, ICSale } from '@/types';
@@ -21,6 +22,20 @@ describe('labTest', () => {
 
   it('rejects lab above gross', () => {
     assert.throws(() => validateLabAgainstGross(100, 50));
+  });
+
+  it('pro-rates purchase lab when picking a metal lot for sale', () => {
+    const lot = {
+      metalWeightG: 1000,
+      labWeightG: 1000,
+      labChargeInrPerG: 10,
+      labTotalInr: 10_000,
+    };
+    const half = labFieldsFromMetalLotSelection(lot, 500);
+    assert.equal(half.labWeightG, 500);
+    assert.equal(half.labChargeInrPerG, 10);
+    assert.equal(half.labTotalInr, 5000);
+    assert.deepEqual(labFieldsFromMetalLotSelection(lot, 0), emptyLabFields());
   });
 
   it('derives total when weight or charge changes', () => {

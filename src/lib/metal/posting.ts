@@ -13,8 +13,9 @@ import {
 import {
   ensureInrCounterpartyAccount,
   ensureInrSystemAccount,
+  metalInrJournalReferenceId,
   postInrJournalInTx,
-  voidInrVoucherByReference,
+  voidInrMetalDealVouchers,
 } from '@/lib/ledgers/inr/inrFundSync';
 import { allocateMetalLotCostAed, allocateMetalLotCostInr } from '@/lib/icTransfer/metalLotCost';
 import {
@@ -90,8 +91,10 @@ export async function syncMetalPurchaseLedgers(
 
   await voidVoucherByReference(client, branchId, 'ic_purchase', purchaseId);
   await voidVoucherByReference(client, branchId, 'metal_purchase_aed', purchaseId);
-  await voidInrVoucherByReference(client, branchId, 'metal_purchase', purchaseId);
-  await voidInrVoucherByReference(client, branchId, 'lab_test_purchase', purchaseId);
+  await voidInrMetalDealVouchers(client, branchId, purchaseId, [
+    'metal_purchase',
+    'lab_test_purchase',
+  ]);
 
   const labInr = roundLedgerAmount(Number(purchase.lab_total_inr) || 0);
 
@@ -130,12 +133,16 @@ export async function syncMetalPurchaseLedgers(
     labInr,
     aedTotal,
     hasAgent: Boolean(agentId),
+    splitInrPaid: Number(purchase.split_inr_paid) || 0,
+    splitAedPaid: Number(purchase.split_aed_paid) || 0,
   });
   if (lines.length === 0) return;
 
   const needsSupplier = lines.some(l => l.debit === 'supplier' || l.credit === 'supplier');
   const supplierAccountId = needsSupplier ? await resolveSupplierInrAccount() : null;
-  if (needsSupplier && !supplierAccountId) return;
+  if (needsSupplier && !supplierAccountId) {
+    throw new Error('Could not resolve INR account for metal purchase supplier');
+  }
 
   const metalStockInr = lines.some(l => l.debit === 'metal_stock' || l.credit === 'metal_stock')
     ? await ensureInrSystemAccount(client, branchId, 'Metal Stock', 'inventory', 'metal_inventory')
@@ -153,7 +160,9 @@ export async function syncMetalPurchaseLedgers(
         'metal_aed_settlement',
       )
     : null;
-  if (needsAedSettlement && !aedSettlementInr) return;
+  if (needsAedSettlement && !aedSettlementInr) {
+    throw new Error('Could not resolve INR account for metal AED settlement clearing');
+  }
 
   let agentAccountId: string | null = null;
   let metalAedAccountId: string | null = null;
@@ -162,7 +171,6 @@ export async function syncMetalPurchaseLedgers(
       agentAccountId = await ensureAedAgentAccount(client, branchId, agentId, 'AED agent');
       metalAedAccountId = await ensureMetalAedAccount(client, branchId);
     }
-    if (!agentAccountId || !metalAedAccountId) return;
   }
 
   const roleId = (role: MetalJournalRole): string | null => {
@@ -182,7 +190,12 @@ export async function syncMetalPurchaseLedgers(
     }
   };
 
-  for (const line of lines) {
+  const sortedPurchaseLines = [...lines].sort((a, b) => {
+    if (a.book === b.book) return 0;
+    return a.book === 'INR' ? -1 : 1;
+  });
+
+  for (const line of sortedPurchaseLines) {
     const debitAccountId = roleId(line.debit);
     const creditAccountId = roleId(line.credit);
     if (!debitAccountId || !creditAccountId) {
@@ -211,7 +224,7 @@ export async function syncMetalPurchaseLedgers(
       amount: line.amount,
       notes,
       referenceType: line.referenceType,
-      referenceId: purchaseId,
+      referenceId: metalInrJournalReferenceId(purchaseId, line),
     });
   }
 }
@@ -223,8 +236,10 @@ export async function voidMetalPurchaseLedgers(
 ): Promise<void> {
   await voidVoucherByReference(client, branchId, 'ic_purchase', purchaseId);
   await voidVoucherByReference(client, branchId, 'metal_purchase_aed', purchaseId);
-  await voidInrVoucherByReference(client, branchId, 'metal_purchase', purchaseId);
-  await voidInrVoucherByReference(client, branchId, 'lab_test_purchase', purchaseId);
+  await voidInrMetalDealVouchers(client, branchId, purchaseId, [
+    'metal_purchase',
+    'lab_test_purchase',
+  ]);
 }
 
 async function ensureMetalSaleCustomerInrAccount(
@@ -309,10 +324,12 @@ export async function syncMetalSaleLedgers(
   await voidVoucherByReference(client, branchId, 'metal_sale_aed', saleId);
   await voidVoucherByReference(client, branchId, 'metal_sale_ic_stock', saleId);
   await voidVoucherByReference(client, branchId, 'metal_fx_profit', saleId);
-  await voidInrVoucherByReference(client, branchId, 'metal_sale_profit', saleId);
-  await voidInrVoucherByReference(client, branchId, 'metal_sale_receipt', saleId);
-  await voidInrVoucherByReference(client, branchId, 'metal_sale_cogs', saleId);
-  await voidInrVoucherByReference(client, branchId, 'lab_test_sale', saleId);
+  await voidInrMetalDealVouchers(client, branchId, saleId, [
+    'metal_sale_profit',
+    'metal_sale_receipt',
+    'metal_sale_cogs',
+    'lab_test_sale',
+  ]);
 
   if (orderStatus !== 'completed') return;
 
@@ -355,6 +372,8 @@ export async function syncMetalSaleLedgers(
     lotCostInrAllocated,
     lotPurchaseAedAllocated,
     hasAgent: Boolean(agentId),
+    splitInrPaid: Number(sale.split_inr_paid) || 0,
+    splitAedPaid: Number(sale.split_aed_paid) || 0,
   });
   if (lines.length === 0) return;
 
@@ -420,9 +439,9 @@ export async function syncMetalSaleLedgers(
       agentAccountId = await ensureAedAgentAccount(client, branchId, agentId, 'AED agent');
       metalAedAccountId = await ensureMetalAedAccount(client, branchId);
     }
-    if (!agentAccountId || (!metalAedAccountId && !metalAedProceedsId)) {
-      const inrOnly = lines.filter(l => l.book === 'INR');
-      if (inrOnly.length === 0) return;
+    const needsAedBook = lines.some(l => l.book === 'AED');
+    if (needsAedBook && (!agentAccountId || (!metalAedAccountId && !metalAedProceedsId))) {
+      throw new Error('Could not resolve AED accounts for metal sale agent leg');
     }
   }
 
@@ -453,7 +472,12 @@ export async function syncMetalSaleLedgers(
     }
   };
 
-  for (const line of lines) {
+  const sortedLines = [...lines].sort((a, b) => {
+    if (a.book === b.book) return 0;
+    return a.book === 'INR' ? -1 : 1;
+  });
+
+  for (const line of sortedLines) {
     const debitAccountId = roleId(line.debit);
     const creditAccountId = roleId(line.credit);
     if (!debitAccountId || !creditAccountId) {
@@ -474,7 +498,7 @@ export async function syncMetalSaleLedgers(
       });
       continue;
     }
-    const inrVoucherId = await postInrJournalInTx(client, {
+    await postInrJournalInTx(client, {
       branchId,
       voucherDate,
       debitAccountId,
@@ -482,15 +506,16 @@ export async function syncMetalSaleLedgers(
       amount: line.amount,
       notes,
       referenceType: line.referenceType,
-      referenceId: saleId,
+      referenceId: metalInrJournalReferenceId(saleId, line),
     });
   }
 
   const profitRow = await client.query(
     `SELECT id::text AS id FROM inr_fund_vouchers
-     WHERE branch_id = $1 AND reference_type = 'metal_sale_profit' AND reference_id = $2 AND status = 'active'
+     WHERE branch_id = $1 AND reference_type = 'metal_sale_profit' AND status = 'active'
+       AND (reference_id = $2 OR reference_id LIKE $3)
      LIMIT 1`,
-    [branchId, saleId],
+    [branchId, saleId, `${saleId}#%`],
   );
   const profitVoucherId = profitRow.rows[0]?.id;
   if (profitVoucherId) {
@@ -508,8 +533,10 @@ export async function voidMetalSaleLedgers(
   await voidVoucherByReference(client, branchId, 'metal_sale_aed', saleId);
   await voidVoucherByReference(client, branchId, 'metal_sale_ic_stock', saleId);
   await voidVoucherByReference(client, branchId, 'metal_fx_profit', saleId);
-  await voidInrVoucherByReference(client, branchId, 'metal_sale_profit', saleId);
-  await voidInrVoucherByReference(client, branchId, 'metal_sale_receipt', saleId);
-  await voidInrVoucherByReference(client, branchId, 'metal_sale_cogs', saleId);
-  await voidInrVoucherByReference(client, branchId, 'lab_test_sale', saleId);
+  await voidInrMetalDealVouchers(client, branchId, saleId, [
+    'metal_sale_profit',
+    'metal_sale_receipt',
+    'metal_sale_cogs',
+    'lab_test_sale',
+  ]);
 }

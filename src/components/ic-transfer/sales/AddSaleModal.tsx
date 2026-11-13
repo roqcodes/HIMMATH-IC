@@ -14,21 +14,29 @@ import {
   filterWarehousesForAssignableUser,
 } from '@/lib/icTransfer/branchPortalScope';
 import { asicInput } from '@/components/asic/ui';
-import { btnPrimary, btnSecondary } from '@/lib/ui';
+import ICTransferModalFormFooter from '@/components/ic-transfer/shared/ICTransferModalFormFooter';
 import { useApp } from '@/context/AppContext';
-import { ICSale } from '@/types';
+import { ICSale, type ICWarehouse } from '@/types';
 import TransactionTypeSelector from '../shared/TransactionTypeSelector';
 import SettlementModeToggle from '../shared/SettlementModeToggle';
 import { emptyMetalFields } from '../shared/MetalSettlementFields';
 import FormattedNumberInput from '../shared/FormattedNumberInput';
 import MetalPaymentToggle from '../shared/MetalPaymentToggle';
 import type { MetalPaymentMethod } from '@/lib/domain/books';
-import { normalizeMetalPaymentMethod } from '@/lib/domain/books';
+import {
+  METAL_AED_AGENT_REQUIRED_MSG,
+  metalAedAgentSatisfied,
+  needsMetalAedAgent,
+  normalizeMetalPaymentMethod,
+} from '@/lib/domain/books';
+import { complementSplitAed, defaultSplitAmounts } from '@/lib/icTransfer/metalSplit';
+import { metalSaleFieldsFromMetalLotSelection } from '@/lib/icTransfer/metalLotCost';
 import { SmoothCollapse, SmoothModeSwap } from '@/components/ui/SmoothHeight';
 import {
   applyMetalFieldChange,
   computeImpliedMetalRateAedPerG,
   computeMetalAedFromInr,
+  grossMetalAedFromNetBooked,
   computeMetalSheetRateAed,
   metalSaleFieldsFromRecord,
   metalSheetRateFromIcUnitRate,
@@ -41,6 +49,7 @@ import { computeWarehouseIcUnitsOnHand } from '@/lib/icTransfer/warehouseIcStock
 import {
   applyLabFieldChange,
   emptyLabFields,
+  labFieldsFromMetalLotSelection,
   labFieldsFromRecord,
   netMetalInr,
   type LabTestFieldKey,
@@ -63,6 +72,7 @@ import type { OrderPriority } from '@/types/warehouse';
 import ImageDropZone from '@/components/ui/ImageDropZone';
 import { uploadImageToCloudinary, deleteCloudinaryImageByToken } from '@/lib/cloudinary';
 import { SALE_COUNTERPARTY_FIELD_LABEL } from '@/lib/counterparties/labels';
+import ManagerCustomerFields from '@/components/ic-transfer/shared/ManagerCustomerFields';
 import { useICTransferModalSnapshots } from '@/lib/icTransfer/useICTransferModalSnapshots';
 import {
   prefetchAvailableMetalLots,
@@ -70,15 +80,20 @@ import {
   invalidateAvailableMetalLotsCache,
 } from '@/lib/icTransfer/useAvailableMetalLots';
 import { invalidateICTransferModalSnapshotCache } from '@/lib/icTransfer/useICTransferModalSnapshots';
-import ICTransferBreakdownPanel, {
-  type ICTransferBreakdownItem,
-} from '../shared/ICTransferBreakdownPanel';
+import ICTransferBreakdownPanel from '../shared/ICTransferBreakdownPanel';
+import {
+  buildCashBreakdownModel,
+  buildMetalBreakdownModel,
+} from '@/lib/icTransfer/breakdownViewModel';
 import PartyLedgerStrip from '../shared/PartyLedgerStrip';
+import WarehouseOnHandStrip from '../shared/WarehouseOnHandStrip';
+import { unitsToInrAmount } from '@/lib/domain/books';
 import ICTransferFormField from '../shared/ICTransferFormField';
-import { FmtLedgerAed, FmtLedgerInr } from '@/lib/icFunds/format';
 import {
   icSaleModalShell,
   icPurchaseFormModalBody,
+  icFormLeftPanelClass,
+  icFormModalGridClass,
   icFormSectionEyebrow,
   icPurchaseDenseInput,
 } from '../shared/icTransferFormModalLayout';
@@ -108,6 +123,9 @@ type Props = {
   open: boolean;
   onClose: () => void;
   initialData?: ICSale;
+  /** Branch portal scope for managers/customers (warehouse detail passes admin `undefined`). */
+  branchId?: string;
+  warehouses?: ICWarehouse[];
   /** When set, warehouse is prefilled and cannot be changed (e.g. warehouse detail page). */
   lockedWarehouseId?: string;
 };
@@ -117,8 +135,8 @@ const denseInput = `${asicInput} ${icPurchaseDenseInput}`;
 /** TEMP: hide address proof dropzone + upload/paste until UI is finalized. */
 const SHOW_SALE_ADDRESS_PROOF = false;
 
-const leftTopGrid = 'grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2';
-const leftTopGridMetal = 'grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2';
+const leftTopGrid = 'grid grid-cols-1 gap-x-3 gap-y-0.5 sm:grid-cols-2';
+const leftTopGridMetal = 'grid grid-cols-1 gap-x-3 gap-y-0.5 sm:grid-cols-2';
 const leftBottomGridMetal =
   'grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2 lg:grid-cols-3 lg:items-start';
 const metalAmountRows = 'flex flex-col gap-2';
@@ -158,7 +176,14 @@ function LotSelectLoading() {
 );
 }
 
-export default function AddSaleModal({ open, onClose, initialData, lockedWarehouseId }: Props) {
+export default function AddSaleModal({
+  open,
+  onClose,
+  initialData,
+  branchId: branchIdProp,
+  warehouses,
+  lockedWarehouseId,
+}: Props) {
   const {
     icWarehouses,
     icSales,
@@ -170,6 +195,7 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
     user,
     currentSlug,
     branches,
+    showToast,
   } = useApp();
 
   const [settlementMode, setSettlementMode] = useState<ICSettlementMode>('cash');
@@ -181,8 +207,10 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
   const [units, setUnits] = useState(initialData?.units ?? 0);
   const [rate, setRate] = useState(initialData?.unitRate ?? 0);
   const [customerName, setCustomerName] = useState(initialData?.customerName || '');
+  const [managerId, setManagerId] = useState('');
   const [counterpartyId, setCounterpartyId] = useState('');
   const [warehouseId, setWarehouseId] = useState(initialData?.warehouseId || '');
+  const activeWarehouseId = lockedWarehouseId || warehouseId;
   const [transactionType, setTransactionType] = useState<ICSaleTransactionType>(() =>
     normalizeICSaleTransactionType(initialData?.transactionType),
   );
@@ -194,6 +222,8 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
   const [isUploading, setIsUploading] = useState(false);
   const [metalPurchaseId, setMetalPurchaseId] = useState(initialData?.metalPurchaseId || '');
   const [metalPayment, setMetalPayment] = useState<MetalPaymentMethod>('CASH');
+  const [splitInrPaid, setSplitInrPaid] = useState(0);
+  const [splitAedPaid, setSplitAedPaid] = useState(0);
   const [aedAgentId, setAedAgentId] = useState('');
   const [now, setNow] = useState<Date | null>(null);
   const formInitSeqRef = useRef(0);
@@ -202,7 +232,7 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
   /** Each modal open increments so the form resets even when initialData?.id is unchanged. */
   const [saleModalOpenSession, setSaleModalOpenSession] = useState(0);
 
-  const branchId = useMemo(() => {
+  const routeBranchId = useMemo(() => {
     if (user?.branchId) return user.branchId;
     if (currentSlug && currentSlug !== 'superadmin') {
       return branches.find(b => b.slug === currentSlug)?.id;
@@ -210,10 +240,14 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
     return undefined;
   }, [user?.branchId, currentSlug, branches]);
 
+  const branchId = lockedWarehouseId ? branchIdProp : (branchIdProp ?? routeBranchId);
+
   const scopedCounterparties = useMemo(() => {
-    if (branchId) return filterCounterpartiesForSales(icSuppliers, branchId);
-    return filterCounterpartiesForSales(icSuppliers);
-  }, [icSuppliers, branchId]);
+    const scoped = branchId
+      ? filterCounterpartiesForSales(icSuppliers, branchId, managerId || undefined)
+      : filterCounterpartiesForSales(icSuppliers, undefined, managerId || undefined);
+    return scoped;
+  }, [icSuppliers, branchId, managerId]);
 
   const agentOptions = useMemo(() => {
     if (branchId) return filterCounterpartiesForAgent(icSuppliers, branchId);
@@ -221,11 +255,11 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
   }, [icSuppliers, branchId]);
 
   const { entityLedgerById, warehouseAvailableById, warehouseMetalGById, refresh, refreshing } =
-    useICTransferModalSnapshots(open, { warehouseId });
+    useICTransferModalSnapshots(open, { warehouseId: activeWarehouseId });
 
   const { lots: metalLots, loading: metalLotsLoading } = useAvailableMetalLots(
     open,
-    warehouseId,
+    activeWarehouseId,
     initialData?.id,
   );
 
@@ -241,6 +275,10 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
     () => filterWarehousesForAssignableUser(icWarehouses, user),
     [icWarehouses, user],
   );
+  const warehouseOptions = useMemo(() => {
+    if (warehouses?.length) return warehouses;
+    return allowedWarehouses;
+  }, [warehouses, allowedWarehouses]);
   const counterpartySearchOptions = useMemo(
     () => buildCounterpartySearchOptions(scopedCounterparties, entityLedgerById),
     [scopedCounterparties, entityLedgerById],
@@ -266,11 +304,6 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
     [scopedCounterparties, counterpartyId],
   );
 
-  const selectedCounterpartyOption = useMemo(
-    () => counterpartySearchOptions.find(o => o.value === counterpartyId) ?? null,
-    [counterpartySearchOptions, counterpartyId],
-  );
-
   const rateGroupCustomerId = counterpartyId || undefined;
 
   const customerRateGroup = useMemo(() => {
@@ -281,11 +314,56 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
   const lockedWarehouse = useMemo(() => {
     if (!lockedWarehouseId) return null;
     return (
-      allowedWarehouses.find(w => w.id === lockedWarehouseId) ||
+      warehouseOptions.find(w => w.id === lockedWarehouseId) ||
       icWarehouses.find(w => w.id === lockedWarehouseId) ||
       null
     );
-  }, [lockedWarehouseId, allowedWarehouses, icWarehouses]);
+  }, [lockedWarehouseId, warehouseOptions, icWarehouses]);
+
+  const scopedWarehouse = useMemo(() => {
+    if (!activeWarehouseId) return null;
+    return (
+      icWarehouses.find(w => w.id === activeWarehouseId) ||
+      warehouseOptions.find(w => w.id === activeWarehouseId) ||
+      lockedWarehouse
+    );
+  }, [icWarehouses, warehouseOptions, lockedWarehouse, activeWarehouseId]);
+  const allowedManagerIds = !activeWarehouseId
+    ? null
+    : scopedWarehouse?.managerIds?.length
+      ? scopedWarehouse.managerIds
+      : [];
+
+  useEffect(() => {
+    if (allowedManagerIds === null) {
+      if (managerId) {
+        setManagerId('');
+        setCounterpartyId('');
+        setCustomerName('');
+      }
+      return;
+    }
+    if (allowedManagerIds.length === 0) {
+      if (managerId) {
+        setManagerId('');
+        setCounterpartyId('');
+        setCustomerName('');
+      }
+      return;
+    }
+    if (managerId && !allowedManagerIds.includes(managerId)) {
+      setManagerId('');
+      setCounterpartyId('');
+      setCustomerName('');
+    }
+  }, [activeWarehouseId, allowedManagerIds, managerId]);
+
+  useEffect(() => {
+    if (!open || !activeWarehouseId) return;
+    if (allowedManagerIds?.length === 1 && !managerId) {
+      setManagerId(allowedManagerIds[0]!);
+    }
+  }, [open, activeWarehouseId, allowedManagerIds, managerId]);
 
   const warehouseAvailable =
     warehouseId
@@ -390,15 +468,9 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
         setMetalPurchaseId(id);
         const lot = metalLots.find(l => l.id === id);
         if (lot) {
-          setMetal(prev =>
-            metalSaleFieldsFromRecord({
-              metalWeightG: lot.remainingG,
-              metalRateInrPerG: lot.metalRateInrPerG,
-              inrTotal: lot.remainingG * (lot.metalRateInrPerG || 0),
-              aedTotal: prev.aedTotal,
-              unitRate: prev.metalSheetRateAed,
-            }),
-          );
+          const sellG = lot.remainingG;
+          setMetal(metalSaleFieldsFromMetalLotSelection(lot, sellG));
+          setLab(labFieldsFromMetalLotSelection(lot, sellG));
         }
       }}
       options={metalLotOptions}
@@ -443,6 +515,8 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
       warehouseId,
       metalPurchaseId,
       metalPayment,
+      splitInrPaid,
+      splitAedPaid,
       aedAgentId,
       transactionType,
       priority,
@@ -461,6 +535,8 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
     warehouseId,
     metalPurchaseId,
     metalPayment,
+    splitInrPaid,
+    splitAedPaid,
     aedAgentId,
     transactionType,
     priority,
@@ -505,6 +581,7 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
     return pauseTransactionalRefetchForModal();
   }, [open]);
 
+  // Reset form only when the modal opens (or edit target changes), not when manager/customer scope changes.
   useEffect(() => {
     if (!open) return;
     ++formInitSeqRef.current;
@@ -520,10 +597,15 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
       inrTotal: initialData?.inrTotal,
       aedTotal: (initialData?.aedAmount ?? 0) + (initialData?.serviceCharge ?? 0),
       unitRate: initialData?.unitRate,
+      labTotalInr: initialData?.labTotalInr,
     });
 
     const resolvedWarehouseId = lockedWarehouseId || initialData?.warehouseId || '';
-    const resolvedCp = resolveInitialCounterpartyId(initialData, scopedCounterparties);
+    const initManagerId = initialData?.managerId || '';
+    const initCounterparties = branchId
+      ? filterCounterpartiesForSales(icSuppliers, branchId, initManagerId || undefined)
+      : filterCounterpartiesForSales(icSuppliers, undefined, initManagerId || undefined);
+    const resolvedCp = resolveInitialCounterpartyId(initialData, initCounterparties);
 
     if (!initialData?.id && saleMetal.metalSheetRateAed <= 0) {
       const wh = lockedWarehouseId || initialData?.warehouseId;
@@ -535,8 +617,8 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
           );
         } else {
           setMetal(saleMetal);
-        }
-      } else {
+          }
+        } else {
         setMetal(saleMetal);
       }
     } else {
@@ -546,6 +628,7 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
     setUnits(initialData?.units ?? 0);
     setRate(initialData?.unitRate ?? 0);
     setCustomerName(initialData?.orderCustomerName || initialData?.customerName || '');
+    setManagerId(initManagerId);
     setCounterpartyId(resolvedCp);
     setWarehouseId(resolvedWarehouseId);
     setMetalPurchaseId(initialData?.metalPurchaseId || '');
@@ -554,6 +637,8 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
       prefetchAvailableMetalLots(whForLots, initialData?.id);
     }
     setMetalPayment(normalizeMetalPaymentMethod(initialData?.metalPaymentMethod ?? 'CASH'));
+    setSplitInrPaid(Number(initialData?.splitInrPaid) || 0);
+    setSplitAedPaid(Number(initialData?.splitAedPaid) || 0);
     setAedAgentId(initialData?.aedAgentCounterpartyId || initialData?.aedAgentId || '');
     const nextLab = labFieldsFromRecord({
       labWeightG: initialData?.labWeightG,
@@ -566,15 +651,8 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
     setAddress(initialData?.address || '');
     setImageUrl(initialData?.imageUrl || '');
     setDeleteToken('');
-  }, [
-    open,
-    saleModalOpenSession,
-    initialData?.id,
-    lockedWarehouseId,
-    scopedCounterparties,
-    icPurchases,
-    icSales,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- open-only reset; matches AddPurchaseModal
+  }, [open, saleModalOpenSession, initialData?.id, lockedWarehouseId]);
 
   useEffect(() => {
     if (!open) return;
@@ -631,7 +709,8 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
   const amounts = computeICSaleAmounts(unitNum, rateNum, serviceChargeNum);
 
 
-  const metalAed = metalPayment === 'AED';
+  const metalAed = needsMetalAedAgent(metalPayment);
+  const metalSplit = metalPayment === 'SPLIT';
   const metalNetInr = netMetalInr(metal.inrTotal, lab.labTotalInr);
 
   const metalAedTotal = useMemo(() => {
@@ -640,6 +719,11 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
     if (!sheet || sheet <= 0) return metal.aedTotal;
     return computeMetalAedFromInr(metalNetInr, sheet);
   }, [isMetal, metal.aedTotal, metal.metalSheetRateAed, metalNetInr]);
+
+  useEffect(() => {
+    if (!metalSplit) return;
+    setSplitAedPaid(complementSplitAed(splitInrPaid, metal.inrTotal, metalAedTotal));
+  }, [metalSplit, metal.inrTotal, metalAedTotal]);
 
   useEffect(() => {
     if (!isMetal || settlementMode !== 'metal') return;
@@ -676,95 +760,52 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
     setLab(prev => applyLabFieldChange(prev, field, n));
   }, []);
 
+  const metalAgentOk = metalAedAgentSatisfied(metalPayment, aedAgentId);
+  const agentFieldInvalid = isMetal && metalAed && !metalAgentOk;
+
+  const warehouseReady = Boolean(activeWarehouseId?.trim());
   const canSubmit = isMetal
     ? Boolean(
-        counterpartyId &&
-          warehouseId.trim().length > 0 &&
+        managerId &&
+          counterpartyId &&
+          warehouseReady &&
           metalPurchaseId &&
           metal.metalWeightG > 0 &&
           metal.metalRateInrPerG > 0 &&
           metal.inrTotal > 0 &&
           metal.metalSheetRateAed > 0 &&
           metalAedTotal > 0 &&
-          (!metalAed || aedAgentId.trim().length > 0),
+          metalAgentOk &&
+          (!metalSplit || (splitInrPaid > 0 && splitAedPaid > 0)),
       )
     : unitNum > 0 &&
     rateNum > 0 &&
+      managerId &&
       counterpartyId &&
-      warehouseId.trim().length > 0;
+      warehouseReady;
 
-  const kpiMetalG = isMetal ? metal.metalWeightG : 0;
-  const kpiInr = isMetal ? metalNetInr : amounts.inrTotal;
-  const kpiAed = isMetal ? metalAedTotal : amounts.aedNetTotal;
-
-  const breakdownItems = useMemo((): ICTransferBreakdownItem[] => {
+  const priceBreakdown = useMemo(() => {
     if (!isMetal) {
-      return [
-        { id: 'units', label: 'Units', value: formatAmount(unitNum, 4) },
-        { id: 'rate', label: 'Rate (AED)', value: formatAmount(rateNum) },
-        {
-          id: 'txn',
-          label: 'Transaction',
-          value: transactionType.replace(/_/g, ' '),
-        },
-        {
-          id: 'inr',
-          label: 'Amount (INR)',
-          value: <FmtLedgerInr amount={amounts.inrTotal} />,
-          strong: true,
-        },
-        {
-          id: 'aed',
-          label: 'Amount (AED)',
-          value: <FmtLedgerAed amount={amounts.aedNetTotal} />,
-          strong: true,
-        },
-      ];
-    }
-
-    const items: ICTransferBreakdownItem[] = [
-      { id: 'w', label: 'Weight', value: `${formatAmount(metal.metalWeightG, 4)} g` },
-      {
-        id: 'gr',
-        label: 'G rate (INR/g)',
-        value: <FmtLedgerInr amount={metal.metalRateInrPerG} />,
-      },
-      {
-        id: 'gross',
-        label: 'Metal (INR)',
-        value: <FmtLedgerInr amount={metal.inrTotal} />,
-      },
-    ];
-    if (lab.labTotalInr > 0) {
-      items.push({
-        id: 'lab',
-        label: 'Lab test',
-        value: (
-          <>
-            − <FmtLedgerInr amount={lab.labTotalInr} />
-          </>
-        ),
-        deduct: true,
+      return buildCashBreakdownModel({
+        unitNum,
+        rateNum,
+        inrTotal: amounts.inrTotal,
+        aedTotal: amounts.aedNetTotal,
+        transactionTypeLabel: transactionType,
       });
     }
-    items.push({
-      id: 'net',
-      label: 'Net (INR)',
-      value: <FmtLedgerInr amount={metalNetInr} />,
-      strong: true,
+    return buildMetalBreakdownModel({
+      metalWeightG: metal.metalWeightG,
+      metalRateInrPerG: metal.metalRateInrPerG,
+      metalInrTotal: metal.inrTotal,
+      labTotalInr: lab.labTotalInr,
+      metalNetInr,
+      metalAedTotal,
+      sheetRateAed: metal.metalSheetRateAed,
+      showAedColumn: metalAed,
+      splitInrPaid: metalSplit ? splitInrPaid : null,
+      splitAedPaid: metalSplit ? splitAedPaid : null,
     });
-    items.push({
-      id: 'aedr',
-      label: 'Rate (AED)',
-      value: formatAmount(metal.metalSheetRateAed),
-    });
-    items.push({
-      id: 'aedt',
-      label: 'Total (AED)',
-      value: <FmtLedgerAed amount={metalAedTotal} />,
-      strong: true,
-    });
-    return items;
   }, [
     isMetal,
     unitNum,
@@ -775,29 +816,12 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
     metal,
     lab.labTotalInr,
     metalNetInr,
+    metalAed,
     metalAedTotal,
+    metalSplit,
+    splitInrPaid,
+    splitAedPaid,
   ]);
-
-  const stockContext =
-    counterpartyId && warehouseId ? (
-      <>
-        On hand:{' '}
-        <span className="font-mono font-medium tabular-nums text-slate-600">
-          {(warehouseAvailable ?? 0).toLocaleString()}
-        </span>{' '}
-        units ·{' '}
-        <span className="font-mono font-medium tabular-nums text-slate-600">
-          {formatMetalGrams(warehouseMetalG ?? 0)}
-        </span>
-        {refreshing ? <span className="text-slate-400"> · updating…</span> : null}
-        {selectedCounterpartyOption?.detail ? (
-          <>
-            {' · '}
-            <span className="text-slate-600">{selectedCounterpartyOption.detail}</span>
-          </>
-        ) : null}
-      </>
-    ) : null;
 
   const handleTransactionTypeChange = (value: ICSaleTransactionType) => {
     setTransactionType(value);
@@ -805,28 +829,36 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canSubmit || isSubmitting) return;
+    if (isSubmitting) return;
+    if (isMetal && !metalAedAgentSatisfied(metalPayment, aedAgentId)) {
+      showToast(METAL_AED_AGENT_REQUIRED_MSG, 'error');
+      return;
+    }
+    if (!canSubmit) return;
     setIsSubmitting(true);
 
     const recordedCustomerName = selectedCounterparty?.name || customerName.trim();
 
     const payload = isMetal
       ? {
-          customerName: recordedCustomerName,
+      customerName: recordedCustomerName,
           counterpartyId,
+          managerId,
           orderCustomerName: recordedCustomerName,
-          warehouseId,
+      warehouseId,
           settlementMode: 'metal' as const,
           metalPurchaseId,
           metalPaymentMethod: metalPayment,
           aedAgentId: metalAed ? aedAgentId : null,
-          unitRate: computeMetalSheetRateAed(metalNetInr, metalAedTotal),
+          splitInrPaid: metalSplit ? splitInrPaid : null,
+          splitAedPaid: metalSplit ? splitAedPaid : null,
+          unitRate: metal.metalSheetRateAed || computeMetalSheetRateAed(metalNetInr, metalAedTotal),
           units: metalPayment === 'CASH' ? netMetalInr(metal.inrTotal, lab.labTotalInr) / INR_PER_UNIT : 0,
           metalWeightG: metal.metalWeightG,
           metalRateInrPerG: metal.metalRateInrPerG,
           metalRateAedPerG: computeImpliedMetalRateAedPerG(metal.metalWeightG, metalAedTotal),
           inrTotal: metal.inrTotal,
-          aedAmount: metalAedTotal,
+          aedAmount: grossMetalAedFromNetBooked(metalAedTotal, metal.inrTotal, lab.labTotalInr),
           labWeightG: lab.labWeightG || undefined,
           labChargeInrPerG: lab.labChargeInrPerG || undefined,
           labTotalInr: lab.labTotalInr || undefined,
@@ -838,6 +870,7 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
       : {
       customerName: recordedCustomerName,
           counterpartyId,
+          managerId,
           orderCustomerName: recordedCustomerName,
       warehouseId,
           settlementMode: 'cash' as const,
@@ -891,21 +924,16 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
       maxWidth="max-w-6xl w-[96vw]"
       maxHeight={icSaleModalShell}
       heightClass="lg:h-[min(90vh,880px)]"
-      bodyClassName={`${icPurchaseFormModalBody} !px-5 !py-2 lg:overflow-hidden`}
+      bodyClassName={`${icPurchaseFormModalBody} !px-5 !py-2 lg:!overflow-hidden`}
+      footerClassName="flex shrink-0 border-t border-slate-200 bg-white p-2 sm:p-3 dark:border-[var(--theme-border)] dark:bg-[var(--theme-surface)]"
       footer={
-        <>
-          <button type="button" className={btnSecondary} onClick={requestClose} disabled={formDisabled}>
-            Cancel
-          </button>
-          <button
-            type="submit"
-            form="ic-sale-form"
-            className={btnPrimary}
-            disabled={formDisabled || !canSubmit}
-          >
-            {isSubmitting ? 'Saving...' : initialData ? 'Save Changes' : 'Register Sale'}
-          </button>
-        </>
+        <ICTransferModalFormFooter
+          onCancel={requestClose}
+          cancelDisabled={formDisabled}
+          submitFormId="ic-sale-form"
+          submitLabel={isSubmitting ? 'Saving...' : initialData ? 'Save Changes' : 'Register Sale'}
+          submitDisabled={formDisabled || !canSubmit}
+        />
       }
     >
       <form
@@ -913,32 +941,33 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
         onSubmit={handleSubmit}
         className="flex min-h-0 flex-1 flex-col lg:min-h-0"
       >
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-12 lg:items-stretch">
-          <div
-            className={`flex min-h-0 flex-col lg:col-span-8 lg:min-h-0 ${
-              isMetal ? 'gap-2.5 lg:h-full lg:justify-between' : 'gap-1.5'
-            }`}
-          >
+        <div className={icFormModalGridClass}>
+          <div className={`${icFormLeftPanelClass} ${isMetal ? 'gap-2.5' : 'gap-1.5'}`}>
             <div className={isMetal ? leftTopGridMetal : leftTopGrid}>
-              <ICTransferFormField label={`${SALE_COUNTERPARTY_FIELD_LABEL} *`}>
-                <EntitySearchSelect
-                  selectedId={counterpartyId}
-                  onSelectId={id => {
-                    setCounterpartyId(id);
-                    const cp = scopedCounterparties.find(c => c.id === id);
-                    if (cp) setCustomerName(cp.name);
-                    void refresh();
-                  }}
-                  options={counterpartySearchOptions}
-                  placeholder="Search by code or name…"
-                  inputClassName={denseInput}
-                  onFocusRefresh={() => void refresh()}
-                  showDetailLine={false}
-                  disabled={formDisabled}
-                />
+              <ICTransferFormField label="Warehouse *" className="sm:col-span-2">
+                {warehouseControl}
               </ICTransferFormField>
 
-              <ICTransferFormField label="Warehouse *">{warehouseControl}</ICTransferFormField>
+              <ManagerCustomerFields
+                branchId={branchId}
+                mode="sale"
+                managerId={managerId}
+                customerId={counterpartyId}
+                allowedManagerIds={allowedManagerIds}
+                onManagerChange={id => {
+                  setManagerId(id);
+                  setCounterpartyId('');
+                  setCustomerName('');
+                }}
+                onCustomerChange={id => {
+                  setCounterpartyId(id);
+                  const cp = scopedCounterparties.find(c => c.id === id);
+                  if (cp) setCustomerName(cp.name);
+                  void refresh();
+                }}
+                entityLedgerById={entityLedgerById}
+                disabled={formDisabled || !activeWarehouseId}
+              />
 
               <ICTransferFormField label="Address / description" className="sm:col-span-2">
                 {SHOW_SALE_ADDRESS_PROOF ? (
@@ -953,18 +982,18 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
                       disabled={formDisabled}
                     />
                     <div className="flex h-[4.875rem] min-w-0 flex-col">
-                      <ImageDropZone
+              <ImageDropZone
                         compact
                         fillHeight
                         className="h-full min-h-0"
-                        imageUrl={imageUrl}
-                        onUpload={handleImageUpload}
-                        onClear={handleDeleteImage}
-                        isUploading={isUploading}
+                imageUrl={imageUrl}
+                onUpload={handleImageUpload}
+                onClear={handleDeleteImage}
+                isUploading={isUploading}
                         disabled={formDisabled}
                         emptyLabel="Drop or click for proof"
-                      />
-                    </div>
+              />
+          </div>
                   </div>
                 ) : (
                   <input
@@ -984,7 +1013,17 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
                   <ICTransferFormField label="Payment method" className="min-w-0 w-full">
                     <MetalPaymentToggle
                       value={metalPayment}
-                      onChange={setMetalPayment}
+                      onChange={next => {
+                        setMetalPayment(next);
+                        if (!needsMetalAedAgent(next)) {
+                          setAedAgentId('');
+                        }
+                        if (next === 'SPLIT') {
+                          const seeded = defaultSplitAmounts(metal.inrTotal, metal.aedTotal);
+                          setSplitInrPaid(seeded.paidInr);
+                          setSplitAedPaid(seeded.paidAed);
+                        }
+                      }}
                       disabled={formDisabled}
                       hideCaption
                       fullWidth
@@ -997,7 +1036,11 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
                         onSelectId={id => setAedAgentId(id)}
                         options={agentSearchOptions}
                         placeholder="Search by code or name…"
-                        inputClassName={denseInput}
+                        inputClassName={
+                          agentFieldInvalid
+                            ? `${denseInput} border-red-300 ring-1 ring-red-200 focus-visible:border-red-400 focus-visible:ring-red-200`
+                            : denseInput
+                        }
                         showDetailLine={false}
                         disabled={formDisabled}
                         onFocusRefresh={() => void refresh()}
@@ -1009,16 +1052,11 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
             </div>
 
             <div
-              className={`border-t border-slate-200 ${
-                isMetal ? 'flex min-h-0 flex-col pt-2.5 lg:min-h-0 lg:flex-1 lg:justify-between' : 'pt-1.5'
-              }`}
+              className={`border-t border-slate-200 ${isMetal ? 'flex flex-col pt-2.5' : 'pt-1.5'}`}
             >
-              <SmoothModeSwap
-                mode={settlementMode}
-                className={isMetal ? 'min-h-0 lg:flex-1' : undefined}
-              >
+              <SmoothModeSwap mode={settlementMode}>
                 {isMetal ? (
-                  <div className="flex min-h-0 flex-col gap-3 lg:flex-1">
+                  <div className="flex flex-col gap-3">
                     <div className={metalAmountRows}>
                       <div className={metalAmountPairRow}>
                         <ICTransferFormField label="Purchase lot *">
@@ -1036,7 +1074,7 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
                             aria-readonly
                           />
                         </ICTransferFormField>
-                      </div>
+              </div>
                       <div className="rounded-lg border border-slate-200/80 bg-slate-50/80 p-2.5">
                         <div className="mb-1.5">
                           <span className={icFormSectionEyebrow}>Lab test (INR)</span>
@@ -1072,7 +1110,7 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
                               onNumericChange={n => onLabField('total', n)}
                             />
                           </ICTransferFormField>
-                        </div>
+              </div>
                       </div>
                       <div className={metalAmountPairRow}>
                         <ICTransferFormField label="G rate (INR) *">
@@ -1095,7 +1133,7 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
                             onNumericChange={n => onMetalField('totalInr', n)}
                           />
                         </ICTransferFormField>
-                      </div>
+                    </div>
                       <div className={metalAmountPairRow}>
                         <ICTransferFormField label="Rate (AED) *">
                           <FormattedNumberInput
@@ -1118,7 +1156,7 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
                             onNumericChange={n => onMetalField('totalAed', n)}
                           />
                         </ICTransferFormField>
-                      </div>
+                </div>
                     </div>
                   </div>
                 ) : (
@@ -1147,8 +1185,8 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
                             >
                               <span className="line-clamp-2 text-center">{customerRateGroup.name}</span>
                             </span>
-                          ) : null}
-                        </div>
+              ) : null}
+            </div>
                       </ICTransferFormField>
 
                       <ICTransferFormField label="Units *">
@@ -1170,7 +1208,7 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
                   disabled={isSubmitting}
                 />
                     </ICTransferFormField>
-              </div>
+          </div>
                 )}
               </SmoothModeSwap>
             </div>
@@ -1179,20 +1217,43 @@ export default function AddSaleModal({ open, onClose, initialData, lockedWarehou
           <ICTransferBreakdownPanel
             heading="Price breakdown"
             ledger={
-              counterpartyId ? (
-                <PartyLedgerStrip
-                  counterpartyId={counterpartyId}
-                  partyLabel={selectedCounterparty?.name || customerName}
-                  book={isMetal ? 'INR' : 'AED'}
-                />
+              warehouseId || counterpartyId ? (
+                <div className="flex flex-col gap-2">
+                  {warehouseId ? (
+                    <WarehouseOnHandStrip
+                      inrAmount={unitsToInrAmount(warehouseAvailable ?? 0)}
+                      metalG={warehouseMetalG ?? 0}
+                      refreshing={refreshing}
+                    />
+                  ) : null}
+                  {counterpartyId ? (
+                    <PartyLedgerStrip
+                      counterpartyId={counterpartyId}
+                      partyLabel={selectedCounterparty?.name || customerName}
+                      book={isMetal ? 'INR' : 'AED'}
+                      balances={entityLedgerById[counterpartyId]}
+                    />
+                  ) : null}
+                </div>
               ) : undefined
             }
-            items={breakdownItems}
-            metalG={kpiMetalG}
-            inrAmount={kpiInr}
-            aedAmount={kpiAed}
+            breakdown={priceBreakdown}
             swapKey={`${settlementMode}-${metalPayment}`}
-            context={stockContext}
+            splitPaidEdit={
+              metalSplit && metalAed
+                ? {
+                    paidInr: splitInrPaid,
+                    paidAed: splitAedPaid,
+                    totalInr: metal.inrTotal,
+                    totalAed: metalAedTotal,
+                    onChange: ({ paidInr, paidAed }) => {
+                      setSplitInrPaid(paidInr);
+                      setSplitAedPaid(paidAed);
+                    },
+                    disabled: formDisabled,
+                  }
+                : undefined
+            }
           />
         </div>
       </form>

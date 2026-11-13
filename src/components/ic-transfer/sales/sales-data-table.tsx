@@ -17,6 +17,10 @@ import {
   saleDealAed,
   saleDealInr,
   formatSaleLineProfit,
+  formatDealTableSheetRate,
+  formatDealTableSplitPaidAed,
+  formatDealTableSplitPaidInr,
+  saleDealSheetRate,
   saleTableDisplayAed,
 } from '@/lib/icTransfer/dealTableDisplay';
 import type { SaleLineProfit } from '@/lib/icTransfer/dealProfit';
@@ -44,8 +48,11 @@ const SALES_COLUMNS: ICTransferTableColumn[] = [
   { id: 'Settlement', label: 'Settlement', align: 'left' },
   { id: 'Units', label: 'Units', align: 'right' },
   { id: 'Metal (g)', label: 'Metal (g)', align: 'right' },
-  { id: 'Total INR', label: 'INR', align: 'right' },
-  { id: 'Total AED', label: 'AED', align: 'right' },
+  { id: 'Total INR', label: 'Total INR', align: 'right' },
+  { id: 'Rate (AED)', label: 'AED rate', align: 'right' },
+  { id: 'Total AED', label: 'Total AED', align: 'right' },
+  { id: 'INR paid', label: 'INR paid', align: 'right' },
+  { id: 'AED paid', label: 'AED paid', align: 'right' },
   { id: 'Profit', label: 'Profit', align: 'right' },
   { id: 'Actions', label: 'Actions', align: 'center', sortable: false },
 ];
@@ -390,11 +397,14 @@ function SaleRow({
           {formatDealTableInr(saleDealInr(s))}
         </span>
       </td>
+      <td className={icTdClass('right')}>{formatDealTableSheetRate(saleDealSheetRate(s))}</td>
       <td className={icTdClass('right')}>
         <span className="font-mono font-medium tabular-nums text-slate-900">
           {formatDealTableAed(saleTableDisplayAed(s))}
         </span>
       </td>
+      <td className={icTdClass('right')}>{formatDealTableSplitPaidInr(s)}</td>
+      <td className={icTdClass('right')}>{formatDealTableSplitPaidAed(s)}</td>
       <td className={icTdClass('right')}>{formatSaleLineProfit(profit)}</td>
       <td className={icTdClass('center')} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-center gap-0.5">

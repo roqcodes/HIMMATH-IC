@@ -7,7 +7,7 @@ import AsicFormField from '@/components/asic/AsicFormField';
 import { SmoothCollapse, SmoothModeSwap } from '@/components/ui/SmoothHeight';
 import EntitySearchSelect from '@/components/ui/EntitySearchSelect';
 import { asicInput } from '@/components/asic/ui';
-import { btnPrimary, btnSecondary } from '@/lib/ui';
+import ICTransferModalFormFooter from '@/components/ic-transfer/shared/ICTransferModalFormFooter';
 import { useApp } from '@/context/AppContext';
 import { ICPurchase, ICWarehouse } from '@/types';
 import SettlementModeToggle from '../shared/SettlementModeToggle';
@@ -15,7 +15,13 @@ import { emptyMetalFields } from '../shared/MetalSettlementFields';
 import FormattedNumberInput from '../shared/FormattedNumberInput';
 import MetalPaymentToggle from '../shared/MetalPaymentToggle';
 import type { MetalPaymentMethod } from '@/lib/domain/books';
-import { normalizeMetalPaymentMethod } from '@/lib/domain/books';
+import {
+  METAL_AED_AGENT_REQUIRED_MSG,
+  metalAedAgentSatisfied,
+  needsMetalAedAgent,
+  normalizeMetalPaymentMethod,
+} from '@/lib/domain/books';
+import { complementSplitAed, defaultSplitAmounts } from '@/lib/icTransfer/metalSplit';
 import {
   computeICSaleAmounts,
   formatAmount,
@@ -25,6 +31,7 @@ import {
   applyMetalFieldChange,
   computeImpliedMetalRateAedPerG,
   computeMetalAedFromInr,
+  grossMetalAedFromNetBooked,
   computeMetalSheetRateAed,
   metalFieldsFromRecord,
   METAL_AED_RATE_DIVISOR,
@@ -46,14 +53,23 @@ import {
   filterWarehousesForBranchPortal,
 } from '@/lib/icTransfer/branchPortalScope';
 import { PURCHASE_COUNTERPARTY_FIELD_LABEL } from '@/lib/counterparties/labels';
+import ManagerCustomerFields from '@/components/ic-transfer/shared/ManagerCustomerFields';
 import { effectivePurchaseCounterpartyId } from '@/lib/counterparties/effectiveId';
 import { emptyLabFields, applyLabFieldChange, labFieldsFromRecord, netMetalInr } from '@/lib/icTransfer/labTest';
 import PartyLedgerStrip from '../shared/PartyLedgerStrip';
+import WarehouseOnHandStrip from '../shared/WarehouseOnHandStrip';
+import { unitsToInrAmount } from '@/lib/domain/books';
 import type { LabTestFieldKey } from '@/lib/icTransfer/labTest';
-import { FmtLedgerAed, FmtLedgerInr } from '@/lib/icFunds/format';
+import {
+  buildCashBreakdownModel,
+  buildMetalBreakdownModel,
+} from '@/lib/icTransfer/breakdownViewModel';
+import ICTransferBreakdownPanel from '../shared/ICTransferBreakdownPanel';
 import {
   icPurchaseModalShell,
   icPurchaseFormModalBody,
+  icFormLeftPanelClass,
+  icFormModalGridClass,
   icFormSectionEyebrow,
   icPurchaseDenseInput,
   icPurchaseDenseLabel,
@@ -77,15 +93,13 @@ type Props = {
 
 const denseInput = `${asicInput} ${icPurchaseDenseInput}`;
 
-const leftTopGrid = 'grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2';
-const leftTopGridMetal = 'grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2';
+const leftTopGrid = 'grid grid-cols-1 gap-x-3 gap-y-0.5 sm:grid-cols-2';
+const leftTopGridMetal = 'grid grid-cols-1 gap-x-3 gap-y-0.5 sm:grid-cols-2';
 const leftBottomGrid = 'grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2 lg:grid-cols-3';
 const leftBottomGridMetal =
   'grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2 lg:grid-cols-3 lg:items-start';
 const metalAmountRows = 'flex flex-col gap-2';
 const metalAmountPairRow = 'grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2';
-const purchaseNotesInput = `${asicInput} ${icPurchaseDenseInput} !min-h-9 max-h-9 resize-none py-1 text-sm leading-snug`;
-
 function SectionEyebrow({ children }: { children: React.ReactNode }) {
   return <h3 className={icFormSectionEyebrow}>{children}</h3>;
 }
@@ -105,115 +119,6 @@ function PurchaseField({
         {children}
       </AsicFormField>
     </div>
-  );
-}
-
-type BreakdownItem = {
-  id: string;
-  label: string;
-  value: React.ReactNode;
-  deduct?: boolean;
-  strong?: boolean;
-};
-
-function PurchaseBreakdownPanel({
-  heading,
-  ledger,
-  items,
-  metalG,
-  inrAmount,
-  aedAmount,
-  context,
-  swapKey,
-  notes,
-  onNotesChange,
-  notesDisabled,
-}: {
-  heading: string;
-  ledger?: React.ReactNode;
-  items: BreakdownItem[];
-  metalG: number;
-  inrAmount: number;
-  aedAmount: number;
-  context?: React.ReactNode;
-  swapKey: string;
-  notes: string;
-  onNotesChange: (value: string) => void;
-  notesDisabled?: boolean;
-}) {
-  return (
-    <aside className="flex min-h-0 flex-col gap-2 lg:col-span-4 lg:border-l lg:border-slate-200 lg:pl-4">
-      {ledger}
-      <SectionEyebrow>{heading}</SectionEyebrow>
-      <SmoothModeSwap mode={swapKey} className="min-h-0 flex-1 flex-col">
-        <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-slate-200 bg-slate-50/50">
-        <ul className="flex-1 space-y-0 divide-y divide-slate-200/80 px-3 py-1">
-          {items.map(item => (
-            <li
-              key={item.id}
-              className="flex items-baseline justify-between gap-3 py-2 text-xs first:pt-2 last:pb-2"
-            >
-              <span className="text-slate-500">{item.label}</span>
-              <span
-                className={`text-right font-mono text-xs tabular-nums ${
-                  item.deduct
-                    ? 'font-semibold text-red-600'
-                    : item.strong
-                      ? 'font-bold text-slate-900'
-                      : 'font-semibold text-slate-800'
-                }`}
-              >
-                {item.value}
-              </span>
-            </li>
-          ))}
-        </ul>
-        {context ? (
-          <div className="border-t border-slate-200/80 px-3 py-2 text-[11px] leading-snug text-slate-500">
-            {context}
-          </div>
-        ) : null}
-        <div className="space-y-2 border-t border-slate-200 bg-white px-3 py-3">
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Metal</span>
-            <span className="font-mono text-sm font-bold tabular-nums text-slate-900">
-              {formatAmount(metalG, 4)} g
-            </span>
-          </div>
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-              Amount (INR)
-            </span>
-            <span className="font-mono text-sm font-bold tabular-nums text-slate-900">
-              <FmtLedgerInr amount={inrAmount} />
-            </span>
-          </div>
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-              Amount (AED)
-            </span>
-            <span className="font-mono text-sm font-bold tabular-nums text-slate-900">
-              <FmtLedgerAed amount={aedAmount} />
-            </span>
-          </div>
-        </div>
-        </div>
-      </SmoothModeSwap>
-      <div className="shrink-0">
-        <label className={purchaseFieldLabel} htmlFor="purchase-notes">
-          Notes
-        </label>
-        <textarea
-          id="purchase-notes"
-          className={`${purchaseNotesInput} mt-1 w-full`}
-          rows={1}
-          value={notes}
-          onChange={e => onNotesChange(e.target.value)}
-          placeholder="Internal remark…"
-          disabled={notesDisabled}
-        />
-      </div>
-    </aside>
   );
 }
 
@@ -242,6 +147,7 @@ export default function AddPurchaseModal({
     addICPurchase,
     updateICPurchase,
     icPurchases,
+    showToast,
   } = useApp();
   const [settlementMode, setSettlementMode] = useState<ICSettlementMode>('cash');
   const [metal, setMetal] = useState(emptyMetalFields());
@@ -251,12 +157,12 @@ export default function AddPurchaseModal({
     if (branchId) return filterWarehousesForBranchPortal(icWarehouses, branchId);
     return filterWarehousesForAdminPortal(icWarehouses);
   }, [warehouses, icWarehouses, branchId]);
+  const [managerId, setManagerId] = useState(initialData?.managerId || '');
   const supplierOptions = useMemo(() => {
-    const base = branchId
-      ? filterCounterpartiesForPurchase(icSuppliers, branchId)
-      : filterCounterpartiesForPurchase(icSuppliers);
-    return base;
-  }, [icSuppliers, branchId]);
+    return branchId
+      ? filterCounterpartiesForPurchase(icSuppliers, branchId, managerId || undefined)
+      : filterCounterpartiesForPurchase(icSuppliers, undefined, managerId || undefined);
+  }, [icSuppliers, branchId, managerId]);
   const agentOptions = useMemo(() => {
     return branchId
       ? filterCounterpartiesForAgent(icSuppliers, branchId)
@@ -270,6 +176,8 @@ export default function AddPurchaseModal({
   const [warehouseId, setWarehouseId] = useState(initialData?.warehouseId || '');
   const [notes, setNotes] = useState(initialData?.notes || '');
   const [metalPayment, setMetalPayment] = useState<MetalPaymentMethod>('CASH');
+  const [splitInrPaid, setSplitInrPaid] = useState(0);
+  const [splitAedPaid, setSplitAedPaid] = useState(0);
   const [aedAgentId, setAedAgentId] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [now, setNow] = useState<Date | null>(null);
@@ -279,8 +187,9 @@ export default function AddPurchaseModal({
   /** Increments each time the modal opens so we reset form even when initialData?.id is unchanged (e.g. add twice). */
   const [purchaseModalOpenSession, setPurchaseModalOpenSession] = useState(0);
 
+  const activeWarehouseIdForSnapshots = lockedWarehouseId || warehouseId;
   const { entityLedgerById, warehouseAvailableById, warehouseMetalGById, refresh, refreshing } =
-    useICTransferModalSnapshots(open, { warehouseId });
+    useICTransferModalSnapshots(open, { warehouseId: activeWarehouseIdForSnapshots });
 
   const supplierSearchOptions = useMemo(
     () => buildSupplierSearchOptions(supplierOptions, entityLedgerById),
@@ -311,9 +220,53 @@ export default function AddPurchaseModal({
     );
   }, [lockedWarehouseId, warehouseOptions, icWarehouses]);
 
+  const activeWarehouseId = lockedWarehouseId || warehouseId;
+  const scopedWarehouse = useMemo(() => {
+    if (!activeWarehouseId) return null;
+    return (
+      icWarehouses.find(w => w.id === activeWarehouseId) ||
+      warehouseOptions.find(w => w.id === activeWarehouseId) ||
+      lockedWarehouse
+    );
+  }, [icWarehouses, warehouseOptions, lockedWarehouse, activeWarehouseId]);
+  const allowedManagerIds = !activeWarehouseId
+    ? null
+    : scopedWarehouse?.managerIds?.length
+      ? scopedWarehouse.managerIds
+      : [];
+
+  useEffect(() => {
+    if (allowedManagerIds === null) {
+      if (managerId) {
+        setManagerId('');
+        setSupplierId('');
+      }
+      return;
+    }
+    if (allowedManagerIds.length === 0) {
+      if (managerId) {
+        setManagerId('');
+        setSupplierId('');
+      }
+      return;
+    }
+    if (managerId && !allowedManagerIds.includes(managerId)) {
+      setManagerId('');
+      setSupplierId('');
+    }
+  }, [activeWarehouseId, allowedManagerIds, managerId]);
+
+  useEffect(() => {
+    if (!open || !activeWarehouseId) return;
+    if (allowedManagerIds?.length === 1 && !managerId) {
+      setManagerId(allowedManagerIds[0]!);
+    }
+  }, [open, activeWarehouseId, allowedManagerIds, managerId]);
+
   const isMetal = settlementMode === 'metal';
   const lockMode = Boolean(initialData?.id);
-  const metalAed = metalPayment === 'AED';
+  const metalAed = needsMetalAedAgent(metalPayment);
+  const metalSplit = metalPayment === 'SPLIT';
   const selectedSupplier = useMemo(
     () => supplierOptions.find(s => s.id === supplierId) ?? null,
     [supplierOptions, supplierId],
@@ -354,8 +307,10 @@ export default function AddPurchaseModal({
       aedAgentId,
       metal,
       lab,
+      splitInrPaid,
+      splitAedPaid,
     };
-  }, [settlementMode, units, rate, supplierId, warehouseId, notes, metalPayment, aedAgentId, metal, lab]);
+  }, [settlementMode, units, rate, supplierId, warehouseId, notes, metalPayment, aedAgentId, metal, lab, splitInrPaid, splitAedPaid]);
 
   const formStateRef = useRef(capturePurchaseFormSnapshot());
   formStateRef.current = capturePurchaseFormSnapshot();
@@ -403,6 +358,7 @@ export default function AddPurchaseModal({
 
     setUnits(initialData?.units ?? 0);
     setRate(initialData?.unitRate ?? 0);
+    setManagerId(initialData?.managerId || '');
     setSupplierId(initialData?.counterpartyId || initialData?.supplierId || '');
     setWarehouseId(resolvedWarehouseId);
     setNotes(initialData?.notes || '');
@@ -412,10 +368,14 @@ export default function AddPurchaseModal({
       metalRateAedPerG: initialData?.metalRateAedPerG,
       inrTotal: initialData?.inrTotal,
       aedTotal: initialData?.aedTotal,
+      unitRate: initialData?.unitRate,
+      labTotalInr: initialData?.labTotalInr,
     });
     setMetal(nextMetal);
     const nextMetalPayment = normalizeMetalPaymentMethod(initialData?.metalPaymentMethod ?? 'CASH');
     setMetalPayment(nextMetalPayment);
+    setSplitInrPaid(Number(initialData?.splitInrPaid) || 0);
+    setSplitAedPaid(Number(initialData?.splitAedPaid) || 0);
     setAedAgentId(initialData?.aedAgentCounterpartyId || initialData?.aedAgentId || '');
     const nextLab = labFieldsFromRecord({
       labWeightG: initialData?.labWeightG,
@@ -457,6 +417,11 @@ export default function AddPurchaseModal({
   }, [isMetal, metalAed, metal.aedTotal, metal.metalSheetRateAed, metalNetInr]);
 
   useEffect(() => {
+    if (!metalSplit) return;
+    setSplitAedPaid(complementSplitAed(splitInrPaid, metal.inrTotal, metalAedTotal));
+  }, [metalSplit, metal.inrTotal, metalAedTotal]);
+
+  useEffect(() => {
     if (!isMetal || !metalAed || settlementMode !== 'metal') return;
     const sheet = metal.metalSheetRateAed;
     if (!sheet || sheet <= 0 || !metal.inrTotal) return;
@@ -481,10 +446,6 @@ export default function AddPurchaseModal({
     metalNetInr,
   ]);
 
-  const kpiMetalG = isMetal ? metal.metalWeightG : 0;
-  const kpiInr = isMetal ? metalNetInr : amounts.inrTotal;
-  const kpiAed = isMetal ? (metalAed ? metalAedTotal : 0) : amounts.aedNetTotal;
-
   const onMetalField = useCallback(
     (field: 'weight' | 'rateInr' | 'sheetRateAed' | 'totalInr' | 'totalAed', n: number) => {
       setMetal(prev => applyMetalFieldChange(prev, field, n));
@@ -496,81 +457,44 @@ export default function AddPurchaseModal({
     setLab(prev => applyLabFieldChange(prev, field, n));
   }, []);
 
-  const canSubmitCash = unitNum > 0 && rateNum > 0 && supplierId && warehouseId;
+  const metalAgentOk = metalAedAgentSatisfied(metalPayment, aedAgentId);
+  const agentFieldInvalid = isMetal && metalAed && !metalAgentOk;
+
+  const canSubmitCash = unitNum > 0 && rateNum > 0 && managerId && supplierId && warehouseId;
   const canSubmitMetal =
+    managerId &&
     supplierId &&
     warehouseId &&
     metal.metalWeightG > 0 &&
     metal.metalRateInrPerG > 0 &&
     metal.inrTotal > 0 &&
+    metalAgentOk &&
     (!metalAed ||
-      (metal.metalSheetRateAed > 0 &&
-        metal.metalRateAedPerG > 0 &&
-        metalAedTotal > 0 &&
-        aedAgentId.trim().length > 0));
+      (metal.metalSheetRateAed > 0 && metal.metalRateAedPerG > 0 && metalAedTotal > 0)) &&
+    (!metalSplit || (splitInrPaid > 0 && splitAedPaid > 0));
   const canSubmit = isMetal ? canSubmitMetal : canSubmitCash;
 
-  const breakdownItems = useMemo((): BreakdownItem[] => {
+  const priceBreakdown = useMemo(() => {
     if (!isMetal) {
-      return [
-        { id: 'units', label: 'Units', value: formatAmount(unitNum, 4) },
-        { id: 'rate', label: 'Unit rate (AED)', value: formatAmount(rateNum) },
-        {
-          id: 'inr',
-          label: 'Amount (INR)',
-          value: <FmtLedgerInr amount={amounts.inrTotal} />,
-          strong: true,
-        },
-        {
-          id: 'aed',
-          label: 'Amount (AED)',
-          value: <FmtLedgerAed amount={amounts.aedNetTotal} />,
-          strong: true,
-        },
-      ];
-    }
-
-    const items: BreakdownItem[] = [
-      { id: 'w', label: 'Weight', value: `${formatAmount(metal.metalWeightG, 4)} g` },
-      {
-        id: 'gr',
-        label: 'G rate (INR/g)',
-        value: <FmtLedgerInr amount={metal.metalRateInrPerG} />,
-      },
-      {
-        id: 'gross',
-        label: 'Metal (INR)',
-        value: <FmtLedgerInr amount={metal.inrTotal} />,
-      },
-    ];
-    if (lab.labTotalInr > 0) {
-      items.push({
-        id: 'lab',
-        label: 'Lab test',
-        value: <>− <FmtLedgerInr amount={lab.labTotalInr} /></>,
-        deduct: true,
+      return buildCashBreakdownModel({
+        unitNum,
+        rateNum,
+        inrTotal: amounts.inrTotal,
+        aedTotal: amounts.aedNetTotal,
       });
     }
-    items.push({
-      id: 'net',
-      label: 'Net (INR)',
-      value: <FmtLedgerInr amount={metalNetInr} />,
-      strong: true,
+    return buildMetalBreakdownModel({
+      metalWeightG: metal.metalWeightG,
+      metalRateInrPerG: metal.metalRateInrPerG,
+      metalInrTotal: metal.inrTotal,
+      labTotalInr: lab.labTotalInr,
+      metalNetInr,
+      metalAedTotal,
+      sheetRateAed: metal.metalSheetRateAed,
+      showAedColumn: metalAed,
+      splitInrPaid: metalSplit ? splitInrPaid : null,
+      splitAedPaid: metalSplit ? splitAedPaid : null,
     });
-    if (metalAed) {
-      items.push({
-        id: 'aedr',
-        label: 'Rate (AED)',
-        value: formatAmount(metal.metalSheetRateAed),
-      });
-      items.push({
-        id: 'aedt',
-        label: 'Total (AED)',
-        value: <FmtLedgerAed amount={metalAedTotal} />,
-        strong: true,
-      });
-    }
-    return items;
   }, [
     isMetal,
     unitNum,
@@ -582,21 +506,14 @@ export default function AddPurchaseModal({
     metalNetInr,
     metalAed,
     metalAedTotal,
+    metalSplit,
+    splitInrPaid,
+    splitAedPaid,
   ]);
 
   const stockContext =
     supplierId && warehouseId ? (
       <>
-        On hand:{' '}
-        <span className="font-mono font-medium tabular-nums text-slate-600">
-          {(warehouseAvailable ?? 0).toLocaleString()}
-        </span>{' '}
-        units ·{' '}
-        <span className="font-mono font-medium tabular-nums text-slate-600">
-          {formatMetalGrams(warehouseMetalG ?? 0)}
-        </span>
-        {refreshing ? <span className="text-slate-400"> · updating…</span> : null}
-        {' · '}
         Supplier:{' '}
         {isMetal ? (
           <span className="font-mono font-medium tabular-nums">{metalAtSupplier.toLocaleString()} g</span>
@@ -619,7 +536,12 @@ export default function AddPurchaseModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canSubmit || isSubmitting) return;
+    if (isSubmitting) return;
+    if (isMetal && !metalAedAgentSatisfied(metalPayment, aedAgentId)) {
+      showToast(METAL_AED_AGENT_REQUIRED_MSG, 'error');
+      return;
+    }
+    if (!canSubmit) return;
     setIsSubmitting(true);
 
     const locationId = warehouseId
@@ -629,12 +551,15 @@ export default function AddPurchaseModal({
     const payload: Omit<ICPurchase, 'id' | 'createdAt'> = isMetal
       ? {
           counterpartyId: supplierId,
+          managerId,
           warehouseId: warehouseId || undefined,
           locationId,
           settlementMode: 'metal',
           metalPaymentMethod: metalPayment,
           aedAgentId: metalAed ? aedAgentId : null,
-          unitRate: 0,
+          splitInrPaid: metalSplit ? splitInrPaid : null,
+          splitAedPaid: metalSplit ? splitAedPaid : null,
+          unitRate: metalAed ? metal.metalSheetRateAed : 0,
           units: 0,
           metalWeightG: metal.metalWeightG,
           metalRateInrPerG: metal.metalRateInrPerG,
@@ -642,7 +567,9 @@ export default function AddPurchaseModal({
             ? computeImpliedMetalRateAedPerG(metal.metalWeightG, metalAedTotal)
             : 0,
           inrTotal: metal.inrTotal,
-          aedTotal: metalAed ? metalAedTotal : undefined,
+          aedTotal: metalAed
+            ? grossMetalAedFromNetBooked(metalAedTotal, metal.inrTotal, lab.labTotalInr)
+            : undefined,
           labWeightG: lab.labWeightG || undefined,
           labChargeInrPerG: lab.labChargeInrPerG || undefined,
           labTotalInr: lab.labTotalInr || undefined,
@@ -650,6 +577,7 @@ export default function AddPurchaseModal({
         }
       : {
           counterpartyId: supplierId,
+          managerId,
           warehouseId: warehouseId || undefined,
           locationId,
           settlementMode: 'cash',
@@ -695,21 +623,21 @@ export default function AddPurchaseModal({
       maxWidth="max-w-6xl w-[96vw]"
       maxHeight={icPurchaseModalShell}
       heightClass="lg:h-[min(90vh,880px)]"
-      bodyClassName={`${icPurchaseFormModalBody} !px-5 !py-2 lg:overflow-hidden`}
+      bodyClassName={`${icPurchaseFormModalBody} !px-5 !py-2 lg:!overflow-hidden`}
+      footerClassName="flex shrink-0 border-t border-slate-200 bg-white p-2 sm:p-3 dark:border-[var(--theme-border)] dark:bg-[var(--theme-surface)]"
       footer={
-        <>
-          <button type="button" className={btnSecondary} onClick={requestClose} disabled={isSubmitting}>
-            Cancel
-          </button>
-          <button
-            type="submit"
-            form="ic-purchase-form"
-            className={btnPrimary}
-            disabled={isSubmitting || !canSubmit}
-          >
-            {isSubmitting ? 'Saving...' : initialData ? 'Save Changes' : 'Add Purchase'}
-          </button>
-        </>
+        <ICTransferModalFormFooter
+          onCancel={requestClose}
+          cancelDisabled={isSubmitting}
+          submitFormId="ic-purchase-form"
+          submitLabel={isSubmitting ? 'Saving...' : initialData ? 'Save Changes' : 'Add Purchase'}
+          submitDisabled={isSubmitting || !canSubmit}
+          notes={notes}
+          onNotesChange={setNotes}
+          notesDisabled={isSubmitting}
+          notesId="purchase-notes"
+          notesPlaceholder="Internal remark…"
+        />
       }
     >
       <form
@@ -717,32 +645,10 @@ export default function AddPurchaseModal({
         onSubmit={handleSubmit}
         className="flex min-h-0 flex-1 flex-col lg:min-h-0"
       >
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-12 lg:items-stretch">
-          <div
-            className={`flex min-h-0 flex-col lg:col-span-8 lg:min-h-0 ${
-              isMetal ? 'gap-2.5 lg:h-full lg:justify-between' : 'gap-1.5'
-            }`}
-          >
+        <div className={icFormModalGridClass}>
+          <div className={`${icFormLeftPanelClass} ${isMetal ? 'gap-2.5' : 'gap-1.5'}`}>
             <div className={isMetal ? leftTopGridMetal : leftTopGrid}>
-              <PurchaseField label={`${PURCHASE_COUNTERPARTY_FIELD_LABEL} *`}>
-                {supplierSearchOptions.length === 0 ? (
-                  <p className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-800">
-                    No suppliers available.
-                  </p>
-                ) : (
-                  <EntitySearchSelect
-                    selectedId={supplierId}
-                    onSelectId={id => setSupplierId(id)}
-                    options={supplierSearchOptions}
-                    placeholder="Search by code or name…"
-                    inputClassName={denseInput}
-                    showDetailLine={false}
-                    onFocusRefresh={() => void refresh()}
-                  />
-                )}
-              </PurchaseField>
-
-              <PurchaseField label="Warehouse *">
+              <PurchaseField label="Warehouse *" className="sm:col-span-2">
                 {lockedWarehouseId ? (
                   <input
                     className={`${denseInput} cursor-not-allowed bg-slate-50 text-slate-700`}
@@ -768,12 +674,37 @@ export default function AddPurchaseModal({
                 )}
               </PurchaseField>
 
+              <ManagerCustomerFields
+                branchId={branchId}
+                mode="purchase"
+                managerId={managerId}
+                customerId={supplierId}
+                allowedManagerIds={allowedManagerIds}
+                onManagerChange={id => {
+                  setManagerId(id);
+                  setSupplierId('');
+                }}
+                onCustomerChange={setSupplierId}
+                entityLedgerById={entityLedgerById}
+                disabled={isSubmitting || !activeWarehouseId}
+              />
+
               <SmoothCollapse open={isMetal} className="sm:col-span-2">
                 <div className={leftTopGridMetal}>
                   <PurchaseField label="Payment method" className="min-w-0 w-full">
                     <MetalPaymentToggle
                       value={metalPayment}
-                      onChange={setMetalPayment}
+                      onChange={next => {
+                        setMetalPayment(next);
+                        if (!needsMetalAedAgent(next)) {
+                          setAedAgentId('');
+                        }
+                        if (next === 'SPLIT') {
+                          const seeded = defaultSplitAmounts(metal.inrTotal, metal.aedTotal);
+                          setSplitInrPaid(seeded.paidInr);
+                          setSplitAedPaid(seeded.paidAed);
+                        }
+                      }}
                       disabled={isSubmitting}
                       hideCaption
                       fullWidth
@@ -786,7 +717,11 @@ export default function AddPurchaseModal({
                         onSelectId={id => setAedAgentId(id)}
                         options={agentSearchOptions}
                         placeholder="Search by code or name…"
-                        inputClassName={denseInput}
+                        inputClassName={
+                          agentFieldInvalid
+                            ? `${denseInput} border-red-300 ring-1 ring-red-200 focus-visible:border-red-400 focus-visible:ring-red-200`
+                            : denseInput
+                        }
                         showDetailLine={false}
                         disabled={isSubmitting}
                         onFocusRefresh={() => void refresh()}
@@ -799,16 +734,11 @@ export default function AddPurchaseModal({
             </div>
 
             <div
-              className={`border-t border-slate-200 ${
-                isMetal ? 'flex min-h-0 flex-col pt-2.5 lg:min-h-0 lg:flex-1 lg:justify-between' : 'pt-1.5'
-              }`}
+              className={`border-t border-slate-200 ${isMetal ? 'flex flex-col pt-2.5' : 'pt-1.5'}`}
             >
-              <SmoothModeSwap
-                mode={settlementMode}
-                className={isMetal ? 'min-h-0 lg:flex-1' : undefined}
-              >
+              <SmoothModeSwap mode={settlementMode}>
                 {isMetal ? (
-                  <div className="flex min-h-0 flex-col gap-3 lg:flex-1">
+                  <div className="flex flex-col gap-3">
                     <div className={metalAmountRows}>
                       <PurchaseField label="Weight (g) *" className="max-w-md">
                         <FormattedNumberInput
@@ -936,26 +866,47 @@ export default function AddPurchaseModal({
             </div>
           </div>
 
-          <PurchaseBreakdownPanel
+          <ICTransferBreakdownPanel
             heading="Price breakdown"
             ledger={
-              supplierId ? (
-                <PartyLedgerStrip
-                  counterpartyId={supplierId}
-                  partyLabel={selectedSupplier?.name}
-                  book={isMetal ? 'INR' : 'AED'}
-                />
+              warehouseId || supplierId ? (
+                <div className="flex flex-col gap-2">
+                  {warehouseId ? (
+                    <WarehouseOnHandStrip
+                      inrAmount={unitsToInrAmount(warehouseAvailable ?? 0)}
+                      metalG={warehouseMetalG ?? 0}
+                      refreshing={refreshing}
+                    />
+                  ) : null}
+                  {supplierId ? (
+                    <PartyLedgerStrip
+                      counterpartyId={supplierId}
+                      partyLabel={selectedSupplier?.name}
+                      book={isMetal ? 'INR' : 'AED'}
+                      balances={entityLedgerById[supplierId]}
+                    />
+                  ) : null}
+                </div>
               ) : undefined
             }
-            items={breakdownItems}
-            metalG={kpiMetalG}
-            inrAmount={kpiInr}
-            aedAmount={kpiAed}
+            breakdown={priceBreakdown}
             context={stockContext}
             swapKey={`${settlementMode}-${metalPayment}`}
-            notes={notes}
-            onNotesChange={setNotes}
-            notesDisabled={isSubmitting}
+            splitPaidEdit={
+              metalSplit && metalAed
+                ? {
+                    paidInr: splitInrPaid,
+                    paidAed: splitAedPaid,
+                    totalInr: metal.inrTotal,
+                    totalAed: metalAedTotal,
+                    onChange: ({ paidInr, paidAed }) => {
+                      setSplitInrPaid(paidInr);
+                      setSplitAedPaid(paidAed);
+                    },
+                    disabled: isSubmitting,
+                  }
+                : undefined
+            }
           />
         </div>
       </form>

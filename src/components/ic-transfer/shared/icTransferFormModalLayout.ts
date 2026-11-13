@@ -7,7 +7,7 @@ export const icFormModalBody = 'sm:py-1.5 sm:px-3';
 
 /** Purchase modal: on lg+, cap body scroll so settlement column can scroll independently. */
 export const icPurchaseFormModalBody =
-  `${icFormModalBody} lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden`;
+  `${icFormModalBody} lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden lg:overflow-y-hidden`;
 
 export const icPurchaseFormGridClass =
   `grid min-h-0 grid-cols-1 lg:min-h-0 lg:flex-1 lg:grid-cols-12 lg:items-stretch`;
@@ -38,6 +38,14 @@ export const icPurchaseReadOnlyInput =
 
 export const icSettlementPanelScroll =
   'min-h-0 flex-1 overflow-y-auto overscroll-contain pr-0.5';
+
+/** Left form column (warehouse, settlement fields): scroll on lg+ when modal body is capped. */
+export const icFormLeftPanelClass =
+  'flex min-h-0 flex-1 flex-col lg:col-span-8 lg:min-h-0 lg:max-h-full lg:flex-1 lg:overflow-y-auto lg:overscroll-contain lg:pr-1';
+
+/** Form grid inside purchase/sale modals — left column scrolls on large screens. */
+export const icFormModalGridClass =
+  'grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-12 lg:items-stretch lg:overflow-hidden';
 
 export const icWarehouseStockBannerMinH = 'min-h-[1.75rem]';
 

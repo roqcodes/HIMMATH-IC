@@ -1,10 +1,14 @@
 import { isDateInRange, type DateFilterRange } from '@/lib/dateFilterRange';
+import { parseCalendarDate } from '@/lib/businessTime';
 import { effectivePurchaseCounterpartyId } from '@/lib/counterparties/effectiveId';
-import type { ICFundVoucher, ICPurchase, ICSale } from '@/types';
+import { normalizeCounterpartyKind } from '@/lib/counterparties/roles';
+import type { ICBranchDeposit, ICFundVoucher, ICPurchase, ICSale, ICSupplier } from '@/types';
 
 export function txnInCounterpartyRange(createdAt: string | undefined, range: DateFilterRange): boolean {
   if (!createdAt) return !range.startDate && !range.endDate;
-  return isDateInRange(createdAt.slice(0, 10), range);
+  const day = parseCalendarDate(createdAt);
+  if (!day) return !range.startDate && !range.endDate;
+  return isDateInRange(day, range);
 }
 
 export function saleMatchesCounterparty(
@@ -50,12 +54,13 @@ export function filterCounterpartySales(
   );
 }
 
-export type CounterpartyActivityKind = 'purchase' | 'sale' | 'voucher';
+export type CounterpartyActivityKind = 'purchase' | 'sale' | 'voucher' | 'deposit';
 
 export type CounterpartyActivityRow =
   | { kind: 'purchase'; at: string; purchase: ICPurchase }
   | { kind: 'sale'; at: string; sale: ICSale }
-  | { kind: 'voucher'; at: string; voucher: ICFundVoucher };
+  | { kind: 'voucher'; at: string; voucher: ICFundVoucher }
+  | { kind: 'deposit'; at: string; deposit: ICBranchDeposit };
 
 /** Cash movements posted in IC Funds against this party's personal account. */
 export function isCounterpartyAccountingVoucher(voucher: Pick<ICFundVoucher, 'voucherType' | 'referenceType' | 'status'>): boolean {
@@ -66,14 +71,50 @@ export function isCounterpartyAccountingVoucher(voucher: Pick<ICFundVoucher, 'vo
   return voucher.voucherType === 'journal' && !ref;
 }
 
+export function filterCounterpartyDeposits(
+  deposits: ICBranchDeposit[],
+  range: DateFilterRange,
+): ICBranchDeposit[] {
+  return deposits.filter(d => txnInCounterpartyRange(d.depositDate || d.createdAt, range));
+}
+
+export function filterManagerCustomerSales(
+  sales: ICSale[],
+  managerId: string,
+  customers: Pick<ICSupplier, 'id' | 'homeManagerId' | 'kind' | 'status'>[],
+  range: DateFilterRange,
+): ICSale[] {
+  if (!managerId) return [];
+  const customerIds = new Set(
+    customers
+      .filter(
+        c =>
+          c.status !== 'inactive' &&
+          normalizeCounterpartyKind(c.kind) === 'customer' &&
+          c.homeManagerId === managerId,
+      )
+      .map(c => c.id),
+  );
+  return sales.filter(s => {
+    const cid = s.counterpartyId || s.orderCustomerId;
+    return Boolean(cid && customerIds.has(cid) && txnInCounterpartyRange(s.createdAt, range));
+  });
+}
+
 export function mergeCounterpartyActivity(
   purchases: ICPurchase[],
   sales: ICSale[],
   vouchers: ICFundVoucher[] = [],
+  deposits: ICBranchDeposit[] = [],
 ): CounterpartyActivityRow[] {
   const rows: CounterpartyActivityRow[] = [
     ...purchases.map(p => ({ kind: 'purchase' as const, at: p.createdAt || '', purchase: p })),
     ...sales.map(s => ({ kind: 'sale' as const, at: s.createdAt || '', sale: s })),
+    ...deposits.map(d => ({
+      kind: 'deposit' as const,
+      at: d.depositDate || d.createdAt || '',
+      deposit: d,
+    })),
     ...vouchers
       .filter(isCounterpartyAccountingVoucher)
       .map(v => ({

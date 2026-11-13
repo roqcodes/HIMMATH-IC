@@ -16,6 +16,8 @@ import CopyOrderDetailsButton from '../shared/CopyOrderDetailsButton';
 import { canBranchDeleteOrder, canCustomerSeeDeliveryProof } from '@/lib/icTransfer/orderStatus';
 import { canEditOrder, canDeleteOrder, canRequestOrderCancellation } from '@/lib/icTransfer/customerOrderReview';
 import { resolveSaleInrDisplay } from '@/lib/icTransfer/metalSettlement';
+import { isMetalSplitPayment, needsMetalAedAgent } from '@/lib/domain/books';
+import { metalPaymentShortLabel } from '@/lib/icTransfer/metalSplit';
 import { formatAmount } from '@/lib/icTransfer/rateCalculations';
 import { isBranchScopedUser } from '@/lib/rbac';
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
@@ -35,7 +37,7 @@ import { formatICSaleTransactionTypeLabel } from '@/lib/icTransfer/transactionTy
 import InrAmountInWords from '../shared/InrAmountInWords';
 import { ModalRecordedOnValue } from '../shared/modalDetailUi';
 import { hasLab } from '@/lib/icTransfer/labTest';
-import { fmtLedgerInr, FmtLedgerInr, FmtLedgerAed } from '@/lib/icFunds/format';
+import { fmtLedgerInr, FmtLedgerAed, FmtLedgerInr } from '@/lib/icFunds/format';
 
 type Props = {
   open: boolean;
@@ -100,7 +102,7 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
 
   const isMetalSale = liveSale.settlementMode === 'metal';
   const saleInr = resolveSaleInrDisplay(liveSale);
-  const metalPaidAed = isMetalSale && liveSale.metalPaymentMethod === 'AED';
+  const metalPaidAed = isMetalSale && needsMetalAedAgent(liveSale.metalPaymentMethod);
   const isBranchPortalView = workflowVariant === 'branch'
     || (workflowVariant === 'auto' && isBranchScopedUser(user));
   const workflowUiVariant = isBranchPortalView ? 'branch' : 'admin';
@@ -340,10 +342,10 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
                 <div>
                   <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Paid in</p>
                   <p className="mt-0.5 text-sm font-semibold text-slate-700">
-                    {liveSale.metalPaymentMethod === 'AED' ? 'AED via agent' : 'Cash (INR)'}
+                    {metalPaymentShortLabel(liveSale.metalPaymentMethod)}
                   </p>
                 </div>
-                {liveSale.metalPaymentMethod === 'AED' ? (
+                {needsMetalAedAgent(liveSale.metalPaymentMethod) ? (
                   <div>
                     <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">AED agent</p>
                     <p className="mt-0.5 text-sm font-semibold text-slate-700">
@@ -365,6 +367,22 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
                       )}
                     </p>
                   </div>
+                ) : null}
+                {isMetalSplitPayment(liveSale.metalPaymentMethod) ? (
+                  <>
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">INR paid</p>
+                      <p className="mt-0.5 text-sm font-semibold tabular-nums text-slate-700">
+                        <FmtLedgerInr amount={liveSale.splitInrPaid ?? 0} />
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">AED paid</p>
+                      <p className="mt-0.5 text-sm font-semibold tabular-nums text-slate-700">
+                        <FmtLedgerAed amount={liveSale.splitAedPaid ?? 0} />
+                      </p>
+                    </div>
+                  </>
                 ) : null}
               </div>
             ) : null}

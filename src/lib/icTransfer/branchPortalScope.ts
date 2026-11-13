@@ -1,7 +1,11 @@
 import type { Branch, ICPurchase, ICSale, ICRateGroup, ICWarehouse, User, ICSupplier } from '@/types';
 import { HQ_IC_FUNDS_BRANCH_ID } from '@/lib/icFunds/hqBranch';
 import { warehouseShortSlug } from '@/lib/icTransfer/warehouseSlug';
-import { filterCounterpartiesByRole } from '@/lib/counterparties/roles';
+import {
+  filterCounterpartiesByKind,
+  filterCounterpartiesByRole,
+  filterCustomersUnderManager,
+} from '@/lib/counterparties/roles';
 
 export type ICTransferPortalMode = 'admin' | 'branch';
 
@@ -59,18 +63,53 @@ function scopeCounterparties<T extends ICSupplier>(
   return branchId ? filterSuppliersForBranchPortal(list, branchId) : filterSuppliersForAdminPortal(list);
 }
 
+export function filterCounterpartiesForManagers<T extends ICSupplier>(
+  list: T[],
+  branchId?: string,
+  allowedManagerIds?: string[] | null,
+): T[] {
+  let managers = filterCounterpartiesByKind(scopeCounterparties(list, branchId), 'manager');
+  if (allowedManagerIds && allowedManagerIds.length > 0) {
+    const allowed = new Set(allowedManagerIds);
+    managers = managers.filter(m => allowed.has(m.id));
+  }
+  return managers;
+}
+
 export function filterCounterpartiesForPurchase<T extends ICSupplier>(
   list: T[],
   branchId?: string,
+  managerId?: string,
 ): T[] {
-  return filterCounterpartiesByRole(scopeCounterparties(list, branchId), 'supplier');
+  const base = filterCounterpartiesByRole(
+    filterCounterpartiesByKind(scopeCounterparties(list, branchId), 'customer'),
+    'supplier',
+  );
+  return managerId ? filterCustomersUnderManager(base, managerId) : base;
 }
 
 export function filterCounterpartiesForSales<T extends ICSupplier>(
   list: T[],
   branchId?: string,
+  managerId?: string,
 ): T[] {
-  return filterCounterpartiesByRole(scopeCounterparties(list, branchId), 'party');
+  const base = filterCounterpartiesByRole(
+    filterCounterpartiesByKind(scopeCounterparties(list, branchId), 'customer'),
+    'party',
+  );
+  return managerId ? filterCustomersUnderManager(base, managerId) : base;
+}
+
+export function isBranchDeskWarehouse(warehouse: Pick<ICWarehouse, 'deskKind'>): boolean {
+  return warehouse.deskKind === 'branch';
+}
+
+export function filterBranchDesks(warehouses: ICWarehouse[]): ICWarehouse[] {
+  return warehouses.filter(isBranchDeskWarehouse);
+}
+
+export function filterIndiaWarehouses(warehouses: ICWarehouse[]): ICWarehouse[] {
+  return warehouses.filter(w => !isBranchDeskWarehouse(w));
 }
 
 export function filterCounterpartiesForAgent<T extends ICSupplier>(
@@ -117,6 +156,28 @@ export function getICTransferWarehouseBase(
     return `/${slug}/ic-transfer-admin/warehouse`;
   }
   return '/admin/warehouse';
+}
+
+export function getICTransferBranchBase(
+  portal: ICTransferPortalMode = 'admin',
+  slug?: string,
+): string {
+  if (portal === 'branch' && slug) {
+    return `/${slug}/ic-transfer-admin/branches`;
+  }
+  return '/admin/branches';
+}
+
+export function getICTransferBranchDetailHref(
+  slug: string,
+  warehouseId: string,
+  portal: ICTransferPortalMode = 'admin',
+): string {
+  const id = warehouseShortSlug(warehouseId);
+  if (portal === 'branch' && slug) {
+    return `/${slug}/ic-transfer-admin/branches/${id}`;
+  }
+  return `/admin/branches/${id}`;
 }
 
 export function getICTransferWarehouseDetailHref(

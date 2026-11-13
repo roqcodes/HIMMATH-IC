@@ -16,6 +16,7 @@ import {
   ShoppingCart,
   Truck,
   Users,
+  Store,
   Warehouse,
   type LucideIcon,
 } from 'lucide-react';
@@ -36,6 +37,7 @@ function sidebarIcon(Icon: LucideIcon, className?: string) {
 
 export const ADMIN_SIDEBAR_ICONS: Record<string, (props: IconProps) => React.ReactElement> = {
   dashboard: ({ className }) => sidebarIcon(LayoutDashboard, className),
+  branches: ({ className }) => sidebarIcon(Store, className),
   warehouse: ({ className }) => sidebarIcon(Warehouse, className),
   purchases: ({ className }) => sidebarIcon(ShoppingCart, className),
   sales: ({ className }) => sidebarIcon(BadgeDollarSign, className),

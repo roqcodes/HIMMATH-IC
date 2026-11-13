@@ -69,12 +69,24 @@ CREATE TABLE IF NOT EXISTS public.ic_counterparties (
     subdivision VARCHAR(255),
     locality VARCHAR(255),
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+    kind VARCHAR(20) NOT NULL DEFAULT 'customer' CHECK (kind IN ('manager', 'customer')),
+    home_manager_id UUID REFERENCES public.ic_counterparties(id) ON DELETE SET NULL,
     balance NUMERIC(15, 2) NOT NULL DEFAULT 0,
-    opening_aed NUMERIC(15, 4) NOT NULL DEFAULT 0,
-    opening_inr NUMERIC(28, 14) NOT NULL DEFAULT 0,
+    opening_aed NUMERIC(15, 2) NOT NULL DEFAULT 0,
+    opening_inr NUMERIC(28, 2) NOT NULL DEFAULT 0,
     roles TEXT[] NOT NULL DEFAULT ARRAY['supplier', 'party']::TEXT[],
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT ic_counterparties_roles_check CHECK (
+      roles <@ ARRAY['supplier', 'party', 'agent']::TEXT[]
+      AND (
+        (kind = 'manager' AND cardinality(roles) = 0)
+        OR (COALESCE(kind, 'customer') <> 'manager' AND cardinality(roles) >= 1)
+      )
+    )
 );
+CREATE INDEX IF NOT EXISTS idx_ic_counterparties_kind ON public.ic_counterparties (kind);
+CREATE INDEX IF NOT EXISTS idx_ic_counterparties_home_manager
+  ON public.ic_counterparties (home_manager_id) WHERE home_manager_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_counterparties_scope_code
   ON public.ic_counterparties (COALESCE(branch_id, ''), lower(btrim(code)))
   WHERE code IS NOT NULL AND btrim(code) <> '';
@@ -95,9 +107,10 @@ CREATE TABLE IF NOT EXISTS public.ic_warehouses (
     current_metal_g NUMERIC(15, 4) NOT NULL DEFAULT 0,
     opening_stock NUMERIC(15, 4) NOT NULL DEFAULT 0,
     opening_metal_g NUMERIC(15, 4) NOT NULL DEFAULT 0,
-    opening_aed NUMERIC(15, 4) NOT NULL DEFAULT 0,
-    opening_inr NUMERIC(28, 14) NOT NULL DEFAULT 0,
+    opening_aed NUMERIC(15, 2) NOT NULL DEFAULT 0,
+    opening_inr NUMERIC(28, 2) NOT NULL DEFAULT 0,
     send_delivery_proof_to_customer BOOLEAN NOT NULL DEFAULT true,
+    desk_kind VARCHAR(20) NOT NULL DEFAULT 'warehouse' CHECK (desk_kind IN ('warehouse', 'branch')),
     branch_id VARCHAR(50) REFERENCES public.branches(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
@@ -105,7 +118,37 @@ CREATE INDEX IF NOT EXISTS idx_ic_warehouses_region ON public.ic_warehouses(regi
 CREATE INDEX IF NOT EXISTS idx_ic_warehouses_branch ON public.ic_warehouses(branch_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_warehouses_scope_code
   ON public.ic_warehouses (COALESCE(branch_id, ''), lower(btrim(code)))
+
+CREATE TABLE IF NOT EXISTS public.ic_warehouse_managers (
+    warehouse_id UUID NOT NULL REFERENCES public.ic_warehouses(id) ON DELETE CASCADE,
+    manager_id UUID NOT NULL REFERENCES public.ic_counterparties(id) ON DELETE CASCADE,
+    PRIMARY KEY (warehouse_id, manager_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ic_warehouse_managers_manager
+  ON public.ic_warehouse_managers (manager_id);
+
+CREATE TABLE IF NOT EXISTS public.ic_branches (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    code VARCHAR(32),
+    phone VARCHAR(50),
+    email VARCHAR(255),
+    address TEXT,
+    timezone VARCHAR(64) NOT NULL DEFAULT 'Asia/Dubai',
+    cash_balance NUMERIC(15, 2) NOT NULL DEFAULT 0,
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_branches_scope_code
+  ON public.ic_branches (lower(btrim(code)))
   WHERE code IS NOT NULL AND btrim(code) <> '';
+
+CREATE TABLE IF NOT EXISTS public.ic_branch_managers (
+    branch_id UUID NOT NULL REFERENCES public.ic_branches(id) ON DELETE CASCADE,
+    manager_id UUID NOT NULL REFERENCES public.ic_counterparties(id) ON DELETE CASCADE,
+    PRIMARY KEY (branch_id, manager_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ic_branch_managers_manager ON public.ic_branch_managers (manager_id);
 
 CREATE TABLE IF NOT EXISTS public.ic_rate_groups (
     id VARCHAR(50) PRIMARY KEY,
@@ -130,22 +173,46 @@ CREATE TABLE IF NOT EXISTS public.ic_rate_group_branches (
 );
 CREATE INDEX IF NOT EXISTS idx_ic_rate_group_branches_branch ON public.ic_rate_group_branches (branch_id);
 
+CREATE TABLE IF NOT EXISTS public.ic_branch_deposits (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    branch_id VARCHAR(50) NOT NULL REFERENCES public.branches(id) ON DELETE CASCADE,
+    ic_branch_id UUID REFERENCES public.ic_branches(id) ON DELETE RESTRICT,
+    warehouse_id UUID REFERENCES public.ic_warehouses(id) ON DELETE SET NULL,
+    manager_id UUID NOT NULL REFERENCES public.ic_counterparties(id) ON DELETE RESTRICT,
+    customer_id UUID NOT NULL REFERENCES public.ic_counterparties(id) ON DELETE RESTRICT,
+    settlement_mode VARCHAR(20) NOT NULL DEFAULT 'cash' CHECK (settlement_mode IN ('cash', 'metal')),
+    amount_aed NUMERIC(15, 2) NOT NULL CHECK (amount_aed > 0),
+    metal_weight_g NUMERIC(15, 4),
+    metal_rate_aed_per_g NUMERIC(15, 4),
+    deposit_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    notes TEXT,
+    entered_by_user_id VARCHAR(255),
+    entered_by_name VARCHAR(255),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_ic_branch_deposits_branch ON public.ic_branch_deposits (branch_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ic_branch_deposits_ic_branch ON public.ic_branch_deposits (ic_branch_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ic_branch_deposits_customer ON public.ic_branch_deposits (customer_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS public.ic_purchases (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     counterparty_id UUID REFERENCES public.ic_counterparties(id) ON DELETE SET NULL,
+    manager_id UUID REFERENCES public.ic_counterparties(id) ON DELETE SET NULL,
     location_id UUID REFERENCES public.ic_regions(id) ON DELETE SET NULL,
     warehouse_id UUID REFERENCES public.ic_warehouses(id) ON DELETE SET NULL,
     unit_rate NUMERIC(15, 4) NOT NULL,
     units NUMERIC(15, 4) NOT NULL,
     payment_method VARCHAR(50),
     notes TEXT,
-    aed_total NUMERIC(15, 4),
+    aed_total NUMERIC(15, 2),
     payment_status VARCHAR(20) DEFAULT 'paid',
     settlement_mode VARCHAR(20) NOT NULL DEFAULT 'cash' CHECK (settlement_mode IN ('cash', 'metal')),
     metal_weight_g NUMERIC(15, 4),
     metal_rate_inr_per_g NUMERIC(15, 4),
     metal_rate_aed_per_g NUMERIC(15, 4),
-    inr_total NUMERIC(15, 4),
+    inr_total NUMERIC(15, 2),
+    split_inr_paid NUMERIC(15, 2),
+    split_aed_paid NUMERIC(15, 2),
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_ic_purchases_counterparty ON public.ic_purchases(counterparty_id);
@@ -183,6 +250,7 @@ CREATE TABLE IF NOT EXISTS public.ic_sales (
     customer_name VARCHAR(255) NOT NULL,
     order_customer_name VARCHAR(255),
     counterparty_id UUID REFERENCES public.ic_counterparties(id) ON DELETE SET NULL,
+    manager_id UUID REFERENCES public.ic_counterparties(id) ON DELETE SET NULL,
     entered_by VARCHAR(255),
     entered_by_name VARCHAR(255),
     entered_by_user_id VARCHAR(255),
@@ -191,11 +259,11 @@ CREATE TABLE IF NOT EXISTS public.ic_sales (
     transaction_type VARCHAR(50),
     units NUMERIC(15, 4) NOT NULL,
     unit_rate NUMERIC(15, 4) NOT NULL,
-    aed_amount NUMERIC(15, 4),
+    aed_amount NUMERIC(15, 2),
     bank TEXT,
     address TEXT,
     image_url TEXT,
-    service_charge NUMERIC(15, 4) DEFAULT 0.00,
+    service_charge NUMERIC(15, 2) DEFAULT 0.00,
     collected_units NUMERIC(15, 4) DEFAULT 0.00,
     priority VARCHAR(20) NOT NULL DEFAULT 'Normal' CHECK (priority IN ('High', 'Normal', 'Low')),
     payment_status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (payment_status IN ('pending', 'paid', 'partial')),
@@ -216,9 +284,11 @@ CREATE TABLE IF NOT EXISTS public.ic_sales (
     metal_weight_g NUMERIC(15, 4),
     metal_rate_inr_per_g NUMERIC(15, 4),
     metal_rate_aed_per_g NUMERIC(15, 4),
-    inr_total NUMERIC(15, 4),
+    inr_total NUMERIC(15, 2),
     metal_purchase_id UUID REFERENCES public.ic_purchases(id) ON DELETE RESTRICT,
-    metal_payment_method VARCHAR(10) CHECK (metal_payment_method IS NULL OR metal_payment_method IN ('INR', 'AED')),
+    metal_payment_method VARCHAR(10) CHECK (metal_payment_method IS NULL OR metal_payment_method IN ('INR', 'AED', 'CASH', 'SPLIT')),
+    split_inr_paid NUMERIC(15, 2),
+    split_aed_paid NUMERIC(15, 2),
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
@@ -274,7 +344,7 @@ CREATE TABLE IF NOT EXISTS public.ic_fund_accounts (
     name VARCHAR(255) NOT NULL,
     account_type VARCHAR(20) NOT NULL CHECK (account_type IN ('bank', 'personal', 'income', 'profit', 'expense', 'd_expense', 'capital')),
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
-    opening_balance NUMERIC(15, 4) NOT NULL DEFAULT 0,
+    opening_balance NUMERIC(15, 2) NOT NULL DEFAULT 0,
     notes TEXT NOT NULL DEFAULT '',
     phone VARCHAR(50),
     source_type VARCHAR(30),
@@ -314,7 +384,7 @@ CREATE TABLE IF NOT EXISTS public.ic_fund_vouchers (
     voucher_date DATE NOT NULL,
     debit_account_id VARCHAR(50) NOT NULL REFERENCES public.ic_fund_accounts(id) ON DELETE RESTRICT,
     credit_account_id VARCHAR(50) NOT NULL REFERENCES public.ic_fund_accounts(id) ON DELETE RESTRICT,
-    amount DECIMAL(28, 14) NOT NULL CHECK (amount > 0),
+    amount DECIMAL(28, 2) NOT NULL CHECK (amount > 0),
     notes TEXT NOT NULL DEFAULT '',
     created_by VARCHAR(255),
     created_by_name VARCHAR(255),
@@ -324,7 +394,7 @@ CREATE TABLE IF NOT EXISTS public.ic_fund_vouchers (
     voided_at TIMESTAMPTZ,
     voided_by_name VARCHAR(255),
     reference_type VARCHAR(30),
-    reference_id VARCHAR(50),
+    reference_id VARCHAR(80),
     version INTEGER NOT NULL DEFAULT 1,
     idempotency_key VARCHAR(80),
     CONSTRAINT ic_fund_voucher_distinct_accounts CHECK (debit_account_id <> credit_account_id)
@@ -409,7 +479,13 @@ CREATE TABLE IF NOT EXISTS public.ic_aed_agents (
 
 ALTER TABLE public.ic_purchases
   ADD COLUMN IF NOT EXISTS metal_payment_method VARCHAR(10),
-  ADD COLUMN IF NOT EXISTS aed_agent_id UUID REFERENCES public.ic_aed_agents(id) ON DELETE SET NULL;
+  ADD COLUMN IF NOT EXISTS aed_agent_id UUID REFERENCES public.ic_aed_agents(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS split_inr_paid NUMERIC(15, 2),
+  ADD COLUMN IF NOT EXISTS split_aed_paid NUMERIC(15, 2);
+
+ALTER TABLE public.ic_sales
+  ADD COLUMN IF NOT EXISTS split_inr_paid NUMERIC(15, 2),
+  ADD COLUMN IF NOT EXISTS split_aed_paid NUMERIC(15, 2);
 
 ALTER TABLE public.ic_sales
   ADD COLUMN IF NOT EXISTS aed_agent_id UUID REFERENCES public.ic_aed_agents(id) ON DELETE SET NULL;
@@ -417,12 +493,68 @@ ALTER TABLE public.ic_sales
 ALTER TABLE public.ic_purchases
   ADD COLUMN IF NOT EXISTS lab_weight_g NUMERIC(15, 4),
   ADD COLUMN IF NOT EXISTS lab_charge_inr_per_g NUMERIC(15, 4),
-  ADD COLUMN IF NOT EXISTS lab_total_inr NUMERIC(15, 4);
+  ADD COLUMN IF NOT EXISTS lab_total_inr NUMERIC(15, 2);
 
 ALTER TABLE public.ic_sales
   ADD COLUMN IF NOT EXISTS lab_weight_g NUMERIC(15, 4),
   ADD COLUMN IF NOT EXISTS lab_charge_inr_per_g NUMERIC(15, 4),
-  ADD COLUMN IF NOT EXISTS lab_total_inr NUMERIC(15, 4);
+  ADD COLUMN IF NOT EXISTS lab_total_inr NUMERIC(15, 2);
+
+ALTER TABLE public.ic_purchases DROP CONSTRAINT IF EXISTS ic_purchases_metal_payment_method_check;
+ALTER TABLE public.ic_purchases
+  ADD CONSTRAINT ic_purchases_metal_payment_method_check
+  CHECK (
+    metal_payment_method IS NULL
+    OR metal_payment_method IN ('CASH', 'AED', 'INR', 'SPLIT')
+  );
+
+ALTER TABLE public.ic_sales DROP CONSTRAINT IF EXISTS ic_sales_metal_payment_method_check;
+ALTER TABLE public.ic_sales
+  ADD CONSTRAINT ic_sales_metal_payment_method_check
+  CHECK (
+    metal_payment_method IS NULL
+    OR metal_payment_method IN ('CASH', 'AED', 'INR', 'SPLIT')
+  );
+
+ALTER TABLE public.ic_purchases DROP CONSTRAINT IF EXISTS ic_purchases_metal_payment_shape;
+ALTER TABLE public.ic_purchases
+  ADD CONSTRAINT ic_purchases_metal_payment_shape
+  CHECK (
+    (settlement_mode = 'cash' AND metal_payment_method IS NULL AND aed_agent_id IS NULL)
+    OR (
+      settlement_mode = 'metal'
+      AND metal_payment_method IN ('CASH', 'AED', 'INR', 'SPLIT')
+      AND (
+        (metal_payment_method IN ('CASH', 'INR') AND aed_agent_id IS NULL AND aed_total IS NULL
+          AND split_inr_paid IS NULL AND split_aed_paid IS NULL)
+        OR (metal_payment_method = 'AED' AND aed_agent_id IS NOT NULL AND aed_total IS NOT NULL AND aed_total > 0
+          AND split_inr_paid IS NULL AND split_aed_paid IS NULL)
+        OR (metal_payment_method = 'SPLIT' AND aed_agent_id IS NOT NULL AND aed_total IS NOT NULL AND aed_total > 0
+          AND split_inr_paid IS NOT NULL AND split_inr_paid > 0
+          AND split_aed_paid IS NOT NULL AND split_aed_paid > 0)
+      )
+    )
+  );
+
+ALTER TABLE public.ic_sales DROP CONSTRAINT IF EXISTS ic_sales_metal_payment_shape;
+ALTER TABLE public.ic_sales
+  ADD CONSTRAINT ic_sales_metal_payment_shape
+  CHECK (
+    (settlement_mode = 'cash' AND metal_payment_method IS NULL AND aed_agent_id IS NULL)
+    OR (
+      settlement_mode = 'metal'
+      AND metal_payment_method IN ('CASH', 'AED', 'INR', 'SPLIT')
+      AND (
+        (metal_payment_method IN ('CASH', 'INR') AND aed_agent_id IS NULL
+          AND split_inr_paid IS NULL AND split_aed_paid IS NULL)
+        OR (metal_payment_method = 'AED' AND aed_agent_id IS NOT NULL AND aed_amount IS NOT NULL AND aed_amount > 0
+          AND split_inr_paid IS NULL AND split_aed_paid IS NULL)
+        OR (metal_payment_method = 'SPLIT' AND aed_agent_id IS NOT NULL AND aed_amount IS NOT NULL AND aed_amount > 0
+          AND split_inr_paid IS NOT NULL AND split_inr_paid > 0
+          AND split_aed_paid IS NOT NULL AND split_aed_paid > 0)
+      )
+    )
+  );
 
 CREATE TABLE IF NOT EXISTS public.inr_fund_accounts (
     id VARCHAR(50) PRIMARY KEY,
@@ -430,7 +562,7 @@ CREATE TABLE IF NOT EXISTS public.inr_fund_accounts (
     name VARCHAR(255) NOT NULL,
     account_type VARCHAR(20) NOT NULL CHECK (account_type IN ('bank', 'personal', 'income', 'profit', 'expense', 'inventory', 'd_expense', 'capital')),
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
-    opening_balance DECIMAL(28, 14) NOT NULL DEFAULT 0,
+    opening_balance DECIMAL(28, 2) NOT NULL DEFAULT 0,
     notes TEXT NOT NULL DEFAULT '',
     source_type VARCHAR(30),
     source_id VARCHAR(50),
@@ -450,14 +582,14 @@ CREATE TABLE IF NOT EXISTS public.inr_fund_vouchers (
     voucher_date DATE NOT NULL,
     debit_account_id VARCHAR(50) NOT NULL REFERENCES public.inr_fund_accounts(id) ON DELETE RESTRICT,
     credit_account_id VARCHAR(50) NOT NULL REFERENCES public.inr_fund_accounts(id) ON DELETE RESTRICT,
-    amount DECIMAL(28, 14) NOT NULL CHECK (amount > 0),
+    amount DECIMAL(28, 2) NOT NULL CHECK (amount > 0),
     notes TEXT NOT NULL DEFAULT '',
     created_by_name VARCHAR(255),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'void')),
     voided_at TIMESTAMPTZ,
     reference_type VARCHAR(30),
-    reference_id VARCHAR(50),
+    reference_id VARCHAR(80),
     CONSTRAINT inr_fund_voucher_distinct_accounts CHECK (debit_account_id <> credit_account_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_inr_fund_vouchers_active_ref
@@ -473,8 +605,8 @@ CREATE INDEX IF NOT EXISTS idx_inr_fund_vouchers_branch_status_credit
 CREATE TABLE IF NOT EXISTS public.ic_capital_settings (
     id VARCHAR(20) PRIMARY KEY DEFAULT 'hq',
     branch_id VARCHAR(50) NOT NULL REFERENCES public.branches(id) ON DELETE CASCADE DEFAULT 'branch_hq',
-    opening_aed DECIMAL(28, 14) NOT NULL DEFAULT 0,
-    opening_inr DECIMAL(28, 14) NOT NULL DEFAULT 0,
+    opening_aed DECIMAL(28, 2) NOT NULL DEFAULT 0,
+    opening_inr DECIMAL(28, 2) NOT NULL DEFAULT 0,
     opening_inr_per_aed DECIMAL(28, 14) NOT NULL DEFAULT 0,
     management_share_bps INTEGER NOT NULL DEFAULT 0 CHECK (management_share_bps >= 0 AND management_share_bps <= 10000),
     management_investor_id VARCHAR(50),
@@ -505,9 +637,9 @@ CREATE TABLE IF NOT EXISTS public.ic_capital_lots (
     movement_type VARCHAR(20) NOT NULL CHECK (movement_type IN ('opening', 'deposit', 'withdraw', 'payout')),
     book VARCHAR(3) NOT NULL CHECK (book IN ('AED', 'INR')),
     lot_date DATE NOT NULL,
-    amount_native DECIMAL(28, 14) NOT NULL,
+    amount_native DECIMAL(28, 2) NOT NULL,
     inr_per_aed DECIMAL(28, 14) NOT NULL DEFAULT 1 CHECK (inr_per_aed > 0),
-    aed_eq DECIMAL(28, 14) NOT NULL,
+    aed_eq DECIMAL(28, 2) NOT NULL,
     bank_account_id VARCHAR(50),
     voucher_id VARCHAR(50) NOT NULL,
     voucher_book VARCHAR(3) NOT NULL CHECK (voucher_book IN ('AED', 'INR')),
@@ -526,8 +658,8 @@ CREATE TABLE IF NOT EXISTS public.ic_capital_allocations (
     source_voucher_date DATE NOT NULL,
     investor_id VARCHAR(50) NOT NULL REFERENCES public.ic_capital_investors(id) ON DELETE RESTRICT,
     kind VARCHAR(20) NOT NULL CHECK (kind IN ('profit', 'expense', 'management', 'payout')),
-    event_amount DECIMAL(28, 14) NOT NULL,
-    allocated_amount DECIMAL(28, 14) NOT NULL,
+    event_amount DECIMAL(28, 2) NOT NULL,
+    allocated_amount DECIMAL(28, 2) NOT NULL,
     book VARCHAR(3) NOT NULL CHECK (book IN ('AED', 'INR')),
     management_bps_snapshot INTEGER NOT NULL DEFAULT 0,
     capital_share_bps_snapshot INTEGER NOT NULL DEFAULT 0,
@@ -549,6 +681,8 @@ ALTER TABLE public.branches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_page_permissions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_regions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_counterparties ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ic_warehouse_managers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ic_branch_deposits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_warehouses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_rate_groups ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ic_rate_group_counterparties ENABLE ROW LEVEL SECURITY;
@@ -606,6 +740,21 @@ CREATE POLICY asic_profiles_self ON public.profiles FOR SELECT USING (
 
 DROP POLICY IF EXISTS asic_counterparties_access ON public.ic_counterparties;
 CREATE POLICY asic_counterparties_access ON public.ic_counterparties FOR ALL USING (
+  public.current_profile_role() IN ('admin', 'auditor')
+  OR branch_id = public.current_profile_branch()
+);
+
+DROP POLICY IF EXISTS asic_ic_warehouse_managers_access ON public.ic_warehouse_managers;
+CREATE POLICY asic_ic_warehouse_managers_access ON public.ic_warehouse_managers FOR ALL USING (true);
+
+DROP POLICY IF EXISTS asic_ic_branches_access ON public.ic_branches;
+CREATE POLICY asic_ic_branches_access ON public.ic_branches FOR ALL USING (true);
+
+DROP POLICY IF EXISTS asic_ic_branch_managers_access ON public.ic_branch_managers;
+CREATE POLICY asic_ic_branch_managers_access ON public.ic_branch_managers FOR ALL USING (true);
+
+DROP POLICY IF EXISTS asic_ic_branch_deposits_access ON public.ic_branch_deposits;
+CREATE POLICY asic_ic_branch_deposits_access ON public.ic_branch_deposits FOR ALL USING (
   public.current_profile_role() IN ('admin', 'auditor')
   OR branch_id = public.current_profile_branch()
 );

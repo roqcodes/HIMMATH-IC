@@ -4,6 +4,7 @@ import {
   addCalendarDays,
   formatBusinessDate,
   parseCalendarDate,
+  resolveBranchTimeZone,
   toBusinessDate,
   txnDay,
 } from './businessTime';
@@ -36,6 +37,23 @@ describe('parseCalendarDate / formatBusinessDate', () => {
   it('does not treat Date.toISOString() prefix as authoritative', () => {
     const pgDate = new Date(2026, 5, 21);
     assert.equal(parseCalendarDate(pgDate), '2026-06-21');
+  });
+});
+
+import { branchStoredTimeZoneNeedsFix } from '@/lib/branchTimeZoneDb';
+
+describe('branchStoredTimeZoneNeedsFix', () => {
+  it('flags legacy Postgres-invalid labels', () => {
+    assert.equal(branchStoredTimeZoneNeedsFix('gmt+0530'), true);
+    assert.equal(branchStoredTimeZoneNeedsFix('Asia/Kolkata'), false);
+  });
+});
+
+describe('resolveBranchTimeZone', () => {
+  it('maps legacy GMT offset labels to IANA zones', () => {
+    assert.equal(resolveBranchTimeZone('gmt+0530'), 'Asia/Kolkata');
+    assert.equal(resolveBranchTimeZone('GMT+05:30'), 'Asia/Kolkata');
+    assert.equal(resolveBranchTimeZone('Asia/Dubai'), 'Asia/Dubai');
   });
 });
 

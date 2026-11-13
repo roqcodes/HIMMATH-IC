@@ -125,7 +125,9 @@ function TradeTable({
                         <td className={`${icfTd} text-right font-mono tabular-nums text-slate-600`}>
                           {row.metalRateInrPerG ? fmtInr(row.metalRateInrPerG) : '—'}
                         </td>
-                        <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtInr(row.inrTotal)}</td>
+                        <td className={`${icfTd} text-right font-mono tabular-nums`}>
+                          {fmtInr(tradeLineBookInr(row))}
+                        </td>
                         <td className={`${icfTd} text-right font-mono tabular-nums`}>
                           {row.bookedProfitInr != null ? (
                             <FmtLedgerInr amount={row.bookedProfitInr} />

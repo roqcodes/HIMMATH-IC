@@ -44,6 +44,14 @@ export default function MetalPaymentToggle({
       </button>
       <button
         type="button"
+        className={segment(value === 'SPLIT', !!disabled, fullWidth)}
+        disabled={disabled}
+        onClick={() => onChange('SPLIT')}
+      >
+        Split
+      </button>
+      <button
+        type="button"
         className={segment(value === 'AED', !!disabled, fullWidth)}
         disabled={disabled}
         onClick={() => onChange('AED')}

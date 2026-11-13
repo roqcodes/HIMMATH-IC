@@ -1,3 +1,4 @@
+import { roundMoney } from '@/lib/icFunds/currencyPolicy';
 import { normalizeMetalPaymentMethod, type MetalPaymentMethod } from '@/lib/domain/books';
 
 export type MetalLotProfitResult = {
@@ -13,9 +14,8 @@ export type MetalLotProfitResult = {
   fxProfitAed: number;
 };
 
-function round4(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Number(value.toFixed(4));
+function money(value: number): number {
+  return roundMoney(value);
 }
 
 export function computeMetalLotProfit(params: {
@@ -29,18 +29,18 @@ export function computeMetalLotProfit(params: {
 }): MetalLotProfitResult {
   const salePaymentMethod = normalizeMetalPaymentMethod(params.salePaymentMethod);
   const purchasePaymentMethod = normalizeMetalPaymentMethod(params.purchasePaymentMethod);
-  const purchaseInr = round4(params.purchaseInr);
-  const saleInr = round4(params.saleInr);
-  const purchaseAed = round4(params.purchaseAed);
-  const saleAed = round4(params.saleAed);
-  const profitInr = round4(saleInr - purchaseInr);
-  const profitAed = round4(saleAed - purchaseAed);
+  const purchaseInr = money(params.purchaseInr);
+  const saleInr = money(params.saleInr);
+  const purchaseAed = money(params.purchaseAed);
+  const saleAed = money(params.saleAed);
+  const profitInr = money(saleInr - purchaseInr);
+  const profitAed = money(saleAed - purchaseAed);
   const fxProfitAed =
     salePaymentMethod === 'AED' && purchasePaymentMethod === 'AED' ? profitAed : 0;
   return {
     paymentMethod: salePaymentMethod,
     purchasePaymentMethod,
-    weightG: round4(params.weightG),
+    weightG: Number((Number(params.weightG) || 0).toFixed(4)),
     purchaseInr,
     saleInr,
     purchaseAed,

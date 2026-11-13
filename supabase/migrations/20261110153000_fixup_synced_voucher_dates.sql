@@ -3,7 +3,7 @@
 UPDATE public.ic_fund_vouchers v
 SET voucher_date = (timezone(b.timezone, v.created_at))::date
 FROM public.branches b
-WHERE v.branch_id = b.id
+WHERE v.branch_id = b.id  
   AND v.reference_type IS NOT NULL  
   AND v.voucher_date IS DISTINCT FROM (timezone(b.timezone, v.created_at))::date;
 

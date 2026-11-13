@@ -12,7 +12,13 @@ import {
 } from '@/lib/icTransfer/branchOrderOwnership';
 import { resolveDateFilterRange, getDateFilterLabel } from '@/lib/dateFilterRange';
 import { computeSaleBookKpis, countSalesInRange } from '@/lib/icTransfer/dealBookKpis';
-import { saleDealInr, saleTableDisplayAed } from '@/lib/icTransfer/dealTableDisplay';
+import {
+  saleDealInr,
+  saleDealSheetRate,
+  saleTableDisplayAed,
+  tableSplitPaidAed,
+  tableSplitPaidInr,
+} from '@/lib/icTransfer/dealTableDisplay';
 import { useICTransferFilters } from '../ui';
 import { canManageICTransferGlobalSettings } from '@/lib/icTransfer/settings';
 import AddSaleModal from './AddSaleModal';
@@ -253,6 +259,15 @@ export default function ICTransferSales() {
       } else if (sortField === 'Total AED') {
         valA = saleTableDisplayAed(a);
         valB = saleTableDisplayAed(b);
+      } else if (sortField === 'Rate (AED)') {
+        valA = saleDealSheetRate(a);
+        valB = saleDealSheetRate(b);
+      } else if (sortField === 'INR paid') {
+        valA = tableSplitPaidInr(a);
+        valB = tableSplitPaidInr(b);
+      } else if (sortField === 'AED paid') {
+        valA = tableSplitPaidAed(a);
+        valB = tableSplitPaidAed(b);
       } else if (sortField === 'Profit') {
         valA = saleProfits.get(a.id)?.amount ?? 0;
         valB = saleProfits.get(b.id)?.amount ?? 0;

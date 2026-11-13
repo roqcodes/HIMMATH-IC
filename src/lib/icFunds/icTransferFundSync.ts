@@ -4,7 +4,7 @@ import type { QueryResult } from 'pg';
 import { query, withTransaction, sortedIds } from '@/lib/db';
 import { validateVoucherAccounts } from '@/lib/icFunds/voucherRules';
 import { validateVoucherCurrencyPolicy, roundLedgerAmount, IC_FUNDS_BASE_CURRENCY } from '@/lib/icFunds/currencyPolicy';
-import { isMetalAedPayment } from '@/lib/domain/books';
+import { metalInrSaleIcUnitsFromFields } from '@/lib/icTransfer/metalSplit';
 import { ensureHqIcFundsBranch } from '@/lib/icFunds/ensureHqBranch';
 import { HQ_IC_FUNDS_BRANCH_ID } from '@/lib/icFunds/hqBranch';
 import { computeIcCashAedTotal } from '@/lib/icTransfer/rateCalculations';
@@ -20,7 +20,7 @@ import {
 } from '@/lib/icFunds/warehouseProfit';
 import { IC_SALE_VOID_ORDER_STATUSES } from '@/lib/icFunds/icTransferReportFilters';
 import { logger } from '@/lib/logger';
-import { resolveBranchTimeZone } from '@/lib/businessTime';
+import { loadBranchTimeZoneInTx } from '@/lib/branchTimeZoneDb';
 import { ledgerVoucherDateFromInstant } from '@/lib/toIsoDateString';
 
 type DbClient = {
@@ -29,7 +29,12 @@ type DbClient = {
 
 const db: DbClient = { query };
 
-export type ICFundAccountSourceType = 'ic_supplier' | 'ic_warehouse' | 'ic_customer' | 'ic_counterparty';
+export type ICFundAccountSourceType =
+  | 'ic_supplier'
+  | 'ic_warehouse'
+  | 'ic_customer'
+  | 'ic_counterparty'
+  | 'ic_branch';
 
 const SALE_GHOST_STATUSES = new Set([
   'accepted',
@@ -55,11 +60,6 @@ async function lockFundAccounts(
     [ids, branchId],
   );
   return accounts.rows;
-}
-
-async function loadBranchTimeZone(client: DbClient, branchId: string): Promise<string> {
-  const res = await client.query(`SELECT timezone FROM branches WHERE id = $1 LIMIT 1`, [branchId]);
-  return resolveBranchTimeZone(res.rows[0]?.timezone as string | undefined);
 }
 
 function accountDisplayName(sourceType: ICFundAccountSourceType, name: string): string {
@@ -351,10 +351,18 @@ function metalInrSaleIcUnitsFromRow(row: {
   settlement_mode?: unknown;
   metal_payment_method?: unknown;
   units?: unknown;
+  inr_total?: unknown;
+  lab_total_inr?: unknown;
+  split_inr_paid?: unknown;
 }): number {
-  if (String(row.settlement_mode || '') !== 'metal') return 0;
-  if (isMetalAedPayment(String(row.metal_payment_method ?? ''))) return 0;
-  return Number(row.units) || 0;
+  return metalInrSaleIcUnitsFromFields({
+    settlementMode: String(row.settlement_mode || ''),
+    metalPaymentMethod: row.metal_payment_method != null ? String(row.metal_payment_method) : null,
+    units: row.units != null ? Number(row.units) : null,
+    inrTotal: row.inr_total != null ? Number(row.inr_total) : null,
+    labTotalInr: row.lab_total_inr != null ? Number(row.lab_total_inr) : null,
+    splitInrPaid: row.split_inr_paid != null ? Number(row.split_inr_paid) : null,
+  });
 }
 
 function metalInrIcPoolCostAedFromRow(
@@ -365,7 +373,7 @@ function metalInrIcPoolCostAedFromRow(
   const rate = Number(row.unit_rate) || 0;
   if (u > 0 && rate > 0) return computeIcCashAedTotal(u, rate);
   const aed = Number(row.aed_amount) || 0;
-  if (aed > 0) return Number(aed.toFixed(4));
+  if (aed > 0) return roundLedgerAmount(aed);
   return 0;
 }
 
@@ -421,6 +429,7 @@ async function loadWarehouseInventoryEvents(
 
   const metalInrSalesRes = await client.query(
     `SELECT id, units, unit_rate, aed_amount, settlement_mode, metal_payment_method,
+            inr_total, lab_total_inr, split_inr_paid,
             COALESCE(status_updated_at, created_at) AS completed_at, created_at
      FROM ic_sales
      WHERE warehouse_id = $1
@@ -503,6 +512,7 @@ async function loadGlobalInventoryEvents(
 
   const metalInrSalesRes = await client.query(
     `SELECT id, units, unit_rate, aed_amount, settlement_mode, metal_payment_method,
+            inr_total, lab_total_inr, split_inr_paid,
             COALESCE(status_updated_at, created_at) AS completed_at, created_at
      FROM ic_sales
      WHERE order_status = 'completed'
@@ -1037,7 +1047,7 @@ export async function syncICPurchaseToICFunds(purchaseId: string): Promise<void>
       if (purchaseRes.rows.length === 0) return;
       const purchase = purchaseRes.rows[0];
       const branchId = await resolvePurchaseBranchId(client, purchaseId);
-      const branchTz = await loadBranchTimeZone(client, branchId);
+      const branchTz = await loadBranchTimeZoneInTx(client, branchId);
       const metal = isMetalSettlement(purchase.settlement_mode);
 
       if (metal) {
@@ -1117,23 +1127,18 @@ export async function syncICPurchaseToICFunds(purchaseId: string): Promise<void>
   }
 }
 
+/** Void HQ AED/INR journals for a purchase (safe after the purchase row is deleted). */
 export async function removeICPurchaseFromICFunds(purchaseId: string): Promise<void> {
   try {
     await withTransaction(async client => {
-      const purchaseRes = await client.query(
-        `SELECT settlement_mode FROM ic_purchases WHERE id = $1 LIMIT 1`,
-        [purchaseId],
-      );
-      const branchId = await resolvePurchaseBranchId(client, purchaseId);
-      if (isMetalSettlement(purchaseRes.rows[0]?.settlement_mode)) {
-        const { voidMetalPurchaseLedgers } = await import('@/lib/metal/posting');
-        await voidMetalPurchaseLedgers(client, branchId, purchaseId);
-      } else {
-        await voidVoucherByReference(client, branchId, 'ic_purchase', purchaseId);
-      }
+      const branchId = HQ_IC_FUNDS_BRANCH_ID;
+      const { voidMetalPurchaseLedgers } = await import('@/lib/metal/posting');
+      await voidMetalPurchaseLedgers(client, branchId, purchaseId);
+      await voidVoucherByReference(client, branchId, 'ic_purchase', purchaseId);
     });
   } catch (err) {
     logger.error({ err, purchaseId }, 'Failed to remove IC purchase from IC Funds');
+    throw err;
   }
 }
 
@@ -1146,7 +1151,7 @@ export async function syncICSaleToICFunds(saleId: string): Promise<void> {
       if (saleRes.rows.length === 0) return;
       const sale = saleRes.rows[0];
       const branchId = await resolveSaleBranchId(client, sale);
-      const branchTz = await loadBranchTimeZone(client, branchId);
+      const branchTz = await loadBranchTimeZoneInTx(client, branchId);
       const orderStatus = String(sale.order_status || '');
       const metal = isMetalSettlement(sale.settlement_mode);
 
@@ -1198,22 +1203,19 @@ export async function syncICSaleToICFunds(saleId: string): Promise<void> {
   }
 }
 
+/** Void HQ AED/INR journals for a sale (safe after the sale row is deleted). */
 export async function removeICSaleFromICFunds(saleId: string): Promise<void> {
   try {
     await withTransaction(async client => {
-      const saleRes = await client.query(`SELECT * FROM ic_sales WHERE id = $1 LIMIT 1`, [saleId]);
-      if (saleRes.rows.length === 0) return;
-      const branchId = await resolveSaleBranchId(client, saleRes.rows[0]);
-      if (isMetalSettlement(saleRes.rows[0].settlement_mode)) {
-        const { voidMetalSaleLedgers } = await import('@/lib/metal/posting');
-        await voidMetalSaleLedgers(client, branchId, saleId);
-      } else {
-        await voidVoucherByReference(client, branchId, 'ic_sale', saleId);
-        await voidSaleMarginVouchers(client, branchId, saleId);
-      }
+      const branchId = HQ_IC_FUNDS_BRANCH_ID;
+      const { voidMetalSaleLedgers } = await import('@/lib/metal/posting');
+      await voidMetalSaleLedgers(client, branchId, saleId);
+      await voidVoucherByReference(client, branchId, 'ic_sale', saleId);
+      await voidSaleMarginVouchers(client, branchId, saleId);
     });
   } catch (err) {
     logger.error({ err, saleId }, 'Failed to remove IC sale from IC Funds');
+    throw err;
   }
 }
 
@@ -1272,4 +1274,81 @@ export async function syncSaleFxSettlementLedgerInTx(
 
 export async function syncSaleFxSettlementLedger(_settlementId: string): Promise<void> {
   return;
+}
+
+/** Branch AED deposit: Dr branch till (HQ cash book), Cr customer wallet (credit — we owe them). */
+export async function syncICBranchDepositToICFunds(depositId: string): Promise<void> {
+  try {
+    await ensureHqIcFundsBranch();
+    await withTransaction(async client => {
+      const res = await client.query(
+        `SELECT d.*,
+                ib.name AS ic_branch_name,
+                ib.timezone AS ic_branch_timezone,
+                c.name AS customer_name
+         FROM ic_branch_deposits d
+         JOIN ic_branches ib ON ib.id = d.ic_branch_id
+         JOIN ic_counterparties c ON c.id = d.customer_id
+         WHERE d.id = $1 LIMIT 1`,
+        [depositId],
+      );
+      if (res.rows.length === 0) return;
+      const row = res.rows[0];
+      const icBranchId = String(row.ic_branch_id);
+      const deskName = (row.ic_branch_name ? String(row.ic_branch_name) : '').trim() || icBranchId;
+      const branchTz = String(row.ic_branch_timezone || 'Asia/Dubai').trim();
+      const ledgerBranchId = HQ_IC_FUNDS_BRANCH_ID;
+      await loadBranchTimeZoneInTx(client, ledgerBranchId);
+      const amount = roundLedgerAmount(Number(row.amount_aed) || 0);
+      await voidVoucherByReference(client, ledgerBranchId, 'ic_branch_deposit', depositId);
+      if (amount <= 0) return;
+
+      const tillAccountId = await ensureLinkedAccount(client, {
+        branchId: ledgerBranchId,
+        sourceType: 'ic_branch',
+        sourceId: icBranchId,
+        name: deskName,
+      });
+      const customerAccountId = await ensureLinkedAccount(client, {
+        branchId: ledgerBranchId,
+        sourceType: 'ic_counterparty',
+        sourceId: String(row.customer_id),
+        name: String(row.customer_name || 'Customer'),
+      });
+      if (!tillAccountId || !customerAccountId) {
+        throw new Error('Could not resolve IC Funds accounts for branch deposit');
+      }
+
+      const voucherInstant = row.created_at ?? row.deposit_date;
+      await postVoucherInTx(client, {
+        branchId: ledgerBranchId,
+        voucherType: 'journal',
+        voucherDate: ledgerVoucherDateFromInstant(voucherInstant, branchTz),
+        debitAccountId: tillAccountId,
+        creditAccountId: customerAccountId,
+        amount,
+        notes:
+      String(row.settlement_mode) === 'metal'
+        ? `Metal deposit at ${deskName} · ${Number(row.metal_weight_g) || 0}g · ${depositId.slice(0, 8)}`
+        : `AED deposit at ${deskName} · ${depositId.slice(0, 8)}`,
+        referenceType: 'ic_branch_deposit',
+        referenceId: depositId,
+      });
+    });
+  } catch (err) {
+    logger.error({ err, depositId }, 'Failed to sync branch deposit to IC Funds');
+    throw err;
+  }
+}
+
+/** Void HQ journal tied to a deleted branch deposit (customer wallet credit reversed). */
+export async function removeICBranchDepositFromICFunds(depositId: string): Promise<void> {
+  try {
+    await withTransaction(async client => {
+      await voidVoucherByReference(client, HQ_IC_FUNDS_BRANCH_ID, 'ic_branch_deposit', depositId);
+    });
+  } catch (err) {
+    logger.error({ err, depositId }, 'Failed to remove branch deposit from IC Funds');
+    throw err;
+  }
 }

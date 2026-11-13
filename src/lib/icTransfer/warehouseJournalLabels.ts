@@ -1,3 +1,4 @@
+import { journalDealEntityId } from '@/lib/counterparties/counterpartyPartyJournals';
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
 import type { ICPurchase, ICSale, ICFundVoucher } from '@/types';
 
@@ -16,6 +17,7 @@ const WAREHOUSE_DEAL_REFERENCE_TYPES = new Set([
   'ic_sale_profit',
   'metal_sale_ic_stock',
   'metal_fx_profit',
+  'ic_branch_deposit',
 ]);
 
 const JOURNAL_ACCOUNT_DISPLAY_NAMES: Record<string, string> = {
@@ -63,7 +65,7 @@ export function warehouseJournalEntryLabel(
   if (accounting) return accounting;
 
   const ref = voucher.referenceType;
-  const id = voucher.referenceId;
+  const id = journalDealEntityId(voucher.referenceId);
 
   if (ref === 'ic_purchase' || ref === 'metal_purchase') {
     const p = purchases.find(x => x.id === id);
@@ -76,6 +78,7 @@ export function warehouseJournalEntryLabel(
   if (ref === 'metal_sale_aed') return 'Collected via agent';
   if (ref === 'metal_sale_ic_stock') return 'IC units from metal';
   if (ref === 'metal_fx_profit') return 'Metal FX (AED)';
+  if (ref === 'ic_branch_deposit') return 'Customer deposit';
   if (ref === 'metal_sale_cogs') return 'Cost of metal sold';
   if (ref === 'metal_sale_receipt') return 'Sold metal';
   if (ref === 'metal_sale_profit') return 'Metal profit';
@@ -100,7 +103,7 @@ export function warehouseJournalDealRef(
   purchases: ICPurchase[],
   sales: ICSale[],
 ): string {
-  const id = voucher.referenceId;
+  const id = journalDealEntityId(voucher.referenceId);
   if (!id) return '—';
   if (
     voucher.referenceType === 'ic_fund_payment' ||
@@ -120,6 +123,10 @@ export function warehouseJournalDealRef(
     return s ? getFormattedTxnId(s.id, 'sale', s) : id.slice(0, 8);
   }
 
+  if (voucher.referenceType === 'ic_branch_deposit') {
+    return id ? `DEP-${id.slice(0, 8)}` : '—';
+  }
+
   const s = sales.find(x => x.id === id);
   if (s) return getFormattedTxnId(s.id, 'sale', s);
   return id.slice(0, 8);
@@ -131,6 +138,8 @@ export function journalStoryRank(referenceType?: string | null): number {
     case 'metal_purchase':
     case 'ic_purchase':
       return 10;
+    case 'ic_branch_deposit':
+      return 5;
     case 'lab_test_purchase':
       return 11;
     case 'metal_purchase_aed':
@@ -205,6 +214,9 @@ export function warehouseJournalGroupHeadline(
     const sale = sales.find(x => x.id === refId);
     if (sale) {
       return isMetal(sale.settlementMode) ? 'Sold metal' : 'Sold IC';
+    }
+    if (lines.some(l => l.referenceType === 'ic_branch_deposit')) {
+      return 'Customer deposit';
     }
   }
   const first = lines[0];

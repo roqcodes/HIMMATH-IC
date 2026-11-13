@@ -1,3 +1,4 @@
+import { roundMoney } from '@/lib/icFunds/currencyPolicy';
 import type { ICRateGroup } from '@/types';
 import { resolveGroupOrderRate } from './ratePricing';
 import { normalizeICSaleTransactionType } from './transactionTypes';
@@ -20,6 +21,9 @@ export const IC_CASH_AED_PER_RATE_UNIT = 100;
  */
 const LEGACY_IC_POOL_INTERNAL_WAC_CEILING = 200;
 
+/** Operational sheet / unit rates (not currency amounts). */
+export const IC_RATE_DISPLAY_DECIMALS = 4;
+
 /**
  * Cash IC: **AED = units × RATE × 100** (RATE ~36.5 → 3,650 AED per unit).
  */
@@ -27,7 +31,7 @@ export function computeIcCashAedTotal(units: number, unitRateAed: number): numbe
   const u = Number(units);
   const r = Number(unitRateAed);
   if (!Number.isFinite(u) || u <= 0 || !Number.isFinite(r) || r <= 0) return 0;
-  return Number((u * r * IC_CASH_AED_PER_RATE_UNIT).toFixed(4));
+  return roundMoney(u * r * IC_CASH_AED_PER_RATE_UNIT);
 }
 
 /** Implied cash sheet RATE from units and AED (AED ÷ units ÷ 100). */
@@ -36,7 +40,7 @@ export function computeIcCashRateFromTotals(units: number, aedTotal: number): nu
   if (!Number.isFinite(u) || u <= 0) return 0;
   const aed = Number(aedTotal);
   if (!Number.isFinite(aed) || aed <= 0) return 0;
-  return Number((aed / (u * IC_CASH_AED_PER_RATE_UNIT)).toFixed(4));
+  return Number((aed / (u * IC_CASH_AED_PER_RATE_UNIT)).toFixed(IC_RATE_DISPLAY_DECIMALS));
 }
 
 /** Sheet rate ~36 for UI prefill from perpetual-inventory WAC (`cost ÷ units`). */
@@ -51,8 +55,9 @@ export function displayIcSheetRateFromPoolInternalWac(internalWacPerUnit: number
 
 export function formatAmount(value: number, fractionDigits = 2): string {
   if (!Number.isFinite(value)) return '0';
+  const min = fractionDigits <= 2 ? 2 : 0;
   return value.toLocaleString(undefined, {
-    minimumFractionDigits: 0,
+    minimumFractionDigits: min,
     maximumFractionDigits: fractionDigits,
   });
 }

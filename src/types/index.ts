@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════
 
 import type { ICSaleTransactionType } from '@/lib/icTransfer/transactionTypes';
-import type { CounterpartyRole } from '@/lib/counterparties/roles';
+import type { CounterpartyKind, CounterpartyRole } from '@/lib/counterparties/roles';
 
 export type UserRole = 'admin' | 'auditor' | 'staff' | 'delivery' | 'customer' | 'investor' | 'branch_manager' | 'collection_agent';
 
@@ -643,10 +643,29 @@ export interface ICSupplier {
   /** When set, supplier is owned by a branch portal (exclusive to that branch). */
   branchId?: string;
   status?: 'active' | 'inactive';
+  /** Manager (desk head) or customer (money party) — mutually exclusive. */
+  kind?: CounterpartyKind;
+  /** Home manager for customers. */
+  homeManagerId?: string;
   /** supplier = purchases; party = sales; agent = UAE AED collection. */
   roles?: CounterpartyRole[];
   openingAed?: number;
   openingInr?: number;
+  createdAt?: string;
+}
+
+/** UAE / Middle East operating branch (cash locker on HQ books). */
+export interface ICBranch {
+  id: string;
+  name: string;
+  code?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  timezone?: string;
+  cashBalance?: number;
+  status?: 'active' | 'inactive';
+  managerIds?: string[];
   createdAt?: string;
 }
 
@@ -672,7 +691,31 @@ export interface ICWarehouse {
   branchId?: string;
   /** When true, delivery proof goes straight to customer on agent completion. */
   sendDeliveryProofToCustomer?: boolean;
+  /** India stock desk vs UAE branch shop (AED deposits). */
+  deskKind?: 'warehouse' | 'branch';
+  /** Managers allowed at this desk (deposits / deals). Empty = unrestricted (non-branch). */
+  managerIds?: string[];
   createdAt?: string;
+}
+
+/** UAE branch customer deposit (cash or metal-settled AED credit). */
+export interface ICBranchDeposit {
+  id: string;
+  branchId: string;
+  icBranchId?: string | null;
+  warehouseId?: string | null;
+  managerId: string;
+  customerId: string;
+  managerName?: string;
+  customerName?: string;
+  settlementMode: 'cash' | 'metal';
+  amountAed: number;
+  metalWeightG?: number | null;
+  metalRateAedPerG?: number | null;
+  depositDate: string;
+  notes?: string | null;
+  enteredByName?: string | null;
+  createdAt: string;
 }
 
 export type ICRateSlabTier = {
@@ -728,6 +771,8 @@ export interface ICPurchase {
   id: string;
   /** Unified trading partner (same id on sales). */
   counterpartyId?: string;
+  /** Acting manager who booked the deal. */
+  managerId?: string;
   supplierId?: string;
   locationId?: string;
   warehouseId?: string;
@@ -739,7 +784,9 @@ export interface ICPurchase {
   metalRateAedPerG?: number | null;
   inrTotal?: number | null;
   paymentMethod?: string;
-  metalPaymentMethod?: 'CASH' | 'AED' | 'INR' | null;
+  metalPaymentMethod?: 'CASH' | 'AED' | 'INR' | 'SPLIT' | null;
+  splitInrPaid?: number | null;
+  splitAedPaid?: number | null;
   aedAgentId?: string | null;
   /** Counterparty with agent role (for metal AED forms). */
   aedAgentCounterpartyId?: string | null;
@@ -776,6 +823,8 @@ export interface ICSale {
   orderCustomerId?: string;
   /** Unified trading partner (same id on purchases). */
   counterpartyId?: string;
+  /** Acting manager who booked the deal. */
+  managerId?: string;
   /** Portal customer's third-party recipient (customer portal only). */
   subCustomerId?: string;
   subCustomerName?: string;
@@ -790,7 +839,9 @@ export interface ICSale {
   inrTotal?: number | null;
   /** Metal sale: which purchase lot this sale closes (partial sells later). */
   metalPurchaseId?: string | null;
-  metalPaymentMethod?: 'CASH' | 'AED' | 'INR' | null;
+  metalPaymentMethod?: 'CASH' | 'AED' | 'INR' | 'SPLIT' | null;
+  splitInrPaid?: number | null;
+  splitAedPaid?: number | null;
   aedAgentId?: string | null;
   aedAgentCounterpartyId?: string | null;
   aedAgentName?: string | null;

@@ -18,6 +18,8 @@ type ModalProps = {
   heightClass?: string;
   /** Extra classes on the scrollable body region (e.g. tighter padding, overflow-hidden). */
   bodyClassName?: string;
+  /** Override default footer flex (e.g. full-width notes + actions row). */
+  footerClassName?: string;
   /** Centered slot in the header row (e.g. mode switcher). */
   headerCenter?: React.ReactNode;
   /** Trailing header content before the close button (e.g. timestamp). */
@@ -40,6 +42,7 @@ export default function Modal({
   maxHeight = 'sm:max-h-[min(88dvh,720px)]',
   heightClass,
   bodyClassName,
+  footerClassName,
   headerCenter,
   headerTrailing,
   zIndexClass = 'z-[400]',
@@ -146,7 +149,12 @@ export default function Modal({
         </div>
 
         {footer && (
-          <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-slate-200 bg-white p-2 sm:flex-row sm:justify-end sm:gap-2 sm:p-3 dark:border-[var(--theme-border)] dark:bg-[var(--theme-surface)] [&>button]:w-full sm:[&>button]:w-auto">
+          <div
+            className={
+              footerClassName ??
+              'flex shrink-0 flex-col-reverse gap-2 border-t border-slate-200 bg-white p-2 sm:flex-row sm:justify-end sm:gap-2 sm:p-3 dark:border-[var(--theme-border)] dark:bg-[var(--theme-surface)] [&>button]:w-full sm:[&>button]:w-auto'
+            }
+          >
             {footer}
           </div>
         )}

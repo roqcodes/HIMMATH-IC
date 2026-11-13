@@ -11,9 +11,13 @@ import { saveCounterpartyAction } from '@/app/actions/counterpartyActions';
 import { parseFormAmount } from '@/lib/parseFormAmount';
 import type { ICSupplier } from '@/types';
 import {
+  COUNTERPARTY_KINDS,
   COUNTERPARTY_ROLES,
   DEFAULT_COUNTERPARTY_ROLES,
+  filterCounterpartiesByKind,
+  normalizeCounterpartyKind,
   normalizeCounterpartyRoles,
+  type CounterpartyKind,
   type CounterpartyRole,
 } from '@/lib/counterparties/roles';
 
@@ -36,7 +40,7 @@ export default function CounterpartyModal({
   onClose,
   onSaved,
 }: Props) {
-  const { addICSupplier, updateICSupplier } = useApp();
+  const { addICSupplier, updateICSupplier, icSuppliers } = useApp();
   const isEdit = Boolean(counterparty?.id);
 
   const [name, setName] = useState('');
@@ -47,6 +51,8 @@ export default function CounterpartyModal({
   const [city, setCity] = useState('');
   const [state, setState] = useState('');
   const [status, setStatus] = useState<'active' | 'inactive'>('active');
+  const [kind, setKind] = useState<CounterpartyKind>('customer');
+  const [homeManagerId, setHomeManagerId] = useState('');
   const [roles, setRoles] = useState<CounterpartyRole[]>([...DEFAULT_COUNTERPARTY_ROLES]);
   const [openingAed, setOpeningAed] = useState('0');
   const [openingInr, setOpeningInr] = useState('0');
@@ -73,6 +79,8 @@ export default function CounterpartyModal({
       setCity(counterparty.locality || '');
       setState(counterparty.subdivision || '');
       setStatus(counterparty.status === 'inactive' ? 'inactive' : 'active');
+      setKind(normalizeCounterpartyKind(counterparty.kind));
+      setHomeManagerId(counterparty.homeManagerId || '');
       setRoles(normalizeCounterpartyRoles(counterparty.roles));
       setOpeningAed(String(counterparty.openingAed ?? 0));
       setOpeningInr(String(counterparty.openingInr ?? 0));
@@ -85,13 +93,22 @@ export default function CounterpartyModal({
       setCity('');
       setState('');
       setStatus('active');
+      setKind('customer');
+      setHomeManagerId('');
       setRoles([...DEFAULT_COUNTERPARTY_ROLES]);
       setOpeningAed('0');
       setOpeningInr('0');
     }
   }, [open, counterparty]);
 
-  const canSubmit = name.trim().length > 0;
+  const managerOptions = React.useMemo(
+    () => filterCounterpartiesByKind(icSuppliers, 'manager'),
+    [icSuppliers],
+  );
+
+  const canSubmit =
+    name.trim().length > 0 &&
+    (kind === 'manager' || (kind === 'customer' && homeManagerId.trim().length > 0));
 
   const handleSave = async () => {
     if (!canSubmit) return;
@@ -121,7 +138,9 @@ export default function CounterpartyModal({
         subdivision: stateTrim || undefined,
         locality: cityTrim || undefined,
         status,
-        roles,
+        kind,
+        homeManagerId: kind === 'customer' ? homeManagerId : null,
+        roles: kind === 'customer' ? roles : [],
         openingAed: aed,
         openingInr: inr,
       });
@@ -140,8 +159,10 @@ export default function CounterpartyModal({
         '',
         stateTrim,
         cityTrim,
-        roles,
+        kind === 'customer' ? roles : [],
         openings,
+        kind,
+        kind === 'customer' ? homeManagerId : null,
       );
     } else {
       ok = await addICSupplier(
@@ -156,8 +177,10 @@ export default function CounterpartyModal({
         stateTrim,
         cityTrim,
         branchId,
-        roles,
+        kind === 'customer' ? roles : [],
         openings,
+        kind,
+        kind === 'customer' ? homeManagerId : null,
       );
     }
     setIsSaving(false);
@@ -171,7 +194,7 @@ export default function CounterpartyModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={isEdit ? 'Edit counterparty' : 'Add counterparty'}
+      title={isEdit ? 'Edit party' : 'Add manager or customer'}
       maxWidth="max-w-4xl w-[min(95vw,56rem)]"
       footer={
         <>
@@ -193,26 +216,66 @@ export default function CounterpartyModal({
             <AsicFormField label="Code" className={fieldClass}>
               <input className={asicInput} value={code} onChange={e => setCode(e.target.value)} />
             </AsicFormField>
+            <AsicFormField label="Kind" className={fieldClass}>
+              <select
+                className={asicInput}
+                value={kind}
+                onChange={e => {
+                  const next = e.target.value as CounterpartyKind;
+                  setKind(next);
+                  if (next === 'manager') {
+                    setHomeManagerId('');
+                    setRoles([]);
+                  } else if (roles.length === 0) {
+                    setRoles([...DEFAULT_COUNTERPARTY_ROLES]);
+                  }
+                }}
+              >
+                {COUNTERPARTY_KINDS.map(k => (
+                  <option key={k} value={k}>
+                    {k === 'manager' ? 'Manager' : 'Customer'}
+                  </option>
+                ))}
+              </select>
+            </AsicFormField>
+            {kind === 'customer' ? (
+              <AsicFormField label="Home manager *" className={fieldClass}>
+                <select
+                  className={asicInput}
+                  value={homeManagerId}
+                  onChange={e => setHomeManagerId(e.target.value)}
+                >
+                  <option value="">Select manager…</option>
+                  {managerOptions.map(m => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              </AsicFormField>
+            ) : null}
             <AsicFormField label="Status" className={fieldClass}>
               <select className={asicInput} value={status} onChange={e => setStatus(e.target.value as 'active' | 'inactive')}>
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
               </select>
             </AsicFormField>
-            <AsicFormField label="Roles" className={fieldClass}>
-              <div className="flex flex-wrap gap-3 pt-1">
-                {COUNTERPARTY_ROLES.map(role => (
-                  <label key={role} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={roles.includes(role)}
-                      onChange={() => toggleRole(role)}
-                    />
-                    {role === 'party' ? 'Party (sales)' : role === 'supplier' ? 'Supplier (purchases)' : 'Agent (metal AED)'}
-                  </label>
-                ))}
-              </div>
-            </AsicFormField>
+            {kind === 'customer' ? (
+              <AsicFormField label="Customer roles" className={fieldClass}>
+                <div className="flex flex-wrap gap-3 pt-1">
+                  {COUNTERPARTY_ROLES.map(role => (
+                    <label key={role} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={roles.includes(role)}
+                        onChange={() => toggleRole(role)}
+                      />
+                      {role === 'party' ? 'Party (sales)' : role === 'supplier' ? 'Supplier (purchases)' : 'Agent (metal AED)'}
+                    </label>
+                  ))}
+                </div>
+              </AsicFormField>
+            ) : null}
           </ModalFormSection>
         }
         right={

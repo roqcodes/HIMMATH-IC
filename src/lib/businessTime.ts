@@ -10,6 +10,39 @@ export const CALENDAR_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export const DEFAULT_BRANCH_TIMEZONE = 'Asia/Dubai';
 
+/** India business calendar (Postgres + Intl). */
+export const INDIA_BRANCH_TIMEZONE = 'Asia/Kolkata';
+
+const LEGACY_TIMEZONE_ALIASES: Record<string, string> = {
+  'gmt+0530': INDIA_BRANCH_TIMEZONE,
+  'gmt+05:30': INDIA_BRANCH_TIMEZONE,
+  'gmt+5:30': INDIA_BRANCH_TIMEZONE,
+  'gmt+0430': 'Asia/Dubai',
+  'gmt+04:30': 'Asia/Dubai',
+  'gmt+0400': 'Asia/Dubai',
+  'gmt+04:00': 'Asia/Dubai',
+  'gmt+4:00': 'Asia/Dubai',
+  ist: INDIA_BRANCH_TIMEZONE,
+  'india standard time': INDIA_BRANCH_TIMEZONE,
+  gst: 'Asia/Dubai',
+  'gulf standard time': 'Asia/Dubai',
+};
+
+/** Map JVM/Windows offset labels (e.g. GMT+0530) to IANA names Postgres accepts. */
+export function normalizeLegacyTimeZoneId(timeZone: string): string {
+  const trimmed = timeZone.trim();
+  if (!trimmed) return trimmed;
+  const folded = trimmed.toLowerCase();
+  const compact = folded.replace(/\s+/g, '');
+  if (LEGACY_TIMEZONE_ALIASES[folded]) return LEGACY_TIMEZONE_ALIASES[folded];
+  if (LEGACY_TIMEZONE_ALIASES[compact]) return LEGACY_TIMEZONE_ALIASES[compact];
+  const noColon = compact.replace(/:/g, '');
+  if (LEGACY_TIMEZONE_ALIASES[noColon]) return LEGACY_TIMEZONE_ALIASES[noColon];
+  if (/^gmt\+?0?5[:.]?30$/.test(noColon)) return INDIA_BRANCH_TIMEZONE;
+  if (/^gmt\+?0?4[:.]?00$/.test(noColon)) return DEFAULT_BRANCH_TIMEZONE;
+  return trimmed;
+}
+
 export function isValidIanaTimeZone(timeZone: string): boolean {
   try {
     Intl.DateTimeFormat(undefined, { timeZone });
@@ -19,8 +52,11 @@ export function isValidIanaTimeZone(timeZone: string): boolean {
   }
 }
 
+/** IANA zone for JS date math and for Postgres `AT TIME ZONE` / `timezone()`. */
 export function resolveBranchTimeZone(timeZone?: string | null): string {
-  if (timeZone && isValidIanaTimeZone(timeZone)) return timeZone;
+  if (!timeZone?.trim()) return DEFAULT_BRANCH_TIMEZONE;
+  const normalized = normalizeLegacyTimeZoneId(timeZone);
+  if (isValidIanaTimeZone(normalized)) return normalized;
   return DEFAULT_BRANCH_TIMEZONE;
 }
 
