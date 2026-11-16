@@ -5,6 +5,7 @@ export type MetalPlPeriodKpis = {
   metalSaleInr: number;
   metalCogsInr: number;
   metalProfitInr: number;
+  metalFxProfitAed: number;
 };
 
 export type ICFundProfitLossReport = {

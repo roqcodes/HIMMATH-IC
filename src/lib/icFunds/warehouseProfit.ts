@@ -84,6 +84,8 @@ export type ICWarehousePLLine = {
   metalDisplayRevenueInr?: number;
   metalDisplayCostInr?: number;
   metalDisplayProfitInr?: number;
+  /** AED FX margin on the portion funded through the AED agent. */
+  metalDisplayProfitAed?: number;
 };
 
 export type ICWarehousePLWarehouseSummary = {

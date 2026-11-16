@@ -42,7 +42,7 @@ function reference(line: ICWarehousePLLine): string {
   return `${prefix}-${id}`;
 }
 
-function SummaryMetric({ label, value, detail }: { label: string; value: string; detail: string }) {
+function SummaryMetric({ label, value, detail }: { label: string; value: string; detail: React.ReactNode }) {
   return (
     <div className="min-w-0 border-l-2 border-slate-200 px-3 py-1 first:border-l-0 first:pl-0 last:pr-0">
       <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">{label}</p>
@@ -85,7 +85,8 @@ export default function WarehouseStatementReport({
     }),
     { opening: 0, incoming: 0, outgoing: 0, closing: 0 },
   );
-  const profit = isMetal ? report.totals.metalProfitInr : report.totals.grossProfit;
+  const profit = isMetal ? warehouses.reduce((sum, row) => sum + row.metalProfitInr, 0) : report.totals.grossProfit;
+  const fxProfitAed = isMetal ? warehouses.reduce((sum, row) => sum + row.metalProfitAed, 0) : 0;
   const fmtStock = isMetal ? fmtGrams : (value: number) => fmtInr(icUnitsInr(value));
 
   return (
@@ -96,7 +97,7 @@ export default function WarehouseStatementReport({
           <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">
             {isMetal ? 'Metal stock · INR' : 'IC stock · INR'}
           </h2>
-          <p className="mt-1 text-xs text-slate-500">Inventory movement and transaction result by warehouse</p>
+          <p className="mt-1 text-xs text-slate-500">{isMetal ? 'Metal movement, INR margin, and AED FX result by warehouse' : 'Inventory movement and transaction result by warehouse'}</p>
         </div>
         <ReportSegmentTabs
           label="Book"
@@ -116,7 +117,7 @@ export default function WarehouseStatementReport({
         <SummaryMetric
           label="Closing stock"
           value={fmtStock(stock.closing)}
-          detail={`${isMetal ? 'Metal P&L' : 'IC profit'} ${isMetal ? 'INR' : 'AED'} ${Math.abs(profit).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${profit < 0 ? ' loss' : ''}`}
+          detail={isMetal ? <>INR P&amp;L <FmtLedgerAmount amount={profit} book="INR" /> · AED FX <FmtLedgerAmount amount={fxProfitAed} book="AED" /></> : `IC profit AED ${Math.abs(profit).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${profit < 0 ? ' loss' : ''}`}
         />
       </section>
 
@@ -132,6 +133,7 @@ export default function WarehouseStatementReport({
                 <th className={icfThAlign('right')}>{isMetal ? 'Out g' : 'Issued INR'}</th>
                 <th className={icfThAlign('right')}>{isMetal ? 'Closing g' : 'Closing INR'}</th>
                 <th className={icfThAlign('right')}>{isMetal ? 'P&L (INR)' : 'Profit (AED)'}</th>
+                {isMetal ? <th className={icfThAlign('right')}>FX Profit (AED)</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -147,6 +149,7 @@ export default function WarehouseStatementReport({
                   <td className={`${icfTd} text-right font-mono font-medium tabular-nums ${((isMetal ? row.metalProfitInr : row.grossProfit) < 0) ? 'text-red-600' : 'text-slate-900'}`}>
                     <FmtLedgerAmount amount={isMetal ? row.metalProfitInr : row.grossProfit} book={isMetal ? 'INR' : 'AED'} />
                   </td>
+                  {isMetal ? <td className={`${icfTd} text-right font-mono font-medium tabular-nums`}><FmtLedgerAmount amount={row.metalProfitAed} book="AED" /></td> : null}
                 </tr>
               ))}
             </tbody>
@@ -159,6 +162,7 @@ export default function WarehouseStatementReport({
                   <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtStock(stock.outgoing)}</td>
                   <td className={`${icfTd} text-right font-mono tabular-nums`}>{fmtStock(stock.closing)}</td>
                   <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAmount amount={profit} book={isMetal ? 'INR' : 'AED'} /></td>
+                  {isMetal ? <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAmount amount={fxProfitAed} book="AED" /></td> : null}
                 </tr>
               </tfoot>
             ) : null}
@@ -181,11 +185,12 @@ export default function WarehouseStatementReport({
                 <th className={icfThAlign('right')}>{isMetal ? 'Sales (INR)' : 'Sales (AED)'}</th>
                 <th className={icfThAlign('right')}>{isMetal ? 'Cost (INR)' : 'Cost (AED)'}</th>
                 <th className={icfThAlign('right')}>{isMetal ? 'Profit (INR)' : 'Profit (AED)'}</th>
+                {isMetal ? <th className={icfThAlign('right')}>FX Profit (AED)</th> : null}
               </tr>
             </thead>
             <tbody>
               {detailLines.length === 0 ? (
-                <tr><td className={`${icfTd} py-8 text-center text-slate-500`} colSpan={9}>No transactions for this book in the selected period.</td></tr>
+                <tr><td className={`${icfTd} py-8 text-center text-slate-500`} colSpan={isMetal ? 10 : 9}>No transactions for this book in the selected period.</td></tr>
               ) : detailLines.map(line => {
                 const purchase = line.lineKind !== 'sale';
                 const revenue = isMetal ? metalRevenue(line) : purchase ? 0 : line.revenue;
@@ -202,6 +207,7 @@ export default function WarehouseStatementReport({
                     <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAmount amount={revenue} book={isMetal ? 'INR' : 'AED'} /></td>
                     <td className={`${icfTd} text-right font-mono tabular-nums`}><FmtLedgerAmount amount={cost} book={isMetal ? 'INR' : 'AED'} /></td>
                     <td className={`${icfTd} text-right font-mono font-medium tabular-nums ${rowProfit < 0 ? 'text-red-600' : 'text-slate-900'}`}><FmtLedgerAmount amount={rowProfit} book={isMetal ? 'INR' : 'AED'} /></td>
+                    {isMetal ? <td className={`${icfTd} text-right font-mono font-medium tabular-nums`}><FmtLedgerAmount amount={line.metalDisplayProfitAed ?? 0} book="AED" /></td> : null}
                   </tr>
                 );
               })}

@@ -70,6 +70,7 @@ export type MetalLotProfit = {
   saleInr: number;
   purchaseAed: number;
   saleAed: number;
+  fxProfitAed: number;
   profitInr: number;
   profitAed: number;
   /** Primary booked P&L amount for single-currency display. */
@@ -86,6 +87,7 @@ export function computeMetalLotProfit(params: {
   purchaseAed: number;
   saleInr: number;
   saleAed: number;
+  saleSplitAedPaid?: number | null;
   weightG: number;
 }): MetalLotProfit {
   const fromModule = computeMetalLotProfitCore({
@@ -95,6 +97,7 @@ export function computeMetalLotProfit(params: {
     purchaseAed: params.purchaseAed,
     saleInr: params.saleInr,
     saleAed: params.saleAed,
+    saleSplitAedPaid: params.saleSplitAedPaid ?? undefined,
     weightG: params.weightG,
   });
   const booked = splitMetalBookedPl(fromModule);
@@ -107,6 +110,7 @@ export function computeMetalLotProfit(params: {
     saleAed: fromModule.saleAed,
     profitInr: fromModule.profitInr,
     profitAed: fromModule.profitAed,
+    fxProfitAed: fromModule.fxProfitAed,
     bookedProfit: booked.inr,
     bookedCurrency: 'INR',
     bookedProfitAed: booked.aed,

@@ -26,6 +26,7 @@ type WarehouseStatementTotals = {
   revenue: number;
   cost: number;
   profit: number;
+  fxProfitAed: number;
 };
 
 const numberFormat = '#,##0.00;[Red](#,##0.00);-';
@@ -89,6 +90,10 @@ function lineProfit(line: ICWarehousePLLine, data: WarehouseStatementExportData)
   return line.lineKind === 'ic_purchase' ? 0 : Number(line.grossProfit) || 0;
 }
 
+function lineFxProfitAed(line: ICWarehousePLLine, data: WarehouseStatementExportData): number {
+  return isMetal(data) ? Number(line.metalDisplayProfitAed) || 0 : 0;
+}
+
 function lineReference(line: ICWarehousePLLine): string {
   const raw = String(line.referenceId || line.saleId).replace(/[^a-z0-9]/gi, '').slice(0, 8).toUpperCase();
   const prefix = line.lineKind === 'metal_purchase' ? 'MPR' : line.lineKind === 'ic_purchase' ? 'PUR' : 'SAL';
@@ -109,20 +114,22 @@ function calculateTotals(data: WarehouseStatementExportData): WarehouseStatement
       revenue: sum.revenue + (isMetal(data) ? 0 : row.revenue),
       cost: sum.cost + (isMetal(data) ? 0 : row.cogs),
       profit: sum.profit + (isMetal(data) ? row.metalProfitInr : row.grossProfit),
+      fxProfitAed: sum.fxProfitAed + (isMetal(data) ? row.metalProfitAed : 0),
     }),
-    { opening: 0, incoming: 0, outgoing: 0, closing: 0, revenue: 0, cost: 0, profit: 0 },
+    { opening: 0, incoming: 0, outgoing: 0, closing: 0, revenue: 0, cost: 0, profit: 0, fxProfitAed: 0 },
   );
 }
 
-function getFinancialTotals(data: WarehouseStatementExportData): Pick<WarehouseStatementTotals, 'revenue' | 'cost' | 'profit'> {
+function getFinancialTotals(data: WarehouseStatementExportData): Pick<WarehouseStatementTotals, 'revenue' | 'cost' | 'profit' | 'fxProfitAed'> {
   const rows = sortLines(data.lines.filter(line => (line.settlementMode === 'metal') === isMetal(data)));
   return rows.reduce(
     (sum, line) => ({
       revenue: sum.revenue + lineRevenue(line, data),
       cost: sum.cost + lineCost(line, data),
       profit: sum.profit + lineProfit(line, data),
+      fxProfitAed: sum.fxProfitAed + lineFxProfitAed(line, data),
     }),
-    { revenue: 0, cost: 0, profit: 0 },
+    { revenue: 0, cost: 0, profit: 0, fxProfitAed: 0 },
   );
 }
 
@@ -162,6 +169,19 @@ function buildKpiCards(data: WarehouseStatementExportData): TallyLedgerKpiCard[]
       closingLabel: `PROFIT ${book}`,
       closingText: `${book} ${fmtMoney(financial.profit)}${financial.profit < 0 ? ' CR' : ' DR'}`,
     },
+    ...(isMetal(data) ? [{
+      title: 'AED FX RESULT',
+      titleAr: 'AED Â· FX',
+      openingText: 'AED proceeds less allocated AED lot cost',
+      debit: financial.fxProfitAed,
+      credit: 0,
+      closing: financial.fxProfitAed,
+      closingPrefix: 'AED',
+      debitLabel: 'NET FX PROFIT',
+      creditLabel: 'FX LOSS',
+      closingLabel: 'AED FX RESULT',
+      closingText: `AED ${financial.fxProfitAed < 0 ? '-' : ''}${fmtMoney(financial.fxProfitAed)}`,
+    }] : []),
   ];
 }
 
@@ -183,7 +203,7 @@ function statementSheet(data: WarehouseStatementExportData): TallyLedgerPdfData 
     const profit = lineProfit(line, data);
     const txn = purchase ? 'Purchase' : 'Sale';
     const moneySummary = metal
-      ? `Sales ${book} ${fmtMoney(revenue)} · cost ${fmtMoney(cost)} · P&L ${fmtMoney(profit)}`
+      ? `Sales ${book} ${fmtMoney(revenue)} · cost ${fmtMoney(cost)} · P&L ${fmtMoney(profit)} · FX profit AED ${lineFxProfitAed(line, data) < 0 ? '-' : ''}${fmtMoney(lineFxProfitAed(line, data))}`
       : `Sales ${book} ${fmtMoney(revenue)} · cost ${fmtMoney(cost)} · profit ${fmtMoney(profit)}`;
     return {
       branch: data.branchName && data.branchName !== 'Himmath HQ' ? data.branchName : 'HO',
@@ -275,6 +295,7 @@ export async function exportWarehouseStatementXlsx(data: WarehouseStatementExpor
   const book = currency(data);
   const qty = quantityName(data);
   const metal = isMetal(data);
+  const summaryColumns = metal ? 7 : 6;
   const stock = calculateTotals(data);
   const financial = getFinancialTotals(data);
   workbook.creator = 'Himmath';
@@ -283,12 +304,12 @@ export async function exportWarehouseStatementXlsx(data: WarehouseStatementExpor
 
   const summary = workbook.addWorksheet('Summary', { views: [{ showGridLines: false }] });
   summary.columns = [
-    { width: 30 }, { width: 20 }, { width: 20 }, { width: 20 }, { width: 20 }, { width: 22 },
+    { width: 30 }, { width: 20 }, { width: 20 }, { width: 20 }, { width: 20 }, { width: 22 }, { width: 22 },
   ];
-  styleTitle(summary, documentTitle(data), `Period: ${data.periodLabel}   |   Branch: ${data.branchName || 'HO'}`, 6);
+  styleTitle(summary, documentTitle(data), `Period: ${data.periodLabel}   |   Branch: ${data.branchName || 'HO'}`, summaryColumns);
   summary.addRow([]);
   const resultSection = summary.addRow(['PERIOD RESULT']);
-  summary.mergeCells(resultSection.number, 1, resultSection.number, 6);
+  summary.mergeCells(resultSection.number, 1, resultSection.number, summaryColumns);
   styleSectionRow(resultSection);
   const resultHeader = summary.addRow(['Measure', 'Amount', 'Book']);
   styleHeaderRow(resultHeader);
@@ -296,6 +317,7 @@ export async function exportWarehouseStatementXlsx(data: WarehouseStatementExpor
     ['Sales', financial.revenue, book],
     ['Inventory cost', financial.cost, book],
     [metal ? 'Metal P&L' : 'Gross profit', financial.profit, book],
+    ...(metal ? [['AED FX profit', financial.fxProfitAed, 'AED']] : []),
   ];
   for (const row of resultRows) {
     const excelRow = summary.addRow(row);
@@ -304,10 +326,10 @@ export async function exportWarehouseStatementXlsx(data: WarehouseStatementExpor
 
   summary.addRow([]);
   const stockSection = summary.addRow(['WAREHOUSE STOCK']);
-  summary.mergeCells(stockSection.number, 1, stockSection.number, 6);
+  summary.mergeCells(stockSection.number, 1, stockSection.number, summaryColumns);
   styleSectionRow(stockSection);
   const stockHeaders = summary.addRow([
-    'Warehouse', `Opening (${qty})`, `In (${qty})`, `Out (${qty})`, `Closing (${qty})`, `${metal ? 'Metal P&L' : 'Profit'} (${book})`,
+    'Warehouse', `Opening (${qty})`, `In (${qty})`, `Out (${qty})`, `Closing (${qty})`, `${metal ? 'Metal P&L' : 'Profit'} (${book})`, ...(metal ? ['FX Profit (AED)'] : []),
   ]);
   styleHeaderRow(stockHeaders);
   for (const warehouse of data.warehouses) {
@@ -318,32 +340,37 @@ export async function exportWarehouseStatementXlsx(data: WarehouseStatementExpor
       metal ? warehouse.metalOutG : icUnitsInr(warehouse.unitsOut),
       metal ? warehouse.closingMetalG : icUnitsInr(warehouse.closingUnits),
       metal ? warehouse.metalProfitInr : warehouse.grossProfit,
+      ...(metal ? [warehouse.metalProfitAed] : []),
     ]);
     for (let col = 2; col <= 5; col += 1) row.getCell(col).numFmt = metal ? quantityFormat : numberFormat;
     row.getCell(6).numFmt = numberFormat;
+    if (metal) row.getCell(7).numFmt = numberFormat;
   }
   const totalRow = summary.addRow([
     'Total', stock.opening, stock.incoming, stock.outgoing, stock.closing, financial.profit,
+    ...(metal ? [financial.fxProfitAed] : []),
   ]);
   totalRow.font = { bold: true };
   totalRow.eachCell(cell => { cell.border = { top: { style: 'thin', color: { argb: border } } }; });
   for (let col = 2; col <= 5; col += 1) totalRow.getCell(col).numFmt = metal ? quantityFormat : numberFormat;
   totalRow.getCell(6).numFmt = numberFormat;
+  if (metal) totalRow.getCell(7).numFmt = numberFormat;
   summary.views = [{ state: 'frozen', ySplit: 5 }];
 
   const transactions = workbook.addWorksheet('Transactions', { views: [{ showGridLines: false }] });
   transactions.columns = [
     { width: 14 }, { width: 16 }, { width: 24 }, { width: 28 }, { width: 16 },
-    { width: 18 }, { width: 18 }, { width: 18 }, { width: 18 },
+    { width: 18 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 18 },
   ];
-  styleTitle(transactions, `${documentTitle(data)} · Transactions`, `Period: ${data.periodLabel}   |   ${selectedLines(data).length} entries`, 9);
+  const transactionColumns = metal ? 10 : 9;
+  styleTitle(transactions, `${documentTitle(data)} · Transactions`, `Period: ${data.periodLabel}   |   ${selectedLines(data).length} entries`, transactionColumns);
   const transactionHeader = transactions.addRow([
-    'Date', 'Reference', 'Warehouse', 'Party', 'Activity', metal ? 'Weight (g)' : 'Value (INR)', `Sales (${book})`, `Cost (${book})`, `${metal ? 'P&L' : 'Profit'} (${book})`,
+    'Date', 'Reference', 'Warehouse', 'Party', 'Activity', metal ? 'Weight (g)' : 'Value (INR)', `Sales (${book})`, `Cost (${book})`, `${metal ? 'P&L' : 'Profit'} (${book})`, ...(metal ? ['FX Profit (AED)'] : []),
   ]);
   styleHeaderRow(transactionHeader);
   transactions.autoFilter = {
     from: { row: transactionHeader.number, column: 1 },
-    to: { row: transactionHeader.number, column: 9 },
+    to: { row: transactionHeader.number, column: transactionColumns },
   };
   for (const line of selectedLines(data)) {
     const row = transactions.addRow([
@@ -356,9 +383,11 @@ export async function exportWarehouseStatementXlsx(data: WarehouseStatementExpor
       lineRevenue(line, data),
       lineCost(line, data),
       lineProfit(line, data),
+      ...(metal ? [lineFxProfitAed(line, data)] : []),
     ]);
     row.getCell(6).numFmt = metal ? quantityFormat : numberFormat;
     for (let col = 7; col <= 9; col += 1) row.getCell(col).numFmt = numberFormat;
+    if (metal) row.getCell(10).numFmt = numberFormat;
   }
   transactions.views = [{ state: 'frozen', ySplit: 3 }];
 

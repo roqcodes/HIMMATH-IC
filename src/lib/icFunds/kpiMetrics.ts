@@ -518,9 +518,9 @@ export function computeBooksKpis(input: {
           tone: 'amber',
         },
         {
-          label: 'Metal P&L',
+          label: 'Metal P&L (INR)',
           ...formatMetalPlKpi({
-            metalProfitAed: 0,
+            metalProfitAed: s.bookedAedProfit,
             metalProfitInr: s.bookedInrProfit,
             rangeLabel: `${s.metalWeightSoldG.toLocaleString(undefined, { maximumFractionDigits: 2 })} g sold`,
           }),
@@ -571,7 +571,7 @@ export function computeBooksKpis(input: {
         tone: t.grossProfit >= 0 ? 'emerald' : 'red',
       },
       {
-        label: 'Metal P&L',
+        label: 'Metal P&L (INR)',
         ...formatMetalPlKpi({
           metalProfitAed: t.metalProfitAed,
           metalProfitInr: t.metalProfitInr,

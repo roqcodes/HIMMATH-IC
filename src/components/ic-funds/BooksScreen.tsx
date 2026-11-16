@@ -7,8 +7,10 @@ import {
   getICFundBooksReportAction,
   type ICFundBooksReportData,
   type ICFundVoucherRangeStats,
+  type ICManagerDealStatement,
   getICFundProfitLossReportAction,
   getICFundStatementAction,
+  getICManagerDealStatementAction,
   getInrFundStatementAction,
   getICSettlementTradeReportAction,
   getICWarehousePLReportAction,
@@ -32,6 +34,7 @@ import {
 } from '@/lib/icFunds/warehouseStatementExport';
 import { reportCatalogTitle } from '@/lib/icFunds/reportCatalog';
 import { issueReportDocumentNo, reportFileName } from '@/lib/icFunds/reportDocument';
+import { formatTallyVoucherNo } from '@/lib/icFunds/tallyLedgerPdf';
 import {
   DEFAULT_REPORT_FILTERS,
   filterAccounts,
@@ -61,13 +64,14 @@ import CapitalRegisterReport from '@/components/ic-funds/reports/CapitalRegister
 import { icFundsReportPath, type ICFundsReportId } from '@/lib/icFunds/nav';
 import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
 import { computeBooksKpis } from '@/lib/icFunds/kpiMetrics';
-import { icfCard, icfTableWrap, icfTd, icfTh, icfThAlign, icfTheadRow, icfAccountLink } from '@/components/ic-funds/ui';
+import { icfCard, icfInput, icfTableWrap, icfTd, icfTh, icfThAlign, icfTheadRow, icfAccountLink } from '@/components/ic-funds/ui';
 import { ASICTableRowsSkeleton, ASICTableSkeleton } from '@/components/asic/ASICTableSkeleton';
 import { useICFundsDateFilter } from '@/components/ic-funds/useICFundsDateFilter';
 import VoucherUserCell from '@/components/ic-funds/VoucherUserCell';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import { BalanceWithPendingCell } from '@/components/ic-funds/BalanceWithPending';
 import StatementLedgerTable from '@/components/ic-funds/reports/StatementLedgerTable';
+import ManagerDealStatementTable from '@/components/ic-funds/reports/ManagerDealStatementTable';
 import { resolveAccountDetailHref } from '@/lib/icFunds/accountNavigation';
 import { useApp } from '@/context/AppContext';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
@@ -128,6 +132,10 @@ export default function BooksScreen({
   const [settlementTradeReport, setSettlementTradeReport] = useState<ICSettlementTradeReport | null>(null);
   const [accounts, setAccounts] = useState<ICFundAccount[]>([]);
   const [accountId, setAccountId] = useState('');
+  const [statementMode, setStatementMode] = useState<'account' | 'manager'>('account');
+  const [statementManagerId, setStatementManagerId] = useState('');
+  const [managerDealStatement, setManagerDealStatement] = useState<ICManagerDealStatement | null>(null);
+  const [managerDealLoading, setManagerDealLoading] = useState(false);
   const [statement, setStatement] = useState<{
     account: ICFundAccount;
     opening: number;
@@ -277,15 +285,17 @@ export default function BooksScreen({
 
   useEffect(() => {
     if (reportView !== 'statement' || !accountId) return;
+    if (accountId.startsWith('manager:')) return;
     const acc = accounts.find(a => a.id === accountId);
     if (acc?.sourceType === 'ic_warehouse') setAccountId('');
   }, [accountId, accounts, reportView]);
 
   useEffect(() => {
-    if (reportView === 'statement') {
+    if (reportView === 'statement' && statementMode === 'account') {
       void loadStatement();
       return;
     }
+    if (reportView === 'statement') return;
     if (reportView === 'profit-loss') {
       void loadProfitLoss();
       return;
@@ -299,10 +309,41 @@ export default function BooksScreen({
       return;
     }
     void loadBundle();
-  }, [loadBundle, loadProfitLoss, loadStatement, loadSettlementTradeReport, loadWarehousePl, reportView, fundLedgerBook]);
+  }, [loadBundle, loadProfitLoss, loadStatement, loadSettlementTradeReport, loadWarehousePl, reportView, statementMode, fundLedgerBook]);
 
   useEffect(() => {
-    if (!accountId) {
+    if (reportView !== 'statement' || statementMode !== 'manager' || !statementManagerId) {
+      setManagerDealStatement(null);
+      setManagerDealLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setManagerDealLoading(true);
+    setError(null);
+    void trackLoading(() => getICManagerDealStatementAction({
+      branchId,
+      managerId: statementManagerId,
+      startDate,
+      endDate,
+    })).then(result => {
+      if (cancelled) return;
+      if (result.success) setManagerDealStatement(result.data);
+      else {
+        setManagerDealStatement(null);
+        setError(result.error);
+      }
+      setManagerDealLoading(false);
+    }).catch(err => {
+      if (cancelled) return;
+      setManagerDealStatement(null);
+      setError(err instanceof Error ? err.message : 'Failed to load manager activity statement');
+      setManagerDealLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [branchId, endDate, reportView, startDate, statementManagerId, statementMode]);
+
+  useEffect(() => {
+    if (!accountId || accountId.startsWith('manager:')) {
       setInrAccountId(null);
       setInrStatement(null);
       return;
@@ -366,17 +407,20 @@ export default function BooksScreen({
     [bundle?.accountLedgers],
   );
 
-  /** Warehouse balances have a dedicated "Warehouse statement" report — hide them here. */
+  const managerSearchOptions = useMemo(
+    () => buildSupplierSearchOptions(icSuppliers.filter(p => p.kind === 'manager' && p.status !== 'inactive')),
+    [icSuppliers],
+  );
+
+  /** One selector for account ledgers and manager activity statements. */
   const accountSearchOptions: EntitySearchOption[] = useMemo(
-    () =>
-      accounts
+    () => [
+      ...accounts
         .filter(a => a.sourceType !== 'ic_warehouse')
-        .map(a => ({
-          value: a.id,
-          label: a.name,
-          detail: ledgerAccountTypeCaption(a),
-        })),
-    [accounts],
+        .map(a => ({ value: a.id, label: a.name, detail: ledgerAccountTypeCaption(a) })),
+      ...managerSearchOptions.map(option => ({ ...option, value: `manager:${option.value}`, detail: 'Manager activity' })),
+    ],
+    [accounts, managerSearchOptions],
   );
 
   const warehouseSearchOptions = useMemo(
@@ -388,6 +432,19 @@ export default function BooksScreen({
     () => buildSupplierSearchOptions(icSuppliers),
     [icSuppliers],
   );
+
+  const filteredManagerDealLines = useMemo(() => {
+    const q = reportFilters.search.trim().toLocaleLowerCase();
+    const lines = managerDealStatement?.lines ?? [];
+    if (!q) return lines;
+    return lines.filter(line => [
+      line.date,
+      line.voucherNo,
+      line.book,
+      line.entryLabel,
+      line.notes,
+    ].some(value => String(value ?? '').toLocaleLowerCase().includes(q)));
+  }, [managerDealStatement, reportFilters.search]);
 
   const filteredSettlementReport = useMemo(
     () => (settlementTradeReport ? filterSettlementTradeReport(settlementTradeReport, reportFilters) : null),
@@ -625,6 +682,23 @@ export default function BooksScreen({
     }
 
     if (reportView === 'statement') {
+      if (statementMode === 'manager') {
+        downloadCsv(
+          reportFileName(fileId, 'csv'),
+          ['Date', 'Entry', 'Journal ID', 'From', 'To', 'Book', 'Amount', 'Notes'],
+          filteredManagerDealLines.map(line => [
+            line.date,
+            line.entryLabel,
+            formatTallyVoucherNo(line.voucherType, line.voucherNo),
+            line.fromParty,
+            line.toParty,
+            line.book,
+            line.amount,
+            line.notes,
+          ]),
+        );
+        return;
+      }
       const targetAccount = accounts.find(a => a.id === accountId) ?? statement?.account;
       if (!targetAccount) return;
 
@@ -790,6 +864,9 @@ export default function BooksScreen({
     inrStatement,
     reportFilters,
     reportView,
+    filteredManagerDealLines,
+    managerDealStatement?.managerName,
+    statementMode,
     statement,
     warehousePl,
   ]);
@@ -859,6 +936,19 @@ export default function BooksScreen({
 
   const handleView = useCallback(async () => {
     if (reportView === 'statement') {
+      if (statementMode === 'manager') {
+        if (!statementManagerId) {
+          await alert({ title: 'Select a manager', message: 'Choose a manager to view their deal activity.', variant: 'info' });
+          return;
+        }
+        openReportPreviewNewTab('icf-manager-deal-statement', {
+          title: 'Manager deal activity statement',
+          subtitle: `${managerDealStatement?.managerName ?? 'Manager'} · ${periodLabel} · AED and INR books`,
+          fileName: issueReportDocumentNo('statement'),
+          orientation: 'landscape',
+        });
+        return;
+      }
       const exportData = await prepareStatementExportData();
       if (!exportData) {
         await alert({
@@ -904,16 +994,32 @@ export default function BooksScreen({
     exportSubtitle,
     filteredWarehouseLines,
     filteredWarehouseSummaries,
+    managerDealStatement?.managerName,
     periodLabel,
     prepareStatementExportData,
     reportTitle,
     reportView,
+    statementManagerId,
+    statementMode,
     warehousePl,
     warehouseStatementBook,
   ]);
 
   const handleExportPdf = useCallback(async () => {
     if (reportView === 'statement') {
+      if (statementMode === 'manager') {
+        if (!statementManagerId) {
+          await alert({ title: 'Select a manager', message: 'Choose a manager to export their deal activity.', variant: 'info' });
+          return;
+        }
+        exportReportPdfFromElement('icf-manager-deal-statement', {
+          title: 'Manager deal activity statement',
+          subtitle: `${managerDealStatement?.managerName ?? 'Manager'} · ${periodLabel} · AED and INR books`,
+          fileName: issueReportDocumentNo('statement'),
+          orientation: 'landscape',
+        });
+        return;
+      }
       const exportData = await prepareStatementExportData();
       if (!exportData) {
         await alert({
@@ -959,10 +1065,13 @@ export default function BooksScreen({
     exportSubtitle,
     filteredWarehouseLines,
     filteredWarehouseSummaries,
+    managerDealStatement?.managerName,
     periodLabel,
     prepareStatementExportData,
     reportTitle,
     reportView,
+    statementManagerId,
+    statementMode,
     warehousePl,
     warehouseStatementBook,
   ]);
@@ -1142,7 +1251,17 @@ export default function BooksScreen({
             onChange: setReportFilters,
             accountOptions: accountSearchOptions,
             accountId,
-            onAccountId: setAccountId,
+            onAccountId: id => {
+              setAccountId(id);
+              if (id.startsWith('manager:')) {
+                setStatementManagerId(id.slice('manager:'.length));
+                setStatementMode('manager');
+              } else {
+                setStatementManagerId('');
+                setStatementMode('account');
+              }
+            },
+            statementMode,
             warehouseOptions: warehouseSearchOptions,
             counterpartyOptions: counterpartySearchOptions,
             statementBook,
@@ -1185,7 +1304,17 @@ export default function BooksScreen({
         ) : null}
 
         {reportView === 'statement' ? (
-          !accountId ? (
+          statementMode === 'manager' ? (
+            !statementManagerId ? (
+              <p className={`${icfTd} py-8 text-center text-slate-500`}>Choose a manager to view their deal activity.</p>
+            ) : (
+              <ManagerDealStatementTable
+                managerName={managerDealStatement?.managerName ?? managerSearchOptions.find(m => m.value === statementManagerId)?.label ?? 'Manager'}
+                lines={filteredManagerDealLines}
+                loading={managerDealLoading}
+              />
+            )
+          ) : !accountId ? (
             <p className={`${icfTd} py-8 text-center text-slate-500`}>
               Choose an account above to load its statement of account.
             </p>
@@ -1263,6 +1392,7 @@ export default function BooksScreen({
             metalSoldG={plReport.metalPl.metalSoldG}
             metalSaleInr={plReport.metalPl.metalSaleInr}
             metalCogsInr={plReport.metalPl.metalCogsInr}
+            metalFxProfitAed={plReport.metalPl.metalFxProfitAed}
             book={profitLossBook}
             onBookChange={setProfitLossBook}
           />

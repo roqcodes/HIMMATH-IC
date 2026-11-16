@@ -156,6 +156,8 @@ export function journalStoryRank(referenceType?: string | null): number {
     case 'metal_sale_profit':
     case 'ic_sale_profit':
       return 23;
+    case 'metal_fx_profit':
+      return 24;
     default:
       return 50;
   }
@@ -195,7 +197,7 @@ export function sortJournalsWithinDealGroup<T extends Pick<ICFundVoucher, 'vouch
 
 function warehouseDealGroupKey(voucher: Pick<ICFundVoucher, 'id' | 'referenceType' | 'referenceId'>): string {
   const ref = voucher.referenceType;
-  const id = voucher.referenceId;
+  const id = journalDealEntityId(voucher.referenceId);
   if (id && ref && WAREHOUSE_DEAL_REFERENCE_TYPES.has(ref)) return `deal:${id}`;
   return `voucher:${voucher.id}`;
 }

@@ -25,6 +25,7 @@ export function computeMetalLotProfit(params: {
   purchaseAed: number;
   saleInr: number;
   saleAed: number;
+  saleSplitAedPaid?: number;
   weightG: number;
 }): MetalLotProfitResult {
   const salePaymentMethod = normalizeMetalPaymentMethod(params.salePaymentMethod);
@@ -35,8 +36,16 @@ export function computeMetalLotProfit(params: {
   const saleAed = money(params.saleAed);
   const profitInr = money(saleInr - purchaseInr);
   const profitAed = money(saleAed - purchaseAed);
-  const fxProfitAed =
-    salePaymentMethod === 'AED' && purchasePaymentMethod === 'AED' ? profitAed : 0;
+  const purchaseHasAed = purchasePaymentMethod === 'AED' || purchasePaymentMethod === 'SPLIT';
+  const saleHasAed = salePaymentMethod === 'AED' || salePaymentMethod === 'SPLIT';
+  // purchaseAed is already prorated by grams and reflects the booked AED leg for split lots.
+  const bookedPurchaseAed = purchaseHasAed ? purchaseAed : 0;
+  const bookedSaleAed = salePaymentMethod === 'SPLIT'
+    ? money(params.saleSplitAedPaid ?? 0)
+    : salePaymentMethod === 'AED' ? saleAed : 0;
+  const fxProfitAed = purchaseHasAed && saleHasAed
+    ? money(bookedSaleAed - bookedPurchaseAed)
+    : 0;
   return {
     paymentMethod: salePaymentMethod,
     purchasePaymentMethod,
@@ -51,7 +60,7 @@ export function computeMetalLotProfit(params: {
   };
 }
 
-/** Metal P&L is INR only. AED agent amounts are balances, not profit. */
+/** Keep the INR metal margin and AED FX margin in their respective books. */
 export function splitMetalBookedPl(pl: MetalLotProfitResult): { aed: number; inr: number } {
-  return { aed: 0, inr: pl.profitInr };
+  return { aed: pl.fxProfitAed, inr: pl.profitInr };
 }

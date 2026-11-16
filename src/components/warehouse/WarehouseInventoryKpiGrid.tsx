@@ -171,14 +171,19 @@ export default function WarehouseInventoryKpiGrid({ metrics, books, rangeLabel }
                 <FmtLedgerAed amount={metrics.cashGrossProfitAed} />
              </p>
           </div>
-          <div className="px-3 py-2">
-             <div className="flex items-baseline justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Metal P&L</span>
-                <span className="text-[11px] text-slate-400">{rangeLabel}</span>
-             </div>
-             <p className={`text-base font-bold tabular-nums sm:text-lg ${metrics.metalProfitInr >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+          <div className="grid min-w-0 grid-cols-2">
+            <div className="min-w-0 px-3 py-2">
+              <p className="truncate text-[10px] font-bold uppercase tracking-wider text-slate-400">Metal P&amp;L (INR)</p>
+              <p className={`mt-1 truncate text-base font-bold tabular-nums sm:text-lg ${metrics.metalProfitInr >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                 <FmtLedgerInr amount={metrics.metalProfitInr} />
-             </p>
+              </p>
+            </div>
+            <div className="min-w-0 border-l border-slate-200 px-3 py-2 text-left dark:border-slate-800">
+              <p className="truncate text-[10px] font-bold uppercase tracking-wider text-slate-400">AED FX profit</p>
+              <p className={`mt-1 truncate text-base font-bold tabular-nums sm:text-lg ${metrics.metalProfitAed >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                <FmtLedgerAed amount={metrics.metalProfitAed} />
+              </p>
+            </div>
           </div>
         </div>
       </section>

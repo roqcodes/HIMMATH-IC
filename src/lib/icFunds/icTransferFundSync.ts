@@ -726,6 +726,33 @@ async function repairCompletedCashSaleMarginsForWarehouse(
   }
 }
 
+/** Rebuild linked metal sale journals when the lot's cost or payment legs change. */
+async function repairCompletedMetalSalesForPurchase(
+  client: DbClient,
+  purchaseId: string,
+  branchId: string,
+  branchTz: string,
+): Promise<void> {
+  const res = await client.query(
+    `SELECT *
+     FROM ic_sales
+     WHERE metal_purchase_id = $1
+       AND settlement_mode = 'metal'
+       AND order_status = 'completed'
+     ORDER BY COALESCE(status_updated_at, created_at) ASC, created_at ASC, id ASC`,
+    [purchaseId],
+  );
+  if (res.rows.length === 0) return;
+
+  const { syncMetalSaleLedgers } = await import('@/lib/metal/posting');
+  for (const sale of res.rows) {
+    const saleId = String(sale.id);
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`ic_sale_sync:${saleId}`]);
+    await syncMetalSaleLedgers(client, sale, branchId, branchTz);
+    await voidMetalCashIcStockVoucher(client, saleId, branchId);
+  }
+}
+
 function isMetalSettlement(mode: unknown): boolean {
   return String(mode || '') === 'metal';
 }
@@ -1059,6 +1086,7 @@ export async function syncICPurchaseToICFunds(purchaseId: string): Promise<void>
       if (metal) {
         const { syncMetalPurchaseLedgers } = await import('@/lib/metal/posting');
         await syncMetalPurchaseLedgers(client, purchase, branchId, branchTz);
+        await repairCompletedMetalSalesForPurchase(client, purchaseId, branchId, branchTz);
         const warehouseId = purchase.warehouse_id ? String(purchase.warehouse_id) : null;
         if (warehouseId) {
           await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId, branchTz);
@@ -1165,6 +1193,10 @@ export async function syncICSaleToICFunds(saleId: string): Promise<void> {
         if (metal) {
           const { voidMetalSaleLedgers } = await import('@/lib/metal/posting');
           await voidMetalSaleLedgers(client, branchId, saleId);
+          const warehouseId = sale.warehouse_id ? String(sale.warehouse_id) : null;
+          if (warehouseId) {
+            await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId, branchTz);
+          }
         } else {
           await voidVoucherByReference(client, branchId, 'ic_sale', saleId);
           await voidSaleMarginVouchers(client, branchId, saleId);

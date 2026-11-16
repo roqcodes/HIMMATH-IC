@@ -1546,7 +1546,14 @@ export async function dbAddICSaleAction(
     });
 
   const saleId = String(row.id);
-  scheduleIcFundLedgerSync(() => syncICSaleFundLedger(saleId));
+  // Metal sales are completed at creation time, so persist their stock and deal
+  // journals before returning success. Deferred sync can otherwise be interrupted
+  // after the sale row is saved, leaving the AED FX voucher missing.
+  if (isMetalSale) {
+    await syncICSaleFundLedger(saleId);
+  } else {
+    scheduleIcFundLedgerSync(() => syncICSaleFundLedger(saleId));
+  }
   const saleRow = await loadICSaleRowById(saleId);
   return { success: true, data: saleRow ?? mapICSaleRow(row) };
   } catch (err: unknown) {
@@ -1735,7 +1742,7 @@ export async function dbUpdateICPurchaseAction(
       return updateRes.rows[0];
     });
 
-    scheduleIcFundLedgerSync(() => syncICPurchaseFundLedger(parsedId));
+    await syncICPurchaseFundLedger(parsedId);
   const purchaseRow = await loadICPurchaseRowById(parsedId);
     return { success: true, data: purchaseRow ?? mapICPurchaseRow(res) };
   } catch (err: unknown) {

@@ -17,11 +17,13 @@ export function formatMetalPlKpi(opts: {
   rangeLabel: string;
 }): Pick<AsicKpiMetric, 'value' | 'hint' | 'tone' | 'valueTitle'> {
   const inr = Number(opts.metalProfitInr) || 0;
+  const aed = Number(opts.metalProfitAed) || 0;
+  const hint = [opts.rangeLabel.trim(), `AED FX profit ${fmtLedgerAed(aed)}`].filter(Boolean).join(' · ');
   return {
     value: ledgerInrNode(inr),
     valueTitle: fmtLedgerInr(inr),
-    ...(opts.rangeLabel.trim() ? { hint: opts.rangeLabel } : {}),
-    tone: plTone(inr),
+    hint,
+    tone: plTone(inr || aed),
   };
 }
 

@@ -137,10 +137,35 @@ export function tableSplitPaidAed(d: SplitPaidFields): number {
 }
 
 export function formatSaleLineProfit(line: SaleLineProfit | undefined): React.ReactNode {
-  if (!line || !Number.isFinite(line.amount) || Math.abs(line.amount) < 0.005) return '—';
+  if (!line) return '—';
+  const primaryAmount = Number.isFinite(line.amount) ? line.amount : 0;
+  const hasPrimary = Math.abs(primaryAmount) >= 0.005;
+  const hasSecondary =
+    line.secondaryCurrency != null &&
+    Number.isFinite(line.secondaryAmount) &&
+    Math.abs(line.secondaryAmount ?? 0) >= 0.005;
+  if (!hasPrimary && !hasSecondary) return '—';
   const amountNode =
-    line.currency === 'AED' ? formatDealTableAed(line.amount) : formatDealTableInr(line.amount);
-  const tone = line.amount < 0 ? 'text-red-600' : 'text-emerald-700';
+    line.currency === 'AED' ? formatDealTableAed(primaryAmount) : formatDealTableInr(primaryAmount);
+  const tone = primaryAmount < 0 ? 'text-red-600' : 'text-emerald-700';
+
+  if (hasSecondary && line.secondaryCurrency && line.secondaryAmount != null) {
+    const secNode =
+      line.secondaryCurrency === 'AED'
+        ? formatDealTableAed(line.secondaryAmount)
+        : formatDealTableInr(line.secondaryAmount);
+    return React.createElement(
+      'div',
+      { className: 'flex flex-col items-end leading-tight' },
+      React.createElement('span', { className: `font-mono font-medium tabular-nums ${tone}` }, amountNode),
+      React.createElement(
+        'span',
+        { className: 'font-mono text-[10px] tabular-nums text-slate-500' },
+        line.secondaryCurrency === 'AED' ? React.createElement('span', null, 'FX ', secNode) : secNode,
+      ),
+    );
+  }
+
   return React.createElement('span', { className: `font-mono font-medium tabular-nums ${tone}` }, amountNode);
 }
 

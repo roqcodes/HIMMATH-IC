@@ -54,7 +54,7 @@ function TradeTable({
   const isMetalInr = variant === 'metal-inr';
   const isAgent = variant === 'metal-agent';
 
-  const colCount = isFund ? 9 : isMetalInr ? 10 : 9;
+  const colCount = isFund ? 9 : isMetalInr ? 10 : 10;
 
   return (
     <div className="border-b border-slate-200 last:border-b-0 dark:border-[var(--theme-border)]">
@@ -88,7 +88,12 @@ function TradeTable({
                   <th className={icfThAlign('right')}>Amount (AED)</th>
                 </>
               ) : null}
-              {isAgent ? <th className={icfThAlign('right')}>Amount (AED)</th> : null}
+              {isAgent ? (
+                <>
+                  <th className={icfThAlign('right')}>Amount (AED)</th>
+                  <th className={icfThAlign('right')}>FX Profit (AED)</th>
+                </>
+              ) : null}
               <th className={icfTh}>Status</th>
             </tr>
           </thead>
@@ -150,7 +155,18 @@ function TradeTable({
                         <ReportAmountCell n={aedAmount} />
                       </>
                     ) : null}
-                    {isAgent ? <ReportAmountCell n={aedAmount} /> : null}
+                    {isAgent ? (
+                      <>
+                        <ReportAmountCell n={aedAmount} />
+                        <td className={`${icfTd} text-right font-mono tabular-nums`}>
+                          {row.bookedProfitAed != null && Math.abs(row.bookedProfitAed) > 0.005 ? (
+                            <FmtLedgerAed amount={row.bookedProfitAed} />
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                      </>
+                    ) : null}
                     <td className={`${icfTd} max-w-[8rem] truncate text-slate-500`}>{status}</td>
                   </tr>
                 );
@@ -199,7 +215,12 @@ function TradeTable({
                   </>
                 ) : null}
                 {isAgent ? (
-                  <ReportAmountCell n={rows.reduce((s, r) => s + tradeLineBookAed(r), 0)} />
+                  <>
+                    <ReportAmountCell n={rows.reduce((s, r) => s + tradeLineBookAed(r), 0)} />
+                    <td className={`${icfTd} text-right font-mono tabular-nums`}>
+                      <FmtLedgerAed amount={rows.reduce((s, r) => s + (r.bookedProfitAed ?? 0), 0)} />
+                    </td>
+                  </>
                 ) : null}
                 <td className={icfTd} />
               </tr>
@@ -317,12 +338,19 @@ export default function SettlementTradeReport({
               </p>
               <p className="text-xs text-slate-500">{summary.saleCount} entries</p>
             </div>
-            <div className="px-2.5 py-2 sm:col-span-2">
+            <div className="border-b border-slate-100 px-2.5 py-2 sm:border-b-0 sm:border-r dark:border-[var(--theme-border)]">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Net agent settlement</p>
               <p className="mt-0.5 text-sm font-semibold tabular-nums">
                 <FmtLedgerAed amount={summary.saleAed - summary.purchaseAed} />
               </p>
-              <p className="text-xs text-slate-500">Settlement with AED agents — not INR metal profit</p>
+              <p className="text-xs text-slate-500">Cash settled with AED agents</p>
+            </div>
+            <div className="px-2.5 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Metal FX profit (AED)</p>
+              <p className="mt-0.5 text-sm font-semibold tabular-nums text-emerald-700">
+                <FmtLedgerAed amount={summary.bookedAedProfit} />
+              </p>
+              <p className="text-xs text-slate-500">Secondary FX profit booked on AED agent sales</p>
             </div>
           </>
         )}

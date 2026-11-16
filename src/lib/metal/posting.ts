@@ -17,7 +17,7 @@ import {
   postInrJournalInTx,
   voidInrMetalDealVouchers,
 } from '@/lib/ledgers/inr/inrFundSync';
-import { allocateMetalLotCostAed, allocateMetalLotCostInr } from '@/lib/icTransfer/metalLotCost';
+import { allocateMetalLotBookedCostAed, allocateMetalLotCostInr } from '@/lib/icTransfer/metalLotCost';
 import {
   planMetalPurchaseJournals,
   planMetalSaleJournals,
@@ -305,20 +305,22 @@ async function ensureMetalSaleCustomerInrAccount(
 async function loadLotPurchasePayment(
   client: DbClient,
   purchaseId: string,
-): Promise<{ paymentMethod: string; purchaseInr: number; purchaseAed: number; purchasedG: number; labTotalInr: number }> {
+): Promise<{ paymentMethod: string; purchaseInr: number; purchaseAed: number; purchaseAedRatePerG: number; splitAedPaid: number; purchasedG: number; labTotalInr: number }> {
   const res = await client.query(
-    `SELECT metal_payment_method, inr_total, aed_total, metal_weight_g, lab_total_inr
+    `SELECT metal_payment_method, inr_total, aed_total, split_aed_paid, metal_weight_g, metal_rate_aed_per_g, lab_total_inr
      FROM ic_purchases WHERE id = $1 LIMIT 1`,
     [purchaseId],
   );
   const row = res.rows[0];
   if (!row) {
-    return { paymentMethod: 'CASH', purchaseInr: 0, purchaseAed: 0, purchasedG: 0, labTotalInr: 0 };
+    return { paymentMethod: 'CASH', purchaseInr: 0, purchaseAed: 0, purchaseAedRatePerG: 0, splitAedPaid: 0, purchasedG: 0, labTotalInr: 0 };
   }
   return {
     paymentMethod: String(row.metal_payment_method || 'AED'),
     purchaseInr: Number(row.inr_total) || 0,
     purchaseAed: Number(row.aed_total) || 0,
+    purchaseAedRatePerG: Number(row.metal_rate_aed_per_g) || 0,
+    splitAedPaid: Number(row.split_aed_paid) || 0,
     purchasedG: Number(row.metal_weight_g) || 0,
     labTotalInr: Number(row.lab_total_inr) || 0,
   };
@@ -356,7 +358,7 @@ export async function syncMetalSaleLedgers(
   const hasLot = Boolean(purchaseId);
   const lot = hasLot
     ? await loadLotPurchasePayment(client, purchaseId)
-    : { paymentMethod: 'CASH', purchaseInr: 0, purchaseAed: 0, purchasedG: 0, labTotalInr: 0 };
+    : { paymentMethod: 'CASH', purchaseInr: 0, purchaseAed: 0, purchaseAedRatePerG: 0, splitAedPaid: 0, purchasedG: 0, labTotalInr: 0 };
 
   const lotCostInrAllocated = hasLot
     ? allocateMetalLotCostInr(
@@ -369,8 +371,8 @@ export async function syncMetalSaleLedgers(
       )
     : 0;
   const lotPurchaseAedAllocated = hasLot
-    ? allocateMetalLotCostAed(
-        { aedTotal: lot.purchaseAed, metalWeightG: lot.purchasedG },
+    ? allocateMetalLotBookedCostAed(
+        { aedTotal: lot.purchaseAed, splitAedPaid: lot.splitAedPaid, paymentMethod: lot.paymentMethod, metalWeightG: lot.purchasedG, metalRateAedPerG: lot.purchaseAedRatePerG },
         saleG,
       )
     : 0;

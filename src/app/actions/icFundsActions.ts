@@ -80,7 +80,7 @@ import {
 } from '@/lib/icTransfer/dealProfit';
 import type { ICPurchase, ICSale } from '@/types';
 import { allocateLotAmount, computeMetalLotProfit } from '@/lib/icTransfer/metalInventory';
-import { allocateMetalLotCostAed, allocateMetalLotCostInr } from '@/lib/icTransfer/metalLotCost';
+import { allocateMetalLotBookedCostAed, allocateMetalLotCostAed, allocateMetalLotCostInr } from '@/lib/icTransfer/metalLotCost';
 import { netMetalInr } from '@/lib/icTransfer/labTest';
 import { INR_PER_UNIT } from '@/lib/icTransfer/rateCalculations';
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
@@ -1167,6 +1167,7 @@ const WAREHOUSE_AED_SALE_REFERENCE_TYPES = [
   'ic_sale_profit',
   'metal_sale_aed',
   'metal_sale_ic_stock',
+  'metal_fx_profit',
 ] as const;
 const WAREHOUSE_INR_PURCHASE_REFERENCE_TYPES = ['metal_purchase', 'lab_test_purchase'] as const;
 const WAREHOUSE_INR_SALE_REFERENCE_TYPES = [
@@ -1216,6 +1217,12 @@ export async function listWarehouseDealVouchersAction(params: {
      AND ($4::date IS NULL OR ${alias}.created_at < ($4::date + interval '1 day'))`;
 
   const dealIdSql = (alias: string) => `CAST(${alias}.id AS text) = CAST(v.reference_id AS text)`;
+  // Metal INR journals append account-role codes to reference_id (saleId#prcs).
+  // Match the underlying deal so the grouped warehouse journal includes INR margin,
+  // receipt and COGS alongside the AED FX voucher.
+  const inrDealIdSql = (alias: string) =>
+    `(CAST(${alias}.id AS text) = CAST(v.reference_id AS text)
+      OR CAST(v.reference_id AS text) LIKE (CAST(${alias}.id AS text) || '#%'))`;
 
   const aedWhere = `(
       (v.reference_type = ANY($5::text[]) AND EXISTS (
@@ -1236,12 +1243,12 @@ export async function listWarehouseDealVouchersAction(params: {
   const inrWhere = `(
       (v.reference_type = ANY($2::text[]) AND EXISTS (
         SELECT 1 FROM ic_purchases p
-        WHERE ${dealIdSql('p')} AND p.warehouse_id = $1::uuid
+        WHERE ${inrDealIdSql('p')} AND p.warehouse_id = $1::uuid
         ${dealDateSql('p')}
       ))
       OR (v.reference_type = ANY($6::text[]) AND EXISTS (
         SELECT 1 FROM ic_sales s
-        WHERE ${dealIdSql('s')} AND s.warehouse_id = $1::uuid
+        WHERE ${inrDealIdSql('s')} AND s.warehouse_id = $1::uuid
         ${dealDateSql('s')}
       ))
     )
@@ -1467,7 +1474,7 @@ export async function resolveBranchTillAccountAction(
   }
 }
 
-const COUNTERPARTY_AED_SALE_REFERENCE_TYPES = ['ic_sale', 'ic_sale_cogs', 'ic_sale_profit', 'metal_sale_aed'] as const;
+const COUNTERPARTY_AED_SALE_REFERENCE_TYPES = ['ic_sale', 'ic_sale_cogs', 'ic_sale_profit', 'metal_sale_aed', 'metal_fx_profit'] as const;
 const COUNTERPARTY_ACCOUNTING_REFERENCE_TYPES = [
   'ic_fund_payment',
   'ic_fund_receipt',
@@ -1584,7 +1591,7 @@ export async function listCounterpartyDealVouchersAction(params: {
           ${dealDateSql('s')}
         )
       )
-      OR (v.reference_type = 'metal_sale_aed' AND EXISTS (
+      OR (v.reference_type IN ('metal_sale_aed', 'metal_fx_profit') AND EXISTS (
         SELECT 1 FROM ic_sales s
         WHERE ${dealIdSql('s')} AND ${agentOnSale}
         ${dealDateSql('s')}
@@ -2256,6 +2263,155 @@ export async function deleteICFundVoucherAction(
   }
 }
 
+export type ICManagerDealStatementLine = {
+  date: string;
+  voucherNo: number;
+  voucherType: string;
+  entryLabel: string;
+  fromParty: string;
+  toParty: string;
+  book: 'AED' | 'INR';
+  amount: number;
+  notes: string;
+};
+
+export type ICManagerDealStatement = {
+  managerId: string;
+  managerName: string;
+  lines: ICManagerDealStatementLine[];
+};
+
+/** Journal activity for deals tagged to a manager; this is not a manager ledger. */
+export async function getICManagerDealStatementAction(params: {
+  branchId: string;
+  managerId: string;
+  startDate?: string;
+  endDate?: string;
+}): Promise<ActionResult<ICManagerDealStatement>> {
+  const access = await requireICFundsAccess(params.branchId, 'read');
+  if (!access.ok) return { success: false, error: access.error };
+
+  try {
+    const managerRes = await query(
+      `SELECT name FROM ic_counterparties WHERE id = $1 AND kind = 'manager' LIMIT 1`,
+      [params.managerId],
+    );
+    if (managerRes.rows.length === 0) return { success: false, error: 'Manager not found' };
+
+    const select = (
+      table: 'ic_fund_vouchers' | 'inr_fund_vouchers',
+      accountsTable: 'ic_fund_accounts' | 'inr_fund_accounts',
+      book: 'AED' | 'INR',
+    ) =>
+      query(
+        `SELECT
+           $5::text AS book,
+           v.voucher_date::text AS date,
+           v.voucher_no,
+           v.voucher_type,
+           CASE
+             WHEN v.reference_type = 'ic_purchase' THEN 'Purchase'
+             WHEN v.reference_type = 'metal_purchase_aed' THEN 'Metal Purchase AED'
+             WHEN v.reference_type = 'metal_purchase' THEN 'Metal Purchase INR'
+             WHEN v.reference_type = 'ic_sale' THEN 'Sale'
+             WHEN v.reference_type = 'metal_sale_aed' THEN 'Metal Sold AED'
+             WHEN v.reference_type = 'metal_sale_receipt' THEN 'Metal Sold INR'
+             WHEN v.reference_type = 'ic_fund_payment' THEN 'Payment'
+             WHEN v.reference_type = 'ic_fund_receipt' THEN 'Receipt'
+             WHEN v.reference_type = 'ic_branch_deposit' THEN 'Branch Deposit'
+             WHEN v.reference_type IS NULL AND v.voucher_type = 'payment' THEN 'Payment'
+             WHEN v.reference_type IS NULL AND v.voucher_type = 'receipt' THEN 'Receipt'
+             ELSE 'Journal entry'
+           END AS entry_label,
+           CASE
+             WHEN p.id IS NOT NULL THEN COALESCE(party_from.name, 'Supplier')
+             WHEN s.id IS NOT NULL THEN COALESCE(warehouse.name, 'Company')
+             WHEN d.id IS NOT NULL THEN COALESCE(deposit_customer.name, 'Customer')
+             WHEN v.reference_type IN ('ic_fund_payment', 'ic_fund_receipt') THEN COALESCE(ca.name, '—')
+             ELSE COALESCE(ca.name, '—')
+           END AS from_party,
+           CASE
+             WHEN p.id IS NOT NULL THEN COALESCE(warehouse.name, 'Company')
+             WHEN s.id IS NOT NULL THEN COALESCE(NULLIF(s.customer_name, ''), NULLIF(s.order_customer_name, ''), party_to.name, 'Customer')
+             WHEN d.id IS NOT NULL THEN COALESCE(deposit_manager.name, 'Manager')
+             ELSE COALESCE(da.name, '—')
+           END AS to_party,
+           v.amount,
+           v.notes
+         FROM ${table} v
+         LEFT JOIN ic_purchases p
+           ON v.reference_type IN ('ic_purchase', 'metal_purchase_aed', 'metal_purchase')
+          AND (CAST(v.reference_id AS text) = p.id::text
+           OR CAST(v.reference_id AS text) LIKE (p.id::text || '#%'))
+         LEFT JOIN ic_sales s
+           ON v.reference_type IN ('ic_sale', 'metal_sale_aed', 'metal_sale_receipt')
+          AND (CAST(v.reference_id AS text) = s.id::text
+           OR CAST(v.reference_id AS text) LIKE (s.id::text || '#%'))
+         LEFT JOIN ic_branch_deposits d
+           ON v.reference_type = 'ic_branch_deposit' AND d.id::text = CAST(v.reference_id AS text)
+         LEFT JOIN ic_counterparties party_from ON party_from.id = p.counterparty_id
+         LEFT JOIN ic_counterparties party_to ON party_to.id = s.counterparty_id
+         LEFT JOIN ic_warehouses warehouse ON warehouse.id = COALESCE(p.warehouse_id, s.warehouse_id)
+         LEFT JOIN ic_counterparties deposit_customer ON deposit_customer.id = d.customer_id
+         LEFT JOIN ic_counterparties deposit_manager ON deposit_manager.id = d.manager_id
+         LEFT JOIN ${accountsTable} da ON da.id = v.debit_account_id
+         LEFT JOIN ${accountsTable} ca ON ca.id = v.credit_account_id
+         WHERE v.branch_id = $1
+           AND COALESCE(v.status, 'active') <> 'void'
+           AND (
+             v.reference_type = ANY($6::text[])
+             OR (v.reference_type IS NULL AND v.voucher_type IN ('payment', 'receipt') AND v.manager_id = $2)
+           )
+           AND (
+             p.manager_id = $2 OR s.manager_id = $2 OR v.manager_id = $2 OR d.manager_id = $2
+           )
+           AND ($3::date IS NULL OR v.voucher_date >= $3::date)
+           AND ($4::date IS NULL OR v.voucher_date <= $4::date)
+         ORDER BY v.voucher_date, v.voucher_no, v.created_at`,
+        [
+          params.branchId,
+          params.managerId,
+          params.startDate ?? null,
+          params.endDate ?? null,
+          book,
+          book === 'AED'
+            ? ['ic_purchase', 'metal_purchase_aed', 'ic_sale', 'metal_sale_aed', 'ic_fund_payment', 'ic_fund_receipt', 'ic_branch_deposit']
+            : ['metal_purchase', 'metal_sale_receipt', 'ic_fund_payment', 'ic_fund_receipt'],
+        ],
+      );
+
+    const [aedRows, inrRows] = await Promise.all([
+      select('ic_fund_vouchers', 'ic_fund_accounts', 'AED'),
+      select('inr_fund_vouchers', 'inr_fund_accounts', 'INR'),
+    ]);
+    const lines = [...aedRows.rows, ...inrRows.rows]
+      .map(row => ({
+        date: String(row.date || ''),
+        voucherNo: Number(row.voucher_no) || 0,
+        voucherType: String(row.voucher_type || 'journal'),
+        entryLabel: String(row.entry_label || 'Journal entry'),
+        fromParty: String(row.from_party || '—'),
+        toParty: String(row.to_party || '—'),
+        book: String(row.book) as 'AED' | 'INR',
+        amount: Number(row.amount) || 0,
+        notes: String(row.notes || ''),
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date) || a.voucherNo - b.voucherNo || a.book.localeCompare(b.book));
+
+    return {
+      success: true,
+      data: {
+        managerId: params.managerId,
+        managerName: String(managerRes.rows[0].name || 'Manager'),
+        lines,
+      },
+    };
+  } catch (err) {
+    logger.error({ err, managerId: params.managerId }, 'Failed to load manager deal statement');
+    return { success: false, error: 'Failed to load manager activity statement' };
+  }
+}
+
 export async function getICFundStatementAction(params: {
   branchId: string;
   accountId: string;
@@ -2357,12 +2513,20 @@ export async function getICFundStatementAction(params: {
       }
       const counterparty = debit > 0 ? v.creditAccountName : v.debitAccountName;
       const counterpartyAccountId = debit > 0 ? v.creditAccountId : v.debitAccountId;
+      const particulars =
+        v.referenceType === 'metal_purchase_aed'
+          ? 'Metal Purchase AED'
+          : v.referenceType === 'metal_sale_aed'
+            ? 'Metal Sold AED'
+            : v.referenceType === 'metal_fx_profit'
+              ? 'Metal FX Profit (AED)'
+              : counterparty;
       lines.push({
         date: v.voucherDate,
         branchName: row.transaction_branch_name ? String(row.transaction_branch_name) : undefined,
         voucherNo: v.voucherNo,
         voucherType: v.voucherType,
-        particulars: counterparty,
+        particulars,
         counterpartyAccountId,
         debit,
         credit,
@@ -3288,8 +3452,10 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
          p.aed_total,
          p.inr_total,
          p.lab_total_inr,
+         p.split_aed_paid,
          p.settlement_mode,
          p.metal_weight_g,
+         p.metal_rate_aed_per_g,
          p.metal_payment_method,
          p.created_at,
          w.name AS warehouse_name,
@@ -3320,6 +3486,7 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
          s.metal_weight_g,
          s.metal_purchase_id,
          s.metal_payment_method,
+         s.split_aed_paid,
          COALESCE(s.status_updated_at, s.created_at) AS sale_at,
          w.name AS warehouse_name
        FROM ic_sales s
@@ -3352,7 +3519,7 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
     const metalEventsByWarehouse = new Map<string, MetalWeightEvent[]>();
     const metalLots = new Map<
       string,
-      { inrTotal: number; aedTotal: number; metalWeightG: number; paymentMethod: string | null; labTotalInr: number }
+      { inrTotal: number; aedTotal: number; splitAedPaid: number; metalWeightG: number; metalRateAedPerG: number; paymentMethod: string | null; labTotalInr: number }
     >();
     const metalSalesByWarehouse = new Map<
       string,
@@ -3365,6 +3532,7 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
         saleG: number;
         saleInr: number;
         saleAed: number;
+        splitAedPaid: number;
         lotId: string | null;
         paymentMethod: 'INR' | 'AED' | 'SPLIT';
       }>
@@ -3380,7 +3548,9 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
         metalLots.set(purchaseId, {
           inrTotal: Number(row.inr_total) || 0,
           aedTotal: Number(row.aed_total) || 0,
+          splitAedPaid: Number(row.split_aed_paid) || 0,
           metalWeightG: Number(row.metal_weight_g) || 0,
+          metalRateAedPerG: Number(row.metal_rate_aed_per_g) || 0,
           paymentMethod: row.metal_payment_method ? String(row.metal_payment_method) : null,
           labTotalInr: Number(row.lab_total_inr) || 0,
         });
@@ -3517,6 +3687,7 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
           saleG: Number(row.metal_weight_g) || 0,
           saleInr: netMetalInr(Number(row.inr_total) || 0, Number(row.lab_total_inr) || 0),
           saleAed: (Number(row.aed_amount) || 0) + (Number(row.service_charge) || 0),
+          splitAedPaid: Number(row.split_aed_paid) || 0,
           lotId: row.metal_purchase_id ? String(row.metal_purchase_id) : null,
           paymentMethod:
             tradeLinePaymentFromDb(row.metal_payment_method) === 'SPLIT'
@@ -3712,13 +3883,14 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
               )
             : 0,
           purchaseAed: lot
-            ? allocateMetalLotCostAed(
-                { aedTotal: lot.aedTotal, metalWeightG: lot.metalWeightG },
+          ? allocateMetalLotBookedCostAed(
+              { aedTotal: lot.aedTotal, splitAedPaid: lot.splitAedPaid, paymentMethod: lot.paymentMethod, metalWeightG: lot.metalWeightG, metalRateAedPerG: lot.metalRateAedPerG },
                 sale.saleG,
               )
             : 0,
           saleInr: sale.saleInr,
           saleAed: sale.saleAed,
+          saleSplitAedPaid: sale.splitAedPaid,
         });
         metalProfitAed += Number(pl.bookedProfitAed) || 0;
         metalProfitInr += Number(pl.bookedProfitInr) || 0;
@@ -3746,6 +3918,7 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
           metalDisplayRevenueInr: pl.saleInr,
           metalDisplayCostInr: pl.purchaseInr,
           metalDisplayProfitInr: pl.profitInr,
+          metalDisplayProfitAed: pl.fxProfitAed,
         });
       }
 
@@ -3952,6 +4125,8 @@ export async function getICSettlementTradeReportAction(params: unknown): Promise
          mp.inr_total AS lot_purchase_inr,
          mp.lab_total_inr AS lot_purchase_lab,
          mp.aed_total AS lot_purchase_aed,
+         mp.metal_rate_aed_per_g AS lot_purchase_rate_aed_per_g,
+         mp.split_aed_paid AS lot_purchase_split_aed_paid,
          mp.metal_weight_g AS lot_purchase_g,
          mp.metal_payment_method AS lot_payment_method
        FROM ic_sales s
@@ -4041,8 +4216,9 @@ export async function getICSettlementTradeReportAction(params: unknown): Promise
         settlementMode === 'metal'
           ? computeMetalLotProfit({
               paymentMethod: salePay === 'INR' ? 'CASH' : salePay === 'SPLIT' ? 'SPLIT' : 'AED',
-              purchasePaymentMethod:
-                tradeLinePaymentFromDb(row.lot_payment_method) === 'INR'
+              purchasePaymentMethod: !row.lot_payment_method
+                ? 'CASH'
+                : tradeLinePaymentFromDb(row.lot_payment_method) === 'INR'
                   ? 'CASH'
                   : tradeLinePaymentFromDb(row.lot_payment_method) === 'SPLIT'
                     ? 'SPLIT'
@@ -4056,12 +4232,19 @@ export async function getICSettlementTradeReportAction(params: unknown): Promise
                 },
                 saleG,
               ),
-              purchaseAed: allocateMetalLotCostAed(
-                { aedTotal: Number(row.lot_purchase_aed) || 0, metalWeightG: Number(row.lot_purchase_g) || 0 },
+              purchaseAed: allocateMetalLotBookedCostAed(
+                {
+                  aedTotal: Number(row.lot_purchase_aed) || 0,
+                  splitAedPaid: Number(row.lot_purchase_split_aed_paid) || 0,
+                  paymentMethod: row.lot_payment_method ? String(row.lot_payment_method) : null,
+                  metalWeightG: Number(row.lot_purchase_g) || 0,
+                  metalRateAedPerG: Number(row.lot_purchase_rate_aed_per_g) || 0,
+                },
                 saleG,
               ),
               saleInr: netMetalInr(Number(row.inr_total) || 0, Number(row.lab_total_inr) || 0),
               saleAed: aedTotal,
+              saleSplitAedPaid: Number(row.split_aed_paid) || 0,
             })
           : null;
       return {

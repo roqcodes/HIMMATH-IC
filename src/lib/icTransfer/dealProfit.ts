@@ -9,7 +9,7 @@ import { isDateInRange, type DateFilterRange } from '@/lib/dateFilterRange';
 import { isVoidIcSaleOrderStatus } from '@/lib/icFunds/icTransferReportFilters';
 import { computeMetalLotProfit } from '@/lib/icTransfer/metalInventory';
 import {
-  allocateMetalLotCostAed,
+  allocateMetalLotBookedCostAed,
   allocateMetalLotCostInr,
 } from '@/lib/icTransfer/metalLotCost';
 import { resolveSaleInrDisplay } from '@/lib/icTransfer/metalSettlement';
@@ -224,6 +224,8 @@ export function sumDealProfit(slices: DealProfitSlice[]): DealProfitSlice {
 export type SaleLineProfit = {
   currency: 'AED' | 'INR';
   amount: number;
+  secondaryCurrency?: 'AED' | 'INR';
+  secondaryAmount?: number;
 };
 
 /** Per-sale IC WAC profit (AED) or metal lot profit (INR). Same engine as warehouse KPIs. */
@@ -290,14 +292,22 @@ function indexOneWarehouseSaleProfits(
     const saleG = Number(s.metalWeightG) || 0;
     const pl = computeMetalLotProfit({
       paymentMethod: s.metalPaymentMethod,
-      purchasePaymentMethod: lot?.metalPaymentMethod ?? s.metalPaymentMethod,
+      purchasePaymentMethod: lot?.metalPaymentMethod ?? 'CASH',
       weightG: saleG,
       purchaseInr: allocateMetalLotCostInr(lot, saleG),
-      purchaseAed: allocateMetalLotCostAed(lot, saleG),
+      purchaseAed: allocateMetalLotBookedCostAed(lot, saleG),
+      saleSplitAedPaid: s.splitAedPaid,
       saleInr: resolveSaleInrDisplay(s),
       saleAed: Number(s.aedAmount) || 0,
     });
-    out.set(s.id, { currency: 'INR', amount: round2(Number(pl.profitInr) || 0) });
+    const fxAed = round2(Number(pl.fxProfitAed) || 0);
+    const profitInr = round2(Number(pl.profitInr) || 0);
+    out.set(s.id, {
+      currency: 'INR',
+      amount: profitInr,
+      secondaryCurrency: Math.abs(fxAed) > 0.005 ? 'AED' : undefined,
+      secondaryAmount: Math.abs(fxAed) > 0.005 ? fxAed : undefined,
+    });
   }
   return out;
 }
@@ -382,10 +392,11 @@ function computeOneWarehouse(
     const saleG = Number(s.metalWeightG) || 0;
     const pl = computeMetalLotProfit({
       paymentMethod: s.metalPaymentMethod,
-      purchasePaymentMethod: lot?.metalPaymentMethod ?? s.metalPaymentMethod,
+      purchasePaymentMethod: lot?.metalPaymentMethod ?? 'CASH',
       weightG: saleG,
       purchaseInr: allocateMetalLotCostInr(lot, saleG),
-      purchaseAed: allocateMetalLotCostAed(lot, saleG),
+      purchaseAed: allocateMetalLotBookedCostAed(lot, saleG),
+      saleSplitAedPaid: s.splitAedPaid,
       saleInr: resolveSaleInrDisplay(s),
       saleAed: Number(s.aedAmount) || 0,
     });

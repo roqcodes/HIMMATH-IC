@@ -163,12 +163,19 @@ export default function PLScreen({
         tone: dealPl.cashGrossProfitAed >= 0 ? ('emerald' as const) : ('red' as const),
       },
       {
-        label: 'Metal P&L',
+        label: 'Metal P&L (INR)',
         ...formatMetalPlKpi({
           metalProfitAed: dealPl.metalProfitAed,
           metalProfitInr: dealPl.metalProfitInr,
           rangeLabel: `${dealPl.metalSoldG.toLocaleString(undefined, { maximumFractionDigits: 2 })} g · ${dealPl.metalSaleCount} sales`,
         }),
+      },
+      {
+        label: 'Metal FX profit (AED)',
+        value: ledgerAedNode(dealPl.metalProfitAed),
+        valueTitle: fmtLedgerAed(dealPl.metalProfitAed),
+        hint: 'Secondary AED FX profit on agent deals',
+        tone: dealPl.metalProfitAed >= 0 ? ('emerald' as const) : ('red' as const),
       },
     ],
     [dealPl],

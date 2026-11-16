@@ -1,6 +1,7 @@
 import { roundMoney } from '@/lib/icFunds/currencyPolicy';
 import { allocateLotAmount } from '@/lib/icTransfer/metalInventory';
 import { netMetalInr } from '@/lib/icTransfer/labTest';
+import { bookedMetalAed } from '@/lib/icTransfer/metalSplit';
 import {
   computeMetalRateInrFromTotal,
   computeMetalSheetRateAed,
@@ -108,4 +109,30 @@ export function allocateMetalLotCostAed(
   const aed = Number(lot.aedTotal) || 0;
   if (!Number.isFinite(purchasedG) || purchasedG <= 0 || aed <= 0) return 0;
   return allocateLotAmount(aed, saleG, purchasedG);
+}
+
+/** Pro-rata AED actually booked for a lot: full AED total for AED deals, paid AED leg for split deals. */
+export function allocateMetalLotBookedCostAed(
+  lot: {
+    aedTotal?: number | null;
+    splitAedPaid?: number | null;
+    metalWeightG?: number | null;
+    metalRateAedPerG?: number | null;
+    paymentMethod?: string | null;
+    metalPaymentMethod?: string | null;
+  } | undefined,
+  saleG: number,
+): number {
+  if (!lot || saleG <= 0) return 0;
+  const purchasedG = Number(lot.metalWeightG);
+  if (!Number.isFinite(purchasedG) || purchasedG <= 0) return 0;
+  const paymentMethod = lot.metalPaymentMethod ?? lot.paymentMethod;
+  const aedTotal = Number(lot.aedTotal) ||
+    (paymentMethod === 'AED' ? (Number(lot.metalRateAedPerG) || 0) * purchasedG : 0);
+  const bookedAed = bookedMetalAed({
+    paymentMethod,
+    aedTotal,
+    splitAedPaid: lot.splitAedPaid,
+  });
+  return allocateLotAmount(bookedAed, saleG, purchasedG);
 }

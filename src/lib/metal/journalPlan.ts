@@ -264,9 +264,10 @@ export function planMetalSaleJournals(input: MetalSaleJournalInput): MetalJourna
         label: lotHasAed ? 'Collected via agent (split)' : 'AED proceeds (split)',
       });
       const lotAedCost = amt(input.lotPurchaseAedAllocated ?? 0);
-      if (lotHasAed && lotAedCost > 0 && saleAed > 0) {
-        const aedCostSlice = amt((lotAedCost * legs.paidAed) / saleAed);
-        const fx = roundLedgerAmount(legs.paidAed - aedCostSlice);
+      if (lotHasAed && lotAedCost > 0) {
+        // Both values are the AED portions actually booked, with the lot cost already
+        // prorated by grams sold. Do not scale it by the sale's AED share a second time.
+        const fx = roundLedgerAmount(legs.paidAed - lotAedCost);
         if (fx > 0.005) {
           lines.push({
             book: 'AED',

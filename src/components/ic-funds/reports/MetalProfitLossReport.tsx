@@ -10,19 +10,21 @@ export default function MetalProfitLossReport({
   saleInr,
   cogsInr,
   metalSoldG,
+  metalFxProfitAed,
 }: {
   periodLabel: string;
   netInr: number;
   saleInr: number;
   cogsInr: number;
   metalSoldG: number;
+  metalFxProfitAed?: number;
 }) {
   const grams = metalSoldG.toLocaleString(undefined, { maximumFractionDigits: 2 });
 
   return (
     <div>
       <ReportCaption>
-        {periodLabel} · Metal profit in rupees (INR). Not added to AED profit.
+        {periodLabel} · Metal profit in rupees (INR) and secondary FX profit (AED).
         {metalSoldG > 0 ? ` · ${grams} g sold` : ''}
       </ReportCaption>
       {metalSoldG < 0.0001 ? (
@@ -41,10 +43,16 @@ export default function MetalProfitLossReport({
             <td className={`${icfTd} font-medium`}>Less: Cost of metal</td>
             <ReportAmountCell n={-cogsInr} currency="INR" danger />
           </tr>
-          <tr className="border-b border-slate-300 bg-slate-50 font-semibold">
+          <tr className="border-b border-slate-200 bg-slate-50 font-semibold">
             <td className={icfTd}>Metal profit / (loss) for the period (INR)</td>
             <ReportAmountCell n={netInr} currency="INR" danger={netInr < 0} />
           </tr>
+          {metalFxProfitAed != null && Math.abs(metalFxProfitAed) > 0.005 ? (
+            <tr className="border-b border-slate-300 bg-emerald-50/50 font-medium">
+              <td className={icfTd}>Metal FX profit for the period (AED)</td>
+              <ReportAmountCell n={metalFxProfitAed} currency="AED" danger={metalFxProfitAed < 0} />
+            </tr>
+          ) : null}
         </tbody>
       </table>
       <p className="px-2.5 py-2 text-[11px] text-slate-500">

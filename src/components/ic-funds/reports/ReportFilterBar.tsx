@@ -22,6 +22,7 @@ export type ReportFilterBarProps = {
   accountOptions?: EntitySearchOption[];
   accountId?: string;
   onAccountId?: (id: string) => void;
+  statementMode?: 'account' | 'manager';
   warehouseOptions?: EntitySearchOption[];
   counterpartyOptions?: EntitySearchOption[];
   statementBook?: 'aed' | 'inr';
@@ -93,23 +94,24 @@ export default function ReportFilterBar({
   fundLedgerBook,
   onFundLedgerBook,
   showFundLedgerBookTab,
+  statementMode = 'account',
 }: ReportFilterBarProps) {
   const patch = (partial: Partial<ReportFilterState>) => onChange({ ...filters, ...partial });
 
   const showVoucherStatus =
-    reportView === 'all-vouchers' || reportView === 'd-expenses' || reportView === 'statement';
+    reportView === 'all-vouchers' || reportView === 'd-expenses' || (reportView === 'statement' && statementMode === 'account');
   const showExpenseKind = reportView === 'd-expenses';
   const showTradeFilters = reportView === 'fund-trades' || reportView === 'metal-trades';
   const showWarehouseFilter =
     reportView === 'warehouse-pl' || reportView === 'fund-trades' || reportView === 'metal-trades';
   const showPartyFilter =
-    reportView === 'statement' || reportView === 'fund-trades' || reportView === 'metal-trades';
+    (reportView === 'statement' && statementMode === 'account') || reportView === 'fund-trades' || reportView === 'metal-trades';
 
   const activeCount = useMemo(() => countActiveFilters(filters), [filters]);
   const showClear = activeCount > 0;
 
   const statementBookToggle =
-    reportView === 'statement' && showInrBookTab && onStatementBook ? (
+    reportView === 'statement' && statementMode === 'account' && showInrBookTab && onStatementBook ? (
       <ReportSegmentTabs
         label="Ledger book"
         value={statementBook ?? 'aed'}
@@ -176,14 +178,14 @@ export default function ReportFilterBar({
 
         {reportView === 'statement' && accountOptions && onAccountId ? (
           <div className={`${fieldCell} min-w-[10rem] flex-[1.5]`}>
-            <span className={icfLabel}>Account</span>
+            <span className={icfLabel}>Account or manager</span>
             <div className="flex min-w-0 items-center gap-2">
               <EntitySearchSelect
                 className="min-w-0 flex-1"
                 selectedId={accountId ?? ''}
                 onSelectId={id => onAccountId(id)}
                 options={accountOptions}
-                placeholder="Search account…"
+                placeholder="Search account or manager…"
                 inputClassName={icfInput}
                 showDetailLine={false}
               />

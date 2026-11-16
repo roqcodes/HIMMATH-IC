@@ -108,6 +108,7 @@ export async function queryMetalPlPeriodKpis(opts: {
   let metalSaleInr = 0;
   let metalCogsInr = 0;
   let metalProfitInr = 0;
+  let metalFxProfitAed = 0;
 
   for (const row of salesRes.rows) {
     const saleG = Number(row.metal_weight_g) || 0;
@@ -138,6 +139,7 @@ export async function queryMetalPlPeriodKpis(opts: {
     metalSaleInr += pl.saleInr;
     metalCogsInr += pl.purchaseInr;
     metalProfitInr += pl.profitInr;
+    metalFxProfitAed += pl.fxProfitAed;
   }
 
   return {
@@ -145,5 +147,6 @@ export async function queryMetalPlPeriodKpis(opts: {
     metalSaleInr: Number(metalSaleInr.toFixed(2)),
     metalCogsInr: Number(metalCogsInr.toFixed(2)),
     metalProfitInr: Number(metalProfitInr.toFixed(2)),
+    metalFxProfitAed: Number(metalFxProfitAed.toFixed(2)),
   };
 }

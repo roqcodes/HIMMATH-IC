@@ -42,6 +42,7 @@ export default function ProfitLossReport({
   metalSoldG,
   metalSaleInr,
   metalCogsInr,
+  metalFxProfitAed,
   book,
   onBookChange,
 }: {
@@ -53,6 +54,7 @@ export default function ProfitLossReport({
   metalSoldG?: number;
   metalSaleInr?: number;
   metalCogsInr?: number;
+  metalFxProfitAed?: number;
   book: 'aed' | 'inr';
   onBookChange: (book: 'aed' | 'inr') => void;
 }) {
@@ -77,6 +79,7 @@ export default function ProfitLossReport({
           saleInr={metalSaleInr ?? 0}
           cogsInr={metalCogsInr ?? 0}
           metalSoldG={metalSoldG ?? 0}
+          metalFxProfitAed={metalFxProfitAed ?? 0}
         />
       ) : (
         <>
@@ -87,7 +90,8 @@ export default function ProfitLossReport({
           {Math.abs(statement.netForPeriod) < 0.005 &&
           statement.incomeLines.length === 0 &&
           statement.directCostLines.length === 0 &&
-          statement.operatingLines.length === 0 ? (
+          statement.operatingLines.length === 0 &&
+          statement.profitLines.length === 0 ? (
             <p className="border-b border-amber-100 bg-amber-50/80 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
               No income, expense, or COGS accounts moved in this period. Payments, agent journals, and inventory
               purchases still show on Day book and Warehouse statement with the same date filter.
@@ -96,10 +100,11 @@ export default function ProfitLossReport({
           <table className="w-full text-sm">
             <tbody>
               <tr className="border-b border-slate-200 bg-slate-50/80">
-                <td className={`${icfTd} font-semibold`}>Sales</td>
+                <td className={`${icfTd} font-semibold`}>Sales &amp; Profit</td>
                 <ReportAmountCell n={statement.salesTotal} />
               </tr>
               <SectionLines lines={statement.incomeLines} slug={slug} accounts={accounts} />
+              <SectionLines lines={statement.profitLines} slug={slug} accounts={accounts} />
 
               <tr className="border-b border-slate-100">
                 <td className={`${icfTd} font-medium`}>Less: Cost of IC sold</td>

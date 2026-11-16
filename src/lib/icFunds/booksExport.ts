@@ -99,14 +99,16 @@ const REPORT_PRINT_STYLES = `
 /** Export PDF via print dialog — stays in same tab (hidden iframe). */
 export function exportReportPdfFromElement(
   elementId: string,
-  opts?: { title?: string; subtitle?: string; fileName?: string },
+  opts?: { title?: string; subtitle?: string; fileName?: string; orientation?: 'portrait' | 'landscape' },
 ): boolean {
   const node = document.getElementById(elementId);
   if (!node) return false;
   const heading = escapeHtml(opts?.title ?? 'Financial report');
   const fileTitle = escapeHtml(opts?.fileName || opts?.title || 'Financial report');
   const subtitle = opts?.subtitle ? `<p class="meta">${escapeHtml(opts.subtitle)}</p>` : '';
+  const pageStyle = opts?.orientation === 'landscape' ? '@page { size: A4 landscape; margin: 10mm; }' : '';
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${fileTitle}</title>
+    <style>${pageStyle}</style>
     <style>${REPORT_PRINT_STYLES}</style></head><body>
     <h1>${heading}</h1>${subtitle}${node.innerHTML}</body></html>`;
   return printHtmlDocument(html, opts?.fileName);
@@ -115,7 +117,7 @@ export function exportReportPdfFromElement(
 /** Opens printable preview in a new tab (View button). */
 export function openReportPreviewNewTab(
   elementId: string,
-  opts?: { title?: string; subtitle?: string; fileName?: string },
+  opts?: { title?: string; subtitle?: string; fileName?: string; orientation?: 'portrait' | 'landscape' },
 ): void {
   const node = document.getElementById(elementId);
   if (!node) return;
@@ -124,7 +126,9 @@ export function openReportPreviewNewTab(
   const heading = escapeHtml(opts?.title ?? 'Financial report');
   const fileTitle = escapeHtml(opts?.fileName || opts?.title || 'Financial report');
   const subtitle = opts?.subtitle ? `<p class="meta">${escapeHtml(opts.subtitle)}</p>` : '';
+  const pageStyle = opts?.orientation === 'landscape' ? '@page { size: A4 landscape; margin: 10mm; }' : '';
   win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${fileTitle}</title>
+    <style>${pageStyle}</style>
     <style>${REPORT_PRINT_STYLES}</style></head><body>
     <h1>${heading}</h1>${subtitle}${node.innerHTML}</body></html>`);
   win.document.close();
