@@ -107,7 +107,7 @@ export const REPORT_CATALOG_GROUPS: ReadonlyArray<{
         id: 'warehouse-pl',
         title: 'Warehouse statement',
         description:
-          'IC units and AED profit, or metal grams with INR and AED profit shown separately — pick a tab.',
+          'IC stock value in INR and AED profit, or metal grams with INR and AED profit shown separately — pick a tab.',
       },
     ],
   },

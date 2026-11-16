@@ -91,6 +91,10 @@ export type TallyLedgerKpiCard = {
   credit: number;
   closing: number;
   closingPrefix: string;
+  debitLabel?: string;
+  creditLabel?: string;
+  closingLabel?: string;
+  closingText?: string;
 };
 
 export type TallyLedgerDocOptions = {
@@ -125,16 +129,16 @@ export function buildKpiStripHtml(cards: TallyLedgerKpiCard[]): string {
         </div>
         <div class="kpi-metrics">
           <div class="kpi-metric">
-            <div class="kpi-metric-label">TOTAL DEBIT · مدين</div>
+            <div class="kpi-metric-label">${escapeHtml(card.debitLabel || 'TOTAL DEBIT')}</div>
             <div class="kpi-metric-value">${escapeHtml(formatKpiAmount(card.debit))}</div>
           </div>
           <div class="kpi-metric">
-            <div class="kpi-metric-label">TOTAL CREDIT · دائن</div>
+            <div class="kpi-metric-label">${escapeHtml(card.creditLabel || 'TOTAL CREDIT')}</div>
             <div class="kpi-metric-value kpi-cr">${escapeHtml(formatKpiAmount(card.credit))}</div>
           </div>
           <div class="kpi-metric kpi-close">
-            <div class="kpi-metric-label">CLOSING · الرصيد</div>
-            <div class="kpi-metric-value kpi-close-val">${escapeHtml(formatKpiClosing(card.closing, card.closingPrefix))}</div>
+            <div class="kpi-metric-label">${escapeHtml(card.closingLabel || 'CLOSING')}</div>
+            <div class="kpi-metric-value kpi-close-val">${escapeHtml(card.closingText || formatKpiClosing(card.closing, card.closingPrefix))}</div>
           </div>
         </div>
       </div>`;

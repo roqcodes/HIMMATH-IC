@@ -27,6 +27,7 @@ import {
 } from '@/lib/icFunds/statementOfAccountExport';
 import {
   exportWarehouseStatementPdf,
+  exportWarehouseStatementXlsx,
   openWarehouseStatementPreview,
 } from '@/lib/icFunds/warehouseStatementExport';
 import { reportCatalogTitle } from '@/lib/icFunds/reportCatalog';
@@ -966,6 +967,25 @@ export default function BooksScreen({
     warehouseStatementBook,
   ]);
 
+  const handleExportWarehouseXlsx = useCallback(async () => {
+    if (!warehousePl) {
+      await alert({
+        title: 'No warehouse statement',
+        message: 'Warehouse statement has not loaded yet.',
+        variant: 'info',
+      });
+      return;
+    }
+    await exportWarehouseStatementXlsx({
+      branchName: branch?.name ?? 'HO',
+      periodLabel,
+      book: warehouseStatementBook,
+      warehouses: filteredWarehouseSummaries,
+      lines: filteredWarehouseLines,
+      documentNo: issueReportDocumentNo('warehouse-pl'),
+    });
+  }, [alert, branch?.name, filteredWarehouseLines, filteredWarehouseSummaries, periodLabel, warehousePl, warehouseStatementBook]);
+
   const headerToolbar = useMemo(
     () => (
       <>
@@ -983,12 +1003,16 @@ export default function BooksScreen({
         >
           Export PDF
         </button>
-        <button type="button" className={btnSecondary} onClick={handleExportCsv}>
-          Export CSV
+        <button
+          type="button"
+          className={btnSecondary}
+          onClick={() => reportView === 'warehouse-pl' ? void handleExportWarehouseXlsx() : handleExportCsv()}
+        >
+          {reportView === 'warehouse-pl' ? 'Export Excel' : 'Export CSV'}
         </button>
       </>
     ),
-    [handleExportCsv, handleExportPdf, handleView],
+    [handleExportCsv, handleExportPdf, handleExportWarehouseXlsx, handleView, reportView],
   );
 
   useICFundsReportHeaderToolbar(headerToolbar);

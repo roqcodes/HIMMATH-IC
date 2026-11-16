@@ -289,7 +289,7 @@ export default function CounterpartyDetailTabs({
     base.push({
       id: 'journals',
       label: 'Journals',
-      count: journalsLoaded ? journals.filter(v => v.status !== 'void').length : 0,
+      count: journalsLoaded ? journals.filter(v => v.status !== 'void' && v.voucherType === 'journal').length : 0,
     });
     return base;
   }, [activity.length, purchases.length, sales.length, periodDeposits.length, journals, journalsLoaded, showDeposits]);
@@ -679,7 +679,7 @@ export default function CounterpartyDetailTabs({
 
         {tab === 'all' ? (
           <ICTransferDataTableShell
-            title="Purchases, sales & settlements"
+            title="All transactions"
             search={search}
             onSearchChange={setSearch}
             searchPlaceholder="Search activity…"
@@ -760,7 +760,7 @@ export default function CounterpartyDetailTabs({
               />
             </div>
             {journalTable(
-              filteredJournals,
+              filteredJournals.filter(v => v.voucherType === 'journal'),
               'No AED or INR journals for this counterparty in the selected period.',
             )}
           </div>

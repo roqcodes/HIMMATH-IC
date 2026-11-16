@@ -62,13 +62,10 @@ export type CounterpartyActivityRow =
   | { kind: 'voucher'; at: string; voucher: ICFundVoucher }
   | { kind: 'deposit'; at: string; deposit: ICBranchDeposit };
 
-/** Cash movements posted in IC Funds against this party's personal account. */
-export function isCounterpartyAccountingVoucher(voucher: Pick<ICFundVoucher, 'voucherType' | 'referenceType' | 'status'>): boolean {
+/** Non-journal vouchers belong in All; journal vouchers have their own tab. */
+export function isCounterpartyActivityVoucher(voucher: Pick<ICFundVoucher, 'voucherType' | 'status'>): boolean {
   if (voucher.status === 'void') return false;
-  const ref = voucher.referenceType || '';
-  if (ref.startsWith('ic_fund_')) return true;
-  if (voucher.voucherType === 'payment' || voucher.voucherType === 'receipt') return true;
-  return voucher.voucherType === 'journal' && !ref;
+  return voucher.voucherType !== 'journal';
 }
 
 export function filterCounterpartyDeposits(
@@ -151,7 +148,7 @@ export function mergeCounterpartyActivity(
       deposit: d,
     })),
     ...vouchers
-      .filter(isCounterpartyAccountingVoucher)
+      .filter(isCounterpartyActivityVoucher)
       .map(v => ({
         kind: 'voucher' as const,
         at: v.createdAt || v.voucherDate || '',
