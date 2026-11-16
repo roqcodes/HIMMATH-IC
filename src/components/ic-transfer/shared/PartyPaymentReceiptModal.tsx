@@ -47,6 +47,7 @@ type Props = {
 
 const denseInput = `${asicInput} ${icPurchaseDenseInput}`;
 const fieldLabel = icPurchaseDenseLabel;
+const leftTopGrid = 'grid grid-cols-1 gap-x-3 gap-y-0.5 sm:grid-cols-2';
 
 function SectionEyebrow({ children }: { children: React.ReactNode }) {
   return <h3 className={icFormSectionEyebrow}>{children}</h3>;

@@ -78,7 +78,7 @@ import {
   isPartyProfitMemoVoucher,
 } from '@/lib/counterparties/counterpartyPartyJournals';
 
-type TabId = 'all' | 'purchases' | 'sales' | 'deposits' | 'journals';
+type TabId = 'all' | 'purchases' | 'sales' | 'deposits' | 'payments' | 'receipts' | 'journals';
 
 const ACTIVITY_COLUMNS = icCounterpartyDealTableColumns(true);
 const PURCHASE_COLUMNS = icCounterpartyDealTableColumns(false);
@@ -272,6 +272,16 @@ export default function CounterpartyDetailTabs({
       { id: 'all', label: 'All', count: activity.length },
       { id: 'purchases', label: 'Purchases', count: purchases.length },
       { id: 'sales', label: 'Sales', count: sales.length },
+      {
+        id: 'payments',
+        label: 'Payments',
+        count: journalsLoaded ? journals.filter(v => v.status !== 'void' && v.voucherType === 'payment').length : 0,
+      },
+      {
+        id: 'receipts',
+        label: 'Receipts',
+        count: journalsLoaded ? journals.filter(v => v.status !== 'void' && v.voucherType === 'receipt').length : 0,
+      },
     ];
     if (showDeposits) {
       base.push({ id: 'deposits', label: 'Deposits', count: periodDeposits.length });
@@ -562,7 +572,7 @@ export default function CounterpartyDetailTabs({
     return renderVoucherRow(row.voucher);
   };
 
-  const journalTable = (
+  const journalTable = (rows: ICFundVoucher[], emptyMessage: string) => (
     <div className={icfTableWrap}>
       <table className="w-full min-w-[760px] text-left">
         <thead>
@@ -581,14 +591,12 @@ export default function CounterpartyDetailTabs({
         <tbody>
           {journalsLoading ? (
             <ASICTableRowsSkeleton rows={6} cols={9} />
-          ) : filteredJournals.length === 0 ? (
+          ) : rows.length === 0 ? (
             <tr>
-              <td colSpan={9} className={`${icfTd} py-8 text-center text-sm text-slate-500`}>
-                No AED or INR journals for this counterparty in the selected period.
-              </td>
+              <td colSpan={9} className={`${icfTd} py-8 text-center text-sm text-slate-500`}>{emptyMessage}</td>
             </tr>
           ) : (
-            filteredJournals.map(row => (
+            rows.map(row => (
               <tr
                 key={row.id}
                 role="button"
@@ -751,7 +759,34 @@ export default function CounterpartyDetailTabs({
                 className="w-full"
               />
             </div>
-            {journalTable}
+            {journalTable(
+              filteredJournals,
+              'No AED or INR journals for this counterparty in the selected period.',
+            )}
+          </div>
+        ) : null}
+
+        {tab === 'payments' ? (
+          <div className="p-3 sm:p-4">
+            <div className="mb-3 max-w-md">
+              <SearchInput value={search} onChange={setSearch} placeholder="Search paymentsâ€¦" className="w-full" />
+            </div>
+            {journalTable(
+              filteredJournals.filter(v => v.voucherType === 'payment'),
+              'No payments for this counterparty in the selected period.',
+            )}
+          </div>
+        ) : null}
+
+        {tab === 'receipts' ? (
+          <div className="p-3 sm:p-4">
+            <div className="mb-3 max-w-md">
+              <SearchInput value={search} onChange={setSearch} placeholder="Search receiptsâ€¦" className="w-full" />
+            </div>
+            {journalTable(
+              filteredJournals.filter(v => v.voucherType === 'receipt'),
+              'No receipts for this counterparty in the selected period.',
+            )}
           </div>
         ) : null}
       </div>
