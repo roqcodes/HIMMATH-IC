@@ -12,9 +12,7 @@ import { parseFormAmount } from '@/lib/parseFormAmount';
 import type { ICSupplier } from '@/types';
 import {
   COUNTERPARTY_KINDS,
-  COUNTERPARTY_ROLES,
   DEFAULT_COUNTERPARTY_ROLES,
-  filterCounterpartiesByKind,
   normalizeCounterpartyKind,
   normalizeCounterpartyRoles,
   type CounterpartyKind,
@@ -58,16 +56,6 @@ export default function CounterpartyModal({
   const [openingInr, setOpeningInr] = useState('0');
   const [isSaving, setIsSaving] = useState(false);
 
-  const toggleRole = (role: CounterpartyRole) => {
-    setRoles(prev => {
-      const next = new Set(prev);
-      if (next.has(role)) next.delete(role);
-      else next.add(role);
-      const ordered = COUNTERPARTY_ROLES.filter(r => next.has(r));
-      return ordered.length > 0 ? ordered : [...DEFAULT_COUNTERPARTY_ROLES];
-    });
-  };
-
   useEffect(() => {
     if (!open) return;
     if (counterparty) {
@@ -101,14 +89,9 @@ export default function CounterpartyModal({
     }
   }, [open, counterparty]);
 
-  const managerOptions = React.useMemo(
-    () => filterCounterpartiesByKind(icSuppliers, 'manager'),
-    [icSuppliers],
-  );
+  const isCustomer = kind === 'customer';
 
-  const canSubmit =
-    name.trim().length > 0 &&
-    (kind === 'manager' || (kind === 'customer' && homeManagerId.trim().length > 0));
+  const canSubmit = name.trim().length > 0;
 
   const handleSave = async () => {
     if (!canSubmit) return;
@@ -139,10 +122,10 @@ export default function CounterpartyModal({
         locality: cityTrim || undefined,
         status,
         kind,
-        homeManagerId: kind === 'customer' ? homeManagerId : null,
-        roles: kind === 'customer' ? roles : [],
-        openingAed: aed,
-        openingInr: inr,
+        homeManagerId: null,
+        roles: isCustomer ? roles : [],
+        openingAed: isCustomer ? aed : 0,
+        openingInr: isCustomer ? inr : 0,
       });
       ok = res.success;
       if (!ok && res.error) alert(res.error);
@@ -194,7 +177,7 @@ export default function CounterpartyModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={isEdit ? 'Edit party' : 'Add manager or customer'}
+      title={isEdit ? 'Edit party' : 'Add party'}
       maxWidth="max-w-4xl w-[min(95vw,56rem)]"
       footer={
         <>
@@ -217,65 +200,39 @@ export default function CounterpartyModal({
               <input className={asicInput} value={code} onChange={e => setCode(e.target.value)} />
             </AsicFormField>
             <AsicFormField label="Kind" className={fieldClass}>
-              <select
-                className={asicInput}
-                value={kind}
-                onChange={e => {
-                  const next = e.target.value as CounterpartyKind;
-                  setKind(next);
-                  if (next === 'manager') {
-                    setHomeManagerId('');
-                    setRoles([]);
-                  } else if (roles.length === 0) {
-                    setRoles([...DEFAULT_COUNTERPARTY_ROLES]);
-                  }
-                }}
-              >
+              <div className="flex flex-wrap gap-2 pt-0.5">
                 {COUNTERPARTY_KINDS.map(k => (
-                  <option key={k} value={k}>
-                    {k === 'manager' ? 'Manager' : 'Customer'}
-                  </option>
+                  <button
+                    key={k}
+                    type="button"
+                    className={`rounded-lg border px-3 py-1.5 text-sm font-medium capitalize ${
+                      kind === k
+                        ? 'border-sky-600 bg-sky-50 text-sky-900'
+                        : 'border-slate-200 text-slate-700 hover:border-slate-300'
+                    }`}
+                    onClick={() => {
+                      setKind(k);
+                      if (k !== 'customer') {
+                        setHomeManagerId('');
+                        setRoles([]);
+                        setOpeningAed('0');
+                        setOpeningInr('0');
+                      } else if (roles.length === 0) {
+                        setRoles([...DEFAULT_COUNTERPARTY_ROLES]);
+                      }
+                    }}
+                  >
+                    {k}
+                  </button>
                 ))}
-              </select>
+              </div>
             </AsicFormField>
-            {kind === 'customer' ? (
-              <AsicFormField label="Home manager *" className={fieldClass}>
-                <select
-                  className={asicInput}
-                  value={homeManagerId}
-                  onChange={e => setHomeManagerId(e.target.value)}
-                >
-                  <option value="">Select manager…</option>
-                  {managerOptions.map(m => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
-              </AsicFormField>
-            ) : null}
             <AsicFormField label="Status" className={fieldClass}>
               <select className={asicInput} value={status} onChange={e => setStatus(e.target.value as 'active' | 'inactive')}>
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
               </select>
             </AsicFormField>
-            {kind === 'customer' ? (
-              <AsicFormField label="Customer roles" className={fieldClass}>
-                <div className="flex flex-wrap gap-3 pt-1">
-                  {COUNTERPARTY_ROLES.map(role => (
-                    <label key={role} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={roles.includes(role)}
-                        onChange={() => toggleRole(role)}
-                      />
-                      {role === 'party' ? 'Party (sales)' : role === 'supplier' ? 'Supplier (purchases)' : 'Agent (metal AED)'}
-                    </label>
-                  ))}
-                </div>
-              </AsicFormField>
-            ) : null}
           </ModalFormSection>
         }
         right={
@@ -297,6 +254,7 @@ export default function CounterpartyModal({
                 <input className={asicInput} value={state} onChange={e => setState(e.target.value)} />
               </AsicFormField>
             </ModalFormSection>
+            {isCustomer ? (
             <ModalFormSection
               title="Opening balances"
               description="Starting AED and INR ledger balances. Locked after entries exist."
@@ -320,6 +278,7 @@ export default function CounterpartyModal({
                 />
               </AsicFormField>
             </ModalFormSection>
+            ) : null}
           </>
         }
       />

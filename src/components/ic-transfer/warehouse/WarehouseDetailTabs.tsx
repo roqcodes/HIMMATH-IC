@@ -3,7 +3,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import AsicTabBar from '@/components/asic/AsicTabBar';
 import { useApp } from '@/context/AppContext';
-import { listWarehouseDealVouchersAction } from '@/app/actions/icFundsActions';
+import {
+  listLocationPartyVouchersAction,
+  listWarehouseDealVouchersAction,
+} from '@/app/actions/icFundsActions';
 import { effectivePurchaseCounterpartyId } from '@/lib/counterparties/effectiveId';
 import CounterpartyLink from '@/components/counterparties/CounterpartyLink';
 import { getFormattedTxnId } from '@/lib/icTransferMappers';
@@ -75,7 +78,9 @@ import SearchInput from '@/components/ic-transfer/ui/SearchInput';
 import { asicCard } from '@/components/asic/ui';
 import type { ICPurchase, ICSale, ICFundVoucher } from '@/types';
 
-type TabId = 'all' | 'purchases' | 'sales' | 'labTests' | 'journals';
+import LocationPartyPrVouchersPanel from '@/components/ic-transfer/shared/LocationPartyPrVouchersPanel';
+
+type TabId = 'all' | 'purchases' | 'sales' | 'labTests' | 'payments' | 'receipts' | 'journals';
 
 const ACTIVITY_COLUMNS = icWarehouseDealTableColumns(true);
 const PURCHASE_COLUMNS = icWarehouseDealTableColumns(false);
@@ -116,6 +121,7 @@ type Props = {
   portalMode: ICTransferPortalMode;
   branchSlug: string;
   purchaseBranchId?: string;
+  refreshToken?: number;
 };
 
 export default function WarehouseDetailTabs({
@@ -124,6 +130,7 @@ export default function WarehouseDetailTabs({
   portalMode,
   branchSlug,
   purchaseBranchId,
+  refreshToken,
 }: Props) {
   const { icPurchases, icSales, icSuppliers, icWarehouses, branches } = useApp();
   const [tab, setTab] = useState<TabId>('all');
@@ -133,6 +140,8 @@ export default function WarehouseDetailTabs({
   const [journals, setJournals] = useState<ICFundVoucher[]>([]);
   const [journalsLoading, setJournalsLoading] = useState(false);
   const [journalsLoaded, setJournalsLoaded] = useState(false);
+  const [paymentCount, setPaymentCount] = useState<number | undefined>(undefined);
+  const [receiptCount, setReceiptCount] = useState<number | undefined>(undefined);
 
   const [viewPurchase, setViewPurchase] = useState<ICPurchase | null>(null);
   const [editPurchase, setEditPurchase] = useState<ICPurchase | null>(null);
@@ -258,19 +267,52 @@ export default function WarehouseDetailTabs({
     }
   }, [tab, journalsLoaded, journalsLoading, loadJournals]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const base = {
+        warehouseId,
+        startDate: range.startDate ?? undefined,
+        endDate: range.endDate ?? undefined,
+        limit: 500,
+      };
+      const [payments, receipts] = await Promise.all([
+        listLocationPartyVouchersAction({ ...base, voucherType: 'payment' }),
+        listLocationPartyVouchersAction({ ...base, voucherType: 'receipt' }),
+      ]);
+      if (cancelled) return;
+      setPaymentCount(payments.filter(v => v.status !== 'void').length);
+      setReceiptCount(receipts.filter(v => v.status !== 'void').length);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [warehouseId, range.startDate, range.endDate, refreshToken]);
+
   const tabs = useMemo(
     () => [
       { id: 'all', label: 'All', count: activity.length },
       { id: 'purchases', label: 'Purchases', count: purchases.length },
       { id: 'sales', label: 'Sales', count: sales.length },
       { id: 'labTests', label: 'Lab tests', count: labRows.length },
+      { id: 'payments', label: 'Payments', count: paymentCount },
+      { id: 'receipts', label: 'Receipts', count: receiptCount },
       {
         id: 'journals',
         label: 'Journals',
         count: journalsLoaded ? journals.filter(v => v.status !== 'void').length : undefined,
       },
     ],
-    [activity.length, purchases.length, sales.length, labRows.length, journals, journalsLoaded],
+    [
+      activity.length,
+      purchases.length,
+      sales.length,
+      labRows.length,
+      journals,
+      journalsLoaded,
+      paymentCount,
+      receiptCount,
+    ],
   );
 
   const filteredJournalGroups = useMemo(() => {
@@ -651,6 +693,28 @@ export default function WarehouseDetailTabs({
               </table>
             </div>
           </div>
+        ) : null}
+
+        {tab === 'payments' ? (
+          <LocationPartyPrVouchersPanel
+            voucherType="payment"
+            warehouseId={warehouseId}
+            range={range}
+            branchSlug={branchSlug}
+            refreshToken={refreshToken}
+            title="Party payments (INR)"
+          />
+        ) : null}
+
+        {tab === 'receipts' ? (
+          <LocationPartyPrVouchersPanel
+            voucherType="receipt"
+            warehouseId={warehouseId}
+            range={range}
+            branchSlug={branchSlug}
+            refreshToken={refreshToken}
+            title="Party receipts (INR)"
+          />
         ) : null}
 
         {tab === 'journals' ? (

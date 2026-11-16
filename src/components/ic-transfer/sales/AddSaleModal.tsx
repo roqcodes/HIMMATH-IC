@@ -1208,11 +1208,11 @@ export default function AddSaleModal({
                   disabled={isSubmitting}
                 />
                     </ICTransferFormField>
-          </div>
+              </div>
                 )}
               </SmoothModeSwap>
-            </div>
-          </div>
+                    </div>
+                </div>
 
           <ICTransferBreakdownPanel
             heading="Price breakdown"
@@ -1233,8 +1233,8 @@ export default function AddSaleModal({
                       book={isMetal ? 'INR' : 'AED'}
                       balances={entityLedgerById[counterpartyId]}
                     />
-                  ) : null}
-                </div>
+              ) : null}
+            </div>
               ) : undefined
             }
             breakdown={priceBreakdown}

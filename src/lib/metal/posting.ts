@@ -164,13 +164,26 @@ export async function syncMetalPurchaseLedgers(
     throw new Error('Could not resolve INR account for metal AED settlement clearing');
   }
 
-  let agentAccountId: string | null = null;
+  const needsCustomerAed = lines.some(l => l.debit === 'customer_aed' || l.credit === 'customer_aed');
+  let customerAedAccountId: string | null = null;
   let metalAedAccountId: string | null = null;
-  if (lines.some(l => l.debit === 'agent' || l.credit === 'agent' || l.debit === 'metal_aed' || l.credit === 'metal_aed')) {
-    if (agentId) {
-      agentAccountId = await ensureAedAgentAccount(client, branchId, agentId, 'AED agent');
-      metalAedAccountId = await ensureMetalAedAccount(client, branchId);
+  if (needsCustomerAed || lines.some(l => l.debit === 'metal_aed' || l.credit === 'metal_aed')) {
+    const counterpartyId = purchase.counterparty_id ? String(purchase.counterparty_id) : null;
+    if (counterpartyId) {
+      const cpRes = await client.query(`SELECT name FROM ic_counterparties WHERE id = $1 LIMIT 1`, [
+        counterpartyId,
+      ]);
+      customerAedAccountId = await ensureLinkedAccount(client, {
+        branchId,
+        sourceType: 'ic_counterparty',
+        sourceId: counterpartyId,
+        name: cpRes.rows[0] ? String(cpRes.rows[0].name) : 'Customer',
+      });
     }
+    metalAedAccountId = await ensureMetalAedAccount(client, branchId);
+  }
+  if (needsCustomerAed && !customerAedAccountId) {
+    throw new Error('Could not resolve AED account for metal purchase customer');
   }
 
   const roleId = (role: MetalJournalRole): string | null => {
@@ -181,8 +194,10 @@ export async function syncMetalPurchaseLedgers(
         return aedSettlementInr;
       case 'metal_stock':
         return metalStockInr;
+      case 'customer_aed':
+        return customerAedAccountId;
       case 'agent':
-        return agentAccountId;
+        return null;
       case 'metal_aed':
         return metalAedAccountId;
       default:
@@ -415,7 +430,8 @@ export async function syncMetalSaleLedgers(
     throw new Error('Could not resolve INR account for metal AED settlement clearing');
   }
 
-  let agentAccountId: string | null = null;
+  const needsCustomerAed = lines.some(l => l.debit === 'customer_aed' || l.credit === 'customer_aed');
+  let customerAedAccountId: string | null = null;
   let metalAedAccountId: string | null = null;
   const needsMetalAedProceeds = lines.some(
     l => l.debit === 'metal_aed_proceeds' || l.credit === 'metal_aed_proceeds',
@@ -425,23 +441,34 @@ export async function syncMetalSaleLedgers(
     : null;
 
   if (
+    needsCustomerAed ||
     lines.some(
       l =>
-        l.debit === 'agent' ||
-        l.credit === 'agent' ||
         l.debit === 'metal_aed' ||
         l.credit === 'metal_aed' ||
         l.debit === 'metal_aed_proceeds' ||
         l.credit === 'metal_aed_proceeds',
     )
   ) {
-    if (agentId) {
-      agentAccountId = await ensureAedAgentAccount(client, branchId, agentId, 'AED agent');
-      metalAedAccountId = await ensureMetalAedAccount(client, branchId);
+    const counterpartyId = sale.counterparty_id ? String(sale.counterparty_id) : null;
+    if (counterpartyId) {
+      const cpRes = await client.query(`SELECT name FROM ic_counterparties WHERE id = $1 LIMIT 1`, [
+        counterpartyId,
+      ]);
+      customerAedAccountId = await ensureLinkedAccount(client, {
+        branchId,
+        sourceType: 'ic_counterparty',
+        sourceId: counterpartyId,
+        name: cpRes.rows[0] ? String(cpRes.rows[0].name) : 'Customer',
+      });
     }
+    metalAedAccountId = await ensureMetalAedAccount(client, branchId);
     const needsAedBook = lines.some(l => l.book === 'AED');
-    if (needsAedBook && (!agentAccountId || (!metalAedAccountId && !metalAedProceedsId))) {
-      throw new Error('Could not resolve AED accounts for metal sale agent leg');
+    if (needsAedBook && needsCustomerAed && !customerAedAccountId) {
+      throw new Error('Could not resolve AED account for metal sale customer');
+    }
+    if (needsAedBook && !metalAedAccountId && !metalAedProceedsId) {
+      throw new Error('Could not resolve AED clearing accounts for metal sale');
     }
   }
 
@@ -449,6 +476,8 @@ export async function syncMetalSaleLedgers(
     switch (role) {
       case 'customer':
         return customerAccountId;
+      case 'customer_aed':
+        return customerAedAccountId;
       case 'aed_settlement':
         return aedSettlementInr;
       case 'metal_stock':
@@ -460,7 +489,7 @@ export async function syncMetalSaleLedgers(
       case 'metal_profit':
         return metalProfitInr;
       case 'agent':
-        return agentAccountId;
+        return null;
       case 'metal_aed':
         return metalAedAccountId;
       case 'metal_aed_proceeds':

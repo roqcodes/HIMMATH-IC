@@ -1877,6 +1877,7 @@ export async function dbUpdateICSaleAction(
         idx++;
       }
       if (setClauses.length === 0) throw new Error('No valid fields to update');
+      setClauses.push('status_updated_at = CURRENT_TIMESTAMP');
       values.push(parsedId);
 
       const updateRes = await client.query(
@@ -1904,8 +1905,8 @@ export async function dbUpdateICSaleAction(
       return updateRes.rows[0];
     });
 
-    scheduleIcFundLedgerSync(() => syncICSaleFundLedger(parsedId));
-  const saleRow = await loadICSaleRowById(parsedId);
+    await syncICSaleFundLedger(parsedId);
+    const saleRow = await loadICSaleRowById(parsedId);
     return { success: true, data: saleRow ?? mapICSaleRow(row) };
   } catch (err: unknown) {
     logger.error({ err, id, updates }, 'Error in dbUpdateICSaleAction');

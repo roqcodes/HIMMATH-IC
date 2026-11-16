@@ -28,7 +28,14 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-export function printHtmlDocument(html: string): boolean {
+function extractHtmlTitle(html: string): string | undefined {
+  const match = html.match(/<title>([^<]*)<\/title>/i);
+  const raw = match?.[1]?.trim();
+  return raw || undefined;
+}
+
+/** Chrome uses the focused document's title as the default PDF name — sync parent + iframe. */
+export function printHtmlDocument(html: string, fileName?: string): boolean {
   const iframe = document.createElement('iframe');
   iframe.setAttribute('aria-hidden', 'true');
   iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
@@ -41,15 +48,29 @@ export function printHtmlDocument(html: string): boolean {
     return false;
   }
 
+  const printTitle = (fileName || extractHtmlTitle(html) || 'report').trim();
+
   frameDoc.open();
   frameDoc.write(html);
   frameDoc.close();
+  frameDoc.title = printTitle;
+  iframe.title = printTitle;
 
   const cleanup = () => {
     window.setTimeout(() => iframe.remove(), 500);
   };
 
   const triggerPrint = () => {
+    const prevParentTitle = document.title;
+    document.title = printTitle;
+    frameDoc.title = printTitle;
+
+    const restoreParentTitle = () => {
+      document.title = prevParentTitle;
+    };
+    window.addEventListener('afterprint', restoreParentTitle, { once: true });
+    window.setTimeout(restoreParentTitle, 4000);
+
     frameWindow.focus();
     frameWindow.print();
     cleanup();
@@ -78,33 +99,36 @@ const REPORT_PRINT_STYLES = `
 /** Export PDF via print dialog — stays in same tab (hidden iframe). */
 export function exportReportPdfFromElement(
   elementId: string,
-  opts?: { title?: string; subtitle?: string },
+  opts?: { title?: string; subtitle?: string; fileName?: string },
 ): boolean {
   const node = document.getElementById(elementId);
   if (!node) return false;
-  const title = escapeHtml(opts?.title ?? 'Financial report');
+  const heading = escapeHtml(opts?.title ?? 'Financial report');
+  const fileTitle = escapeHtml(opts?.fileName || opts?.title || 'Financial report');
   const subtitle = opts?.subtitle ? `<p class="meta">${escapeHtml(opts.subtitle)}</p>` : '';
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${title}</title>
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${fileTitle}</title>
     <style>${REPORT_PRINT_STYLES}</style></head><body>
-    <h1>${title}</h1>${subtitle}${node.innerHTML}</body></html>`;
-  return printHtmlDocument(html);
+    <h1>${heading}</h1>${subtitle}${node.innerHTML}</body></html>`;
+  return printHtmlDocument(html, opts?.fileName);
 }
 
 /** Opens printable preview in a new tab (View button). */
 export function openReportPreviewNewTab(
   elementId: string,
-  opts?: { title?: string; subtitle?: string },
+  opts?: { title?: string; subtitle?: string; fileName?: string },
 ): void {
   const node = document.getElementById(elementId);
   if (!node) return;
   const win = window.open('', '_blank', 'noopener,noreferrer');
   if (!win) return;
-  const title = escapeHtml(opts?.title ?? 'Financial report');
+  const heading = escapeHtml(opts?.title ?? 'Financial report');
+  const fileTitle = escapeHtml(opts?.fileName || opts?.title || 'Financial report');
   const subtitle = opts?.subtitle ? `<p class="meta">${escapeHtml(opts.subtitle)}</p>` : '';
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${title}</title>
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${fileTitle}</title>
     <style>${REPORT_PRINT_STYLES}</style></head><body>
-    <h1>${title}</h1>${subtitle}${node.innerHTML}</body></html>`);
+    <h1>${heading}</h1>${subtitle}${node.innerHTML}</body></html>`);
   win.document.close();
+  win.document.title = opts?.fileName || fileTitle;
   win.focus();
 }
 

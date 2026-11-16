@@ -7,6 +7,7 @@ export type MetalJournalBook = 'INR' | 'AED';
 export type MetalJournalRole =
   | 'supplier'
   | 'customer'
+  | 'customer_aed'
   | 'agent'
   | 'aed_settlement'
   | 'metal_stock'
@@ -133,7 +134,7 @@ export function planMetalPurchaseJournals(input: MetalPurchaseJournalInput): Met
         book: 'AED',
         referenceType: 'metal_purchase_aed',
         debit: 'metal_aed',
-        credit: 'agent',
+        credit: 'customer_aed',
         amount: legs.paidAed,
         label: 'Paid via agent (split)',
       });
@@ -167,7 +168,7 @@ export function planMetalPurchaseJournals(input: MetalPurchaseJournalInput): Met
       book: 'AED',
       referenceType: 'metal_purchase_aed',
       debit: 'metal_aed',
-      credit: 'agent',
+      credit: 'customer_aed',
       amount: aedTotal,
       label: 'Paid via agent',
     });
@@ -257,7 +258,7 @@ export function planMetalSaleJournals(input: MetalSaleJournalInput): MetalJourna
       lines.push({
         book: 'AED',
         referenceType: 'metal_sale_aed',
-        debit: 'agent',
+        debit: 'customer_aed',
         credit: aedProceedsCredit,
         amount: legs.paidAed,
         label: lotHasAed ? 'Collected via agent (split)' : 'AED proceeds (split)',
@@ -363,7 +364,7 @@ export function planMetalSaleJournals(input: MetalSaleJournalInput): MetalJourna
     lines.push({
       book: 'AED',
       referenceType: 'metal_sale_aed',
-      debit: 'agent',
+      debit: 'customer_aed',
       credit: aedProceedsCredit,
       amount: saleAed,
       label: lotHasAedBooked ? 'Collected via agent' : 'AED proceeds (INR-cost lot)',

@@ -2,7 +2,10 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import AsicTabBar from '@/components/asic/AsicTabBar';
-import { listBranchDeskVouchersAction } from '@/app/actions/icFundsActions';
+import {
+  listBranchDeskVouchersAction,
+  listLocationPartyVouchersAction,
+} from '@/app/actions/icFundsActions';
 import { HQ_IC_FUNDS_BRANCH_SLUG } from '@/lib/icFunds/hqBranch';
 import { FmtLedgerAmount } from '@/lib/icFunds/format';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
@@ -27,6 +30,7 @@ import BranchDetailDepositsPanel, {
   type BranchDetailContentTab,
   type BranchDepositModeTab,
 } from '@/components/ic-transfer/branch/BranchDetailDepositsPanel';
+import LocationPartyPrVouchersPanel from '@/components/ic-transfer/shared/LocationPartyPrVouchersPanel';
 import type { DateFilterRange } from '@/lib/dateFilterRange';
 import type { ICBranchDeposit, ICFundVoucher } from '@/types';
 
@@ -87,8 +91,14 @@ export default function BranchDetailTabs({
   depositModeCounts,
 }: Props) {
   const [tabInternal, setTabInternal] = useState<BranchDetailContentTab>('all');
-  const depositModeTab: BranchDepositModeTab =
-    modeTab && modeTab !== 'journals' ? modeTab : tabInternal !== 'journals' ? tabInternal : 'all';
+  const isDepositTab = (t: BranchDetailContentTab): t is BranchDepositModeTab =>
+    t === 'all' || t === 'cash' || t === 'metal';
+  const depositModeTab: BranchDepositModeTab = (() => {
+    const active = modeTab ?? tabInternal;
+    if (isDepositTab(active)) return active;
+    if (isDepositTab(tabInternal)) return tabInternal;
+    return 'all';
+  })();
   const viewTab: BranchDetailContentTab = modeTab ?? tabInternal;
   const setViewTab = (next: BranchDetailContentTab) => {
     onModeTabChange?.(next);
@@ -99,6 +109,8 @@ export default function BranchDetailTabs({
   const [journalsLoading, setJournalsLoading] = useState(false);
   const [journalsLoaded, setJournalsLoaded] = useState(false);
   const [viewJournal, setViewJournal] = useState<ICFundVoucher | null>(null);
+  const [paymentCount, setPaymentCount] = useState<number | undefined>(undefined);
+  const [receiptCount, setReceiptCount] = useState<number | undefined>(undefined);
 
   const icFundsSlug = branchSlug || HQ_IC_FUNDS_BRANCH_SLUG;
 
@@ -136,6 +148,28 @@ export default function BranchDetailTabs({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh when deposits change (ledger sync)
   }, [refreshToken]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const base = {
+        icBranchId,
+        startDate: range.startDate ?? undefined,
+        endDate: range.endDate ?? undefined,
+        limit: 500,
+      };
+      const [payments, receipts] = await Promise.all([
+        listLocationPartyVouchersAction({ ...base, voucherType: 'payment' }),
+        listLocationPartyVouchersAction({ ...base, voucherType: 'receipt' }),
+      ]);
+      if (cancelled) return;
+      setPaymentCount(payments.filter(v => v.status !== 'void').length);
+      setReceiptCount(receipts.filter(v => v.status !== 'void').length);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [icBranchId, range.startDate, range.endDate, refreshToken]);
+
   const journalCount = journalsLoaded ? journals.filter(v => v.status !== 'void').length : undefined;
 
   const tabs = useMemo(
@@ -143,9 +177,11 @@ export default function BranchDetailTabs({
       { id: 'all', label: 'All', count: depositModeCounts?.all },
       { id: 'cash', label: 'AED', count: depositModeCounts?.cash },
       { id: 'metal', label: 'Metal', count: depositModeCounts?.metal },
+      { id: 'payments', label: 'Payments', count: paymentCount },
+      { id: 'receipts', label: 'Receipts', count: receiptCount },
       { id: 'journals', label: 'Journals', count: journalCount },
     ],
-    [depositModeCounts, journalCount],
+    [depositModeCounts, journalCount, paymentCount, receiptCount],
   );
 
   const filteredJournalGroups = useMemo(() => {
@@ -179,7 +215,7 @@ export default function BranchDetailTabs({
           />
         </div>
 
-        {viewTab !== 'journals' ? (
+        {isDepositTab(viewTab) ? (
           <BranchDetailDepositsPanel
             icBranchId={icBranchId}
             branchSlug={branchSlug}
@@ -192,6 +228,28 @@ export default function BranchDetailTabs({
             canDelete={canDelete}
             onDeleted={onDeleted}
             hideModeTabs
+          />
+        ) : null}
+
+        {viewTab === 'payments' ? (
+          <LocationPartyPrVouchersPanel
+            voucherType="payment"
+            icBranchId={icBranchId}
+            range={range}
+            branchSlug={branchSlug}
+            refreshToken={refreshToken}
+            title="Party payments (AED)"
+          />
+        ) : null}
+
+        {viewTab === 'receipts' ? (
+          <LocationPartyPrVouchersPanel
+            voucherType="receipt"
+            icBranchId={icBranchId}
+            range={range}
+            branchSlug={branchSlug}
+            refreshToken={refreshToken}
+            title="Party receipts (AED)"
           />
         ) : null}
 

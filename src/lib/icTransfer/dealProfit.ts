@@ -13,6 +13,7 @@ import {
   allocateMetalLotCostInr,
 } from '@/lib/icTransfer/metalLotCost';
 import { resolveSaleInrDisplay } from '@/lib/icTransfer/metalSettlement';
+import { isSaleCompleted } from '@/lib/icTransfer/saleUnits';
 import {
   remainingStockWac,
   simulateWarehouseInventory,
@@ -112,6 +113,7 @@ export function icStockInflowFromMetalInrSales(
 ): WarehouseInventoryEvent[] {
   const events: WarehouseInventoryEvent[] = [];
   for (const s of sales) {
+    if (!isSaleCompleted(s.orderStatus)) continue;
     const units = metalInrSaleIcUnits(s);
     if (units <= 0) continue;
     if (throughIso && !throughIso(s.statusUpdatedAt || s.createdAt)) continue;
@@ -133,7 +135,9 @@ export function icStockSaleEvents(
   const events: WarehouseInventoryEvent[] = [];
   for (const s of sales) {
     if (isMetal(s.settlementMode)) continue;
-    if (throughIso && !throughIso(s.createdAt)) continue;
+    if (!isSaleCompleted(s.orderStatus)) continue;
+    const activityAt = s.statusUpdatedAt || s.createdAt;
+    if (throughIso && !throughIso(activityAt)) continue;
     const units = Number(s.units) || 0;
     if (units <= 0) continue;
     events.push({
@@ -269,6 +273,7 @@ function indexOneWarehouseSaleProfits(
 
   for (const s of whSales) {
     if (isMetal(s.settlementMode)) continue;
+    if (!isSaleCompleted(s.orderStatus)) continue;
     if (!inRange(s.createdAt, range)) continue;
     const margin = saleMargins.get(s.id);
     if (!margin) continue;

@@ -18,7 +18,11 @@ import { formatMetalGrams } from '@/lib/icTransfer/warehouseMatrixMetrics';
 import type { ICBranchDeposit } from '@/types';
 
 export type BranchDepositModeTab = 'all' | 'cash' | 'metal';
-export type BranchDetailContentTab = BranchDepositModeTab | 'journals';
+export type BranchDetailContentTab =
+  | BranchDepositModeTab
+  | 'journals'
+  | 'payments'
+  | 'receipts';
 
 const ALL_COLUMNS: ICTransferTableColumn[] = [
   { id: 'Date', label: 'Date', align: 'left' },
@@ -275,7 +279,8 @@ export default function BranchDetailDepositsPanel({
     const isMetal = d.settlementMode === 'metal';
     const showMode = modeTab === 'all';
     const showMetalCols = modeTab !== 'cash';
-    const showAedEarly = modeTab === 'cash';
+    /** Matches column order: All + Cash = AED before metal cols; Metal tab = AED after rate. */
+    const showAedEarly = modeTab === 'cash' || modeTab === 'all';
 
     const partyCells = (
       <>

@@ -78,27 +78,62 @@ export function filterCounterpartyDeposits(
   return deposits.filter(d => txnInCounterpartyRange(d.depositDate || d.createdAt, range));
 }
 
-export function filterManagerCustomerSales(
+export function filterManagerTaggedSales(
   sales: ICSale[],
   managerId: string,
-  customers: Pick<ICSupplier, 'id' | 'homeManagerId' | 'kind' | 'status'>[],
   range: DateFilterRange,
 ): ICSale[] {
   if (!managerId) return [];
-  const customerIds = new Set(
-    customers
-      .filter(
-        c =>
-          c.status !== 'inactive' &&
-          normalizeCounterpartyKind(c.kind) === 'customer' &&
-          c.homeManagerId === managerId,
-      )
-      .map(c => c.id),
+  return sales.filter(
+    s => s.managerId === managerId && txnInCounterpartyRange(s.createdAt, range),
   );
-  return sales.filter(s => {
-    const cid = s.counterpartyId || s.orderCustomerId;
-    return Boolean(cid && customerIds.has(cid) && txnInCounterpartyRange(s.createdAt, range));
-  });
+}
+
+/** @deprecated Use filterManagerTaggedSales */
+export function filterManagerCustomerSales(
+  sales: ICSale[],
+  managerId: string,
+  _customers: Pick<ICSupplier, 'id' | 'homeManagerId' | 'kind' | 'status'>[],
+  range: DateFilterRange,
+): ICSale[] {
+  return filterManagerTaggedSales(sales, managerId, range);
+}
+
+export function filterManagerTaggedPurchases(
+  purchases: ICPurchase[],
+  managerId: string,
+  range: DateFilterRange,
+): ICPurchase[] {
+  if (!managerId) return [];
+  return purchases.filter(
+    p => p.managerId === managerId && txnInCounterpartyRange(p.createdAt, range),
+  );
+}
+
+export function filterAgentTaggedPurchases(
+  purchases: ICPurchase[],
+  agentCounterpartyId: string,
+  range: DateFilterRange,
+): ICPurchase[] {
+  if (!agentCounterpartyId) return [];
+  return purchases.filter(
+    p =>
+      purchaseMatchesCounterparty(p, agentCounterpartyId) &&
+      txnInCounterpartyRange(p.createdAt, range),
+  );
+}
+
+export function filterAgentTaggedSales(
+  sales: ICSale[],
+  agentCounterpartyId: string,
+  range: DateFilterRange,
+): ICSale[] {
+  if (!agentCounterpartyId) return [];
+  return sales.filter(
+    s =>
+      saleMatchesCounterparty(s, agentCounterpartyId) &&
+      txnInCounterpartyRange(s.createdAt, range),
+  );
 }
 
 export function mergeCounterpartyActivity(

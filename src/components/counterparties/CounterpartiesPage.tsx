@@ -18,7 +18,14 @@ import {
   filterSuppliersForAdminPortal,
   filterSuppliersForBranchPortal,
 } from '@/lib/icTransfer/branchPortalScope';
-import { formatCounterpartyKindLabel, formatCounterpartyRolesLabel } from '@/lib/counterparties/roles';
+import {
+  COUNTERPARTY_KINDS,
+  formatCounterpartyKindLabel,
+  formatCounterpartyRolesLabel,
+  normalizeCounterpartyKind,
+  type CounterpartyKind,
+} from '@/lib/counterparties/roles';
+import AsicTabBar from '@/components/asic/AsicTabBar';
 import { COUNTERPARTIES_PAGE_TITLE } from '@/lib/counterparties/labels';
 import { counterpartiesFromRegistry } from '@/lib/counterparties/list';
 import { counterpartyDetailPath } from '@/lib/counterparties/navigation';
@@ -54,6 +61,7 @@ export default function CounterpartiesPage() {
   const { canWrite, buttonProps: wp } = useWriteAccess();
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [kindTab, setKindTab] = useState<'all' | CounterpartyKind>('all');
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<ICSupplier | null>(null);
 
@@ -64,17 +72,35 @@ export default function CounterpartiesPage() {
 
   const rows = useMemo(() => counterpartiesFromRegistry(scoped), [scoped]);
 
+  const kindScoped = useMemo(() => {
+    if (kindTab === 'all') return rows;
+    return rows.filter(r => r.supplier && normalizeCounterpartyKind(r.supplier.kind) === kindTab);
+  }, [rows, kindTab]);
+
   const filtered = useMemo(() => {
-    if (!searchTerm.trim()) return rows;
+    const base = kindScoped;
+    if (!searchTerm.trim()) return base;
     const q = searchTerm.toLowerCase();
-    return rows.filter(
+    return base.filter(
       r =>
         r.name.toLowerCase().includes(q) ||
         (r.code && r.code.toLowerCase().includes(q)) ||
         (r.phone && r.phone.includes(q)) ||
         (r.email && r.email.toLowerCase().includes(q)),
     );
-  }, [rows, searchTerm]);
+  }, [kindScoped, searchTerm]);
+
+  const kindTabs = useMemo(
+    () => [
+      { id: 'all', label: 'All', count: rows.length },
+      ...COUNTERPARTY_KINDS.map(k => ({
+        id: k,
+        label: formatCounterpartyKindLabel(k),
+        count: rows.filter(r => r.supplier && normalizeCounterpartyKind(r.supplier.kind) === k).length,
+      })),
+    ],
+    [rows],
+  );
 
   useEffect(() => {
     if (!highlightId) return;
@@ -140,6 +166,13 @@ export default function CounterpartiesPage() {
         />
 
         <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+          <div className="border-b border-slate-200 px-3 py-2">
+            <AsicTabBar
+              tabs={kindTabs}
+              activeTab={kindTab}
+              onTabChange={id => setKindTab(id as typeof kindTab)}
+            />
+          </div>
           <div className="flex flex-col gap-3 border-b border-slate-200 px-3 py-2 lg:flex-row lg:items-center lg:justify-between">
             <h3 className="text-sm font-medium text-slate-900">Directory</h3>
             <input

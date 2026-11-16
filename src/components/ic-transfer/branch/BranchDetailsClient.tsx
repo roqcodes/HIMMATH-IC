@@ -14,6 +14,8 @@ import BranchDetailKpiGrid from '@/components/ic-transfer/branch/BranchDetailKpi
 import BranchDetailTabs from '@/components/ic-transfer/branch/BranchDetailTabs';
 import BranchModal from '@/components/ic-transfer/branch/BranchModal';
 import BranchDepositModal from '@/components/ic-transfer/branch/BranchDepositModal';
+import IcFundsAccountVoucherModal from '@/components/ic-funds/IcFundsAccountVoucherModal';
+import { HQ_IC_FUNDS_BRANCH_ID } from '@/lib/icFunds/hqBranch';
 import type { BranchDetailContentTab } from '@/components/ic-transfer/branch/BranchDetailDepositsPanel';
 import type { ICBranchDeposit } from '@/types';
 import { computeBranchDepositKpis } from '@/lib/icTransfer/branchDepositKpis';
@@ -40,6 +42,7 @@ export default function BranchDetailsClient({
 
   const [editOpen, setEditOpen] = useState(false);
   const [depositModalOpen, setDepositModalOpen] = useState(false);
+  const [prModal, setPrModal] = useState<'payment' | 'receipt' | null>(null);
   const [depositRefreshToken, setDepositRefreshToken] = useState(0);
   const [viewTab, setViewTab] = useState<BranchDetailContentTab>('all');
   const [periodDeposits, setPeriodDeposits] = useState<ICBranchDeposit[]>([]);
@@ -124,6 +127,22 @@ export default function BranchDetailsClient({
             </button>
             <button
               type="button"
+              className={`${asicBtnOutline}${depositBlocked ? ' cursor-not-allowed opacity-50' : ''}`}
+              onClick={depositBlocked ? undefined : () => setPrModal('receipt')}
+              {...wp({ disabled: depositBlocked })}
+            >
+              Receipt
+            </button>
+            <button
+              type="button"
+              className={`${asicBtnOutline}${depositBlocked ? ' cursor-not-allowed opacity-50' : ''}`}
+              onClick={depositBlocked ? undefined : () => setPrModal('payment')}
+              {...wp({ disabled: depositBlocked })}
+            >
+              Payment
+            </button>
+            <button
+              type="button"
               className={`${asicBtnOutline}${!canWrite ? ' cursor-not-allowed opacity-50' : ''}`}
               onClick={canWrite ? () => setEditOpen(true) : undefined}
               {...wp()}
@@ -178,6 +197,23 @@ export default function BranchDetailsClient({
           void refreshAppData();
         }}
       />
+
+      {prModal ? (
+        <IcFundsAccountVoucherModal
+          open
+          branchId={HQ_IC_FUNDS_BRANCH_ID}
+          voucherType={prModal}
+          book="AED"
+          lockBook
+          fixedIcBranchId={branch.id}
+          defaultVoucherDate={new Date().toISOString().slice(0, 10)}
+          onClose={() => setPrModal(null)}
+          onSaved={() => {
+            setDepositRefreshToken(t => t + 1);
+            void refreshAppData();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

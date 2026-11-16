@@ -1,6 +1,6 @@
 import type { ICSupplier } from '@/types';
 
-export const COUNTERPARTY_KINDS = ['manager', 'customer'] as const;
+export const COUNTERPARTY_KINDS = ['manager', 'customer', 'agent'] as const;
 export type CounterpartyKind = (typeof COUNTERPARTY_KINDS)[number];
 
 export const COUNTERPARTY_ROLES = ['supplier', 'party', 'agent'] as const;
@@ -45,14 +45,17 @@ export function formatCounterpartyRolesLabel(roles: CounterpartyRole[] | null | 
 }
 
 export function normalizeCounterpartyKind(value: unknown): CounterpartyKind {
-  return String(value) === 'manager' ? 'manager' : 'customer';
+  const s = String(value);
+  if (s === 'manager') return 'manager';
+  if (s === 'agent') return 'agent';
+  return 'customer';
 }
 
 export function rolesForCounterpartyKind(
   kind: CounterpartyKind,
   roles: CounterpartyRole[] | undefined,
 ): CounterpartyRole[] {
-  if (kind === 'manager') return [];
+  if (kind === 'manager' || kind === 'agent') return [];
   return normalizeCounterpartyRoles(roles);
 }
 
@@ -62,6 +65,10 @@ export function counterpartyIsManager(cp: Pick<ICSupplier, 'kind'>): boolean {
 
 export function counterpartyIsCustomer(cp: Pick<ICSupplier, 'kind'>): boolean {
   return normalizeCounterpartyKind(cp.kind) === 'customer';
+}
+
+export function counterpartyIsAgent(cp: Pick<ICSupplier, 'kind'>): boolean {
+  return normalizeCounterpartyKind(cp.kind) === 'agent';
 }
 
 export function filterCounterpartiesByKind<T extends Pick<ICSupplier, 'kind' | 'status'>>(
@@ -80,5 +87,8 @@ export function filterCustomersUnderManager<T extends Pick<ICSupplier, 'kind' | 
 }
 
 export function formatCounterpartyKindLabel(kind: CounterpartyKind | null | undefined): string {
-  return normalizeCounterpartyKind(kind) === 'manager' ? 'Manager' : 'Customer';
+  const k = normalizeCounterpartyKind(kind);
+  if (k === 'manager') return 'Manager';
+  if (k === 'agent') return 'Agent';
+  return 'Customer';
 }

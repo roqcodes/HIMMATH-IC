@@ -45,7 +45,7 @@ describe('planMetalPurchaseJournals', () => {
       [
         ['metal_purchase', 'metal_stock', 'aed_settlement', 3_00_00_000, 'INR'],
         ['lab_test_purchase', 'aed_settlement', 'metal_stock', 12_000, 'INR'],
-        ['metal_purchase_aed', 'metal_aed', 'agent', 50_000, 'AED'],
+        ['metal_purchase_aed', 'metal_aed', 'customer_aed', 50_000, 'AED'],
       ],
     );
   });
@@ -172,7 +172,7 @@ describe('planMetalSaleJournals', () => {
     assert.deepEqual(
       lines.map(l => [l.referenceType, l.debit, l.credit, l.book]),
       [
-        ['metal_sale_aed', 'agent', 'metal_aed_proceeds', 'AED'],
+        ['metal_sale_aed', 'customer_aed', 'metal_aed_proceeds', 'AED'],
         ['metal_sale_receipt', 'aed_settlement', 'metal_sales', 'INR'],
         ['lab_test_sale', 'metal_sales', 'aed_settlement', 'INR'],
         ['metal_sale_cogs', 'metal_cost', 'metal_stock', 'INR'],
@@ -280,7 +280,7 @@ describe('planMetalSaleJournals', () => {
     assert.deepEqual(
       lines.map(l => [l.referenceType, l.debit, l.credit, l.amount, l.book]),
       [
-        ['metal_sale_aed', 'agent', 'metal_aed_proceeds', 175_000, 'AED'],
+        ['metal_sale_aed', 'customer_aed', 'metal_aed_proceeds', 175_000, 'AED'],
         ['metal_sale_receipt', 'customer', 'metal_sales', 5_000_000, 'INR'],
         ['metal_sale_receipt', 'aed_settlement', 'metal_sales', 5_000_000, 'INR'],
         ['metal_sale_cogs', 'metal_cost', 'metal_stock', 9_000_000, 'INR'],
@@ -307,7 +307,7 @@ describe('planMetalPurchaseJournals split', () => {
         ['metal_purchase', 'metal_stock', 'supplier', 5_000_000, 'INR'],
         ['metal_purchase', 'metal_stock', 'aed_settlement', 5_000_000, 'INR'],
         ['lab_test_purchase', 'aed_settlement', 'metal_stock', 12_000, 'INR'],
-        ['metal_purchase_aed', 'metal_aed', 'agent', 175_000, 'AED'],
+        ['metal_purchase_aed', 'metal_aed', 'customer_aed', 175_000, 'AED'],
       ],
     );
   });
@@ -327,7 +327,7 @@ describe('planMetalPurchaseJournals split', () => {
       [
         ['metal_purchase', 'metal_stock', 'supplier', 5_000_000, 'INR'],
         ['metal_purchase', 'metal_stock', 'aed_settlement', 5_000_000, 'INR'],
-        ['metal_purchase_aed', 'metal_aed', 'agent', 175_000, 'AED'],
+        ['metal_purchase_aed', 'metal_aed', 'customer_aed', 175_000, 'AED'],
       ],
     );
   });

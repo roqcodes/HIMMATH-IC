@@ -161,22 +161,25 @@ export async function ensureLinkedAccount(
   );
   if (existing.rows.length > 0) {
     const accountId = String(existing.rows[0].id);
+    const linkedType = params.sourceType === 'ic_branch' ? 'bank' : null;
     await client.query(
       `UPDATE ic_fund_accounts
        SET source_type = COALESCE(source_type, $1),
            source_id = COALESCE(source_id, $2),
-           phone = COALESCE($3, phone)
+           phone = COALESCE($3, phone),
+           account_type = CASE WHEN $5::text IS NOT NULL THEN $5 ELSE account_type END
        WHERE id = $4`,
-      [params.sourceType, sourceId, params.phone || null, accountId],
+      [params.sourceType, sourceId, params.phone || null, accountId, linkedType],
     );
     return accountId;
   }
 
+  const linkedAccountType = params.sourceType === 'ic_branch' ? 'bank' : 'personal';
   const id = `ICFA-${crypto.randomUUID().slice(0, 10).toUpperCase()}`;
   const insertSql = `INSERT INTO ic_fund_accounts (
          id, branch_id, name, account_type, opening_balance, notes,
          source_type, source_id, phone
-       ) VALUES ($1, $2, $3, 'personal', 0, $4, $5, $6, $7)`;
+       ) VALUES ($1, $2, $3, $7, 0, $4, $5, $6, $8)`;
   const insertParams = [
     id,
     params.branchId,
@@ -184,6 +187,7 @@ export async function ensureLinkedAccount(
     `Auto-synced from IC Transfer (${params.sourceType.replace('ic_', '')})`,
     params.sourceType,
     sourceId,
+    linkedAccountType,
     params.phone || null,
   ];
 
@@ -207,6 +211,7 @@ export async function ensureLinkedAccount(
     insertParams[4],
     insertParams[5],
     insertParams[6],
+    insertParams[7],
   ]);
   if (altInserted) return id;
 
@@ -966,11 +971,12 @@ async function resolveSaleBranchId(_client: DbClient, _sale: Record<string, unkn
 export async function syncICCounterpartyFundAccount(counterpartyId: string): Promise<void> {
   try {
     const res = await query(
-      `SELECT id, name, phone, email, branch_id, opening_aed, opening_inr
+      `SELECT id, name, phone, email, branch_id, opening_aed, opening_inr, kind
        FROM ic_counterparties WHERE id = $1 LIMIT 1`,
       [counterpartyId],
     );
     if (res.rows.length === 0) return;
+    if (String(res.rows[0].kind) !== 'customer') return;
     const row = res.rows[0];
     const aedAccountId = await ensureLinkedAccount(db, {
       branchId: HQ_IC_FUNDS_BRANCH_ID,

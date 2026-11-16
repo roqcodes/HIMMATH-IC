@@ -11,6 +11,7 @@ import {
   updateCognitoUserName,
 } from '@/app/actions/cognitoActions';
 import { requireICFundsAccess } from '@/lib/icFunds/requireAccess';
+import { assertManagerCustomerAllowedAtIcBranch } from '@/lib/icTransfer/icBranchManagerScope';
 import { sortDealJournals } from '@/lib/icTransfer/warehouseJournalLabels';
 import { ensureHqIcFundsBranch } from '@/lib/icFunds/ensureHqBranch';
 import { HQ_IC_FUNDS_BRANCH_ID, HQ_IC_FUNDS_BRANCH_SLUG, isHqIcFundsBranch, isHqIcFundsBranchId } from '@/lib/icFunds/hqBranch';
@@ -230,6 +231,23 @@ function accountingVoucherPartyRef(
   _credit: Record<string, unknown>,
 ): { referenceType: string; referenceId: string } | null {
   return null;
+}
+
+function isIcBranchFundAccount(row: Record<string, unknown>): boolean {
+  return String(row.source_type ?? '').toLowerCase() === 'ic_branch';
+}
+
+function counterpartyIdFromFundAccount(row: Record<string, unknown>): string | null {
+  if (String(row.source_type ?? '').toLowerCase() !== 'ic_counterparty') return null;
+  const sid = String(row.source_id ?? '').trim();
+  if (!sid || sid.startsWith('aed_agent:')) return null;
+  return sid;
+}
+
+function icBranchIdFromFundAccount(row: Record<string, unknown>): string | null {
+  if (!isIcBranchFundAccount(row)) return null;
+  const sid = String(row.source_id ?? '').trim();
+  return sid || null;
 }
 
 function accountBalanceSelectSql(opts?: {
@@ -1275,6 +1293,104 @@ export async function listWarehouseDealVouchersAction(params: {
   }
 }
 
+/** Cash P&R posted against a UAE branch till or India warehouse till. */
+export async function listLocationPartyVouchersAction(params: {
+  voucherType: 'payment' | 'receipt';
+  icBranchId?: string;
+  warehouseId?: string;
+  startDate?: string;
+  endDate?: string;
+  limit?: number;
+}): Promise<ICFundVoucher[]> {
+  const icBranchId = params.icBranchId?.trim() || '';
+  const warehouseId = params.warehouseId?.trim() || '';
+  if (Boolean(icBranchId) === Boolean(warehouseId)) return [];
+
+  const access = await requireICFundsAccess(HQ_IC_FUNDS_BRANCH_ID, 'read');
+  if (!access.ok) return [];
+
+  const limit = clampVoucherListLimit(params.limit ?? 500);
+  const startDate = params.startDate?.trim() || null;
+  const endDate = params.endDate?.trim() || null;
+  const voucherType = params.voucherType;
+
+  try {
+    if (icBranchId) {
+      const { icBranchTillSourceIdsForLookup } = await import('@/lib/icFunds/icBranchTill');
+      const sourceIds = icBranchTillSourceIdsForLookup(icBranchId);
+      const res = await query(
+        `SELECT ${VOUCHER_DETAIL_SELECT_COLUMNS}, 'AED'::text AS book, v.manager_id::text AS manager_id
+         ${VOUCHER_FROM_SQL}
+         WHERE v.branch_id = $1
+           AND v.voucher_type = $2
+           AND v.status IS DISTINCT FROM 'void'
+           AND (
+             (da.source_type = 'ic_branch' AND da.source_id = ANY($3::text[]))
+             OR (ca.source_type = 'ic_branch' AND ca.source_id = ANY($3::text[]))
+           )
+           AND ($4::date IS NULL OR v.voucher_date >= $4::date)
+           AND ($5::date IS NULL OR v.voucher_date <= $5::date)
+         ORDER BY v.voucher_date DESC, v.voucher_no DESC, v.created_at DESC
+         LIMIT $6`,
+        [HQ_IC_FUNDS_BRANCH_ID, voucherType, sourceIds, startDate, endDate, limit],
+      );
+      return res.rows.map(r => ({
+        ...mapVoucher(r as Record<string, unknown>),
+        managerId: r.manager_id ? String(r.manager_id) : undefined,
+      }));
+    }
+
+    const res = await query(
+      `SELECT
+         v.id,
+         v.branch_id,
+         v.voucher_no,
+         v.voucher_type,
+         v.voucher_date,
+         v.debit_account_id,
+         v.credit_account_id,
+         v.amount,
+         v.notes,
+         NULL::text AS created_by,
+         v.created_by_name,
+         NULL::text AS created_by_user_id,
+         v.created_at,
+         v.status,
+         da.name AS debit_account_name,
+         da.account_type AS debit_account_type,
+         ca.name AS credit_account_name,
+         ca.account_type AS credit_account_type,
+         v.voided_at,
+         NULL::text AS voided_by_name,
+         v.reference_type,
+         v.reference_id,
+         v.manager_id::text AS manager_id,
+         'INR'::text AS book
+       ${INR_VOUCHER_FROM_SQL}
+       WHERE v.branch_id = $1
+         AND v.reference_type = 'party_pr'
+         AND v.voucher_type = $2
+         AND v.status = 'active'
+         AND (
+           (da.source_type = 'ic_warehouse' AND da.source_id = $3::text)
+           OR (ca.source_type = 'ic_warehouse' AND ca.source_id = $3::text)
+         )
+         AND ($4::date IS NULL OR v.voucher_date >= $4::date)
+         AND ($5::date IS NULL OR v.voucher_date <= $5::date)
+       ORDER BY v.voucher_date DESC, v.voucher_no DESC, v.created_at DESC
+       LIMIT $6`,
+      [HQ_IC_FUNDS_BRANCH_ID, voucherType, warehouseId, startDate, endDate, limit],
+    );
+    return res.rows.map(r => ({
+      ...mapVoucher(r as Record<string, unknown>),
+      managerId: r.manager_id ? String(r.manager_id) : undefined,
+    }));
+  } catch (err) {
+    logger.error({ err, icBranchId, warehouseId, voucherType }, 'listLocationPartyVouchersAction');
+    return [];
+  }
+}
+
 /** HQ AED journals for branch desk customer deposits (reference ic_branch_deposit). */
 export async function listBranchDeskVouchersAction(params: {
   icBranchId: string;
@@ -1887,6 +2003,8 @@ export async function postICFundVoucherAction(input: unknown): Promise<ActionRes
           createdByName: access.user.name ?? access.user.id ?? null,
           referenceType: partyRef?.referenceType ?? null,
           referenceId: partyRef?.referenceId ?? null,
+          managerId: parsed.data.managerId ?? null,
+          aedAgentId: parsed.data.aedAgentId?.trim() || null,
         });
         if (!voucherId) throw new Error('Failed to save voucher');
         return voucherId;
@@ -1957,6 +2075,23 @@ export async function postICFundVoucherAction(input: unknown): Promise<ActionRes
         throw new Error(currencyError);
       }
 
+      const icBranchId = icBranchIdFromFundAccount(debit) ?? icBranchIdFromFundAccount(credit);
+      if (icBranchId) {
+        if (!parsed.data.managerId?.trim()) {
+          throw new Error('Manager is required when using a branch locker.');
+        }
+        const customerId =
+          counterpartyIdFromFundAccount(debit) ?? counterpartyIdFromFundAccount(credit);
+        if (customerId) {
+          const scopeErr = await assertManagerCustomerAllowedAtIcBranch({
+            icBranchId,
+            managerId: parsed.data.managerId,
+            customerId,
+          });
+          if (scopeErr) throw new Error(scopeErr.error);
+        }
+      }
+
       await client.query(
         `INSERT INTO ic_fund_voucher_counters (branch_id, last_no)
          VALUES ($1, 0)
@@ -1979,8 +2114,8 @@ export async function postICFundVoucherAction(input: unknown): Promise<ActionRes
            id, branch_id, voucher_no, voucher_type, voucher_date,
            debit_account_id, credit_account_id, amount, notes,
            created_by, created_by_name, created_by_user_id,
-           reference_type, reference_id, idempotency_key
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+           reference_type, reference_id, idempotency_key, manager_id, aed_agent_id
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
         [
           voucherId,
           parsed.data.branchId,
@@ -1997,6 +2132,8 @@ export async function postICFundVoucherAction(input: unknown): Promise<ActionRes
           partyRef?.referenceType ?? null,
           partyRef?.referenceId ?? null,
           parsed.data.idempotencyKey ?? null,
+          parsed.data.managerId ?? null,
+          parsed.data.aedAgentId?.trim() || null,
         ],
       );
       return voucherId;
@@ -2175,7 +2312,23 @@ export async function getICFundStatementAction(params: {
     }
 
     const vRes = await query(
-      `${VOUCHER_DETAIL_SELECT_SQL}
+      `SELECT ${VOUCHER_DETAIL_SELECT_COLUMNS},
+         COALESCE(debit_branch.name, credit_branch.name, deposit_branch.name) AS transaction_branch_name
+       ${VOUCHER_FROM_SQL}
+       LEFT JOIN ic_branch_deposits statement_deposit
+         ON v.reference_type = 'ic_branch_deposit'
+        AND statement_deposit.id::text = v.reference_id
+       LEFT JOIN ic_branches debit_branch
+         ON da.source_type = 'ic_branch'
+        AND (debit_branch.id::text = da.source_id
+          OR 'branch_cash_wh_' || debit_branch.id::text = da.source_id
+          OR debit_branch.id = statement_deposit.ic_branch_id)
+       LEFT JOIN ic_branches credit_branch
+         ON ca.source_type = 'ic_branch'
+        AND (credit_branch.id::text = ca.source_id
+          OR 'branch_cash_wh_' || credit_branch.id::text = ca.source_id
+          OR credit_branch.id = statement_deposit.ic_branch_id)
+       LEFT JOIN ic_branches deposit_branch ON deposit_branch.id = statement_deposit.ic_branch_id
        WHERE ${clauses.join(' AND ')}
        ORDER BY v.voucher_date ASC, v.voucher_no ASC, v.created_at ASC`,
       values,
@@ -2206,6 +2359,7 @@ export async function getICFundStatementAction(params: {
       const counterpartyAccountId = debit > 0 ? v.creditAccountId : v.debitAccountId;
       lines.push({
         date: v.voucherDate,
+        branchName: row.transaction_branch_name ? String(row.transaction_branch_name) : undefined,
         voucherNo: v.voucherNo,
         voucherType: v.voucherType,
         particulars: counterparty,

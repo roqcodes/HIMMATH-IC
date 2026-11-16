@@ -69,6 +69,22 @@ export const icFormFieldStack = `flex min-w-0 flex-col ${icFormStackGap}`;
 /** Two-column field rows (rate/units, warehouse/lot). */
 export const icFormRowGrid = `grid grid-cols-1 ${icFormStackGap} sm:grid-cols-2`;
 
+/** Dense voucher modals: full width of parent, 12-col on lg for field spans. */
+export const icVoucherModalFieldGrid =
+  'grid w-full min-w-0 grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2 lg:grid-cols-12 [&>*]:min-w-0';
+
+/** Payment/receipt modals: manager, party account, optional agent — equal thirds, full row width. */
+export const icVoucherPartyFieldsGrid =
+  'grid w-full min-w-0 grid-cols-1 gap-x-3 gap-y-1 sm:col-span-2 sm:grid-cols-3 lg:col-span-12';
+
+export const icVoucherPartyFieldsGridTwoCol =
+  'grid w-full min-w-0 grid-cols-1 gap-x-3 gap-y-1 sm:col-span-2 sm:grid-cols-2 lg:col-span-12';
+
+/** Voucher date / amount side by side on lg. */
+export const icVoucherDateAmountFieldClass = 'sm:col-span-1 lg:col-span-6';
+
+export const icVoucherFullRowFieldClass = 'sm:col-span-2 lg:col-span-12';
+
 /** 12-col settlement fields — matches modal row spacing. */
 export const icFormGrid =
   'grid grid-cols-1 gap-x-3 gap-y-3 sm:grid-cols-2 lg:grid-cols-12 lg:items-start lg:justify-items-stretch [&>*]:min-w-0 lg:[&>*:not([class*="col-span"])]:col-span-6';

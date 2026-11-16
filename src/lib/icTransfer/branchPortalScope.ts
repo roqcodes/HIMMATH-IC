@@ -1,11 +1,7 @@
 import type { Branch, ICPurchase, ICSale, ICRateGroup, ICWarehouse, User, ICSupplier } from '@/types';
 import { HQ_IC_FUNDS_BRANCH_ID } from '@/lib/icFunds/hqBranch';
 import { warehouseShortSlug } from '@/lib/icTransfer/warehouseSlug';
-import {
-  filterCounterpartiesByKind,
-  filterCounterpartiesByRole,
-  filterCustomersUnderManager,
-} from '@/lib/counterparties/roles';
+import { filterCounterpartiesByKind } from '@/lib/counterparties/roles';
 
 export type ICTransferPortalMode = 'admin' | 'branch';
 
@@ -79,25 +75,17 @@ export function filterCounterpartiesForManagers<T extends ICSupplier>(
 export function filterCounterpartiesForPurchase<T extends ICSupplier>(
   list: T[],
   branchId?: string,
-  managerId?: string,
+  _managerId?: string,
 ): T[] {
-  const base = filterCounterpartiesByRole(
-    filterCounterpartiesByKind(scopeCounterparties(list, branchId), 'customer'),
-    'supplier',
-  );
-  return managerId ? filterCustomersUnderManager(base, managerId) : base;
+  return filterCounterpartiesByKind(scopeCounterparties(list, branchId), 'customer');
 }
 
 export function filterCounterpartiesForSales<T extends ICSupplier>(
   list: T[],
   branchId?: string,
-  managerId?: string,
+  _managerId?: string,
 ): T[] {
-  const base = filterCounterpartiesByRole(
-    filterCounterpartiesByKind(scopeCounterparties(list, branchId), 'customer'),
-    'party',
-  );
-  return managerId ? filterCustomersUnderManager(base, managerId) : base;
+  return filterCounterpartiesByKind(scopeCounterparties(list, branchId), 'customer');
 }
 
 export function isBranchDeskWarehouse(warehouse: Pick<ICWarehouse, 'deskKind'>): boolean {
@@ -116,7 +104,7 @@ export function filterCounterpartiesForAgent<T extends ICSupplier>(
   list: T[],
   branchId?: string,
 ): T[] {
-  return filterCounterpartiesByRole(scopeCounterparties(list, branchId), 'agent');
+  return filterCounterpartiesByKind(scopeCounterparties(list, branchId), 'agent');
 }
 
 export function filterPurchasesForBranchPortal(

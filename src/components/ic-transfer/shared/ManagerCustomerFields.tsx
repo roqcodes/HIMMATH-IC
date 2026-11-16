@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo } from 'react';
+import { asicInput } from '@/components/asic/ui';
 import ICTransferFormField from '@/components/ic-transfer/shared/ICTransferFormField';
 import EntitySearchSelect from '@/components/ui/EntitySearchSelect';
 import { useApp } from '@/context/AppContext';
@@ -28,6 +29,13 @@ type Props = {
   onCustomerChange: (id: string) => void;
   entityLedgerById?: Record<string, EntityLedgerBalances>;
   disabled?: boolean;
+  /** Only render manager picker (customer chosen elsewhere). */
+  managerOnly?: boolean;
+  /** Single column in parent grid — no full-width row span. */
+  inline?: boolean;
+  /** Children participate in parent grid (e.g. 3-col voucher row). */
+  contentsGrid?: boolean;
+  inputClassName?: string;
 };
 
 export default function ManagerCustomerFields({
@@ -40,6 +48,10 @@ export default function ManagerCustomerFields({
   onCustomerChange,
   entityLedgerById,
   disabled,
+  managerOnly,
+  inline,
+  contentsGrid,
+  inputClassName = asicInput,
 }: Props) {
   const { icSuppliers } = useApp();
 
@@ -88,11 +100,18 @@ export default function ManagerCustomerFields({
     }
   }, [managerId, customers, customerId, onCustomerChange]);
 
+  const wrapClass = contentsGrid
+    ? 'contents'
+    : inline
+      ? 'min-w-0'
+      : 'grid grid-cols-1 gap-x-3 gap-y-1 sm:col-span-2 sm:grid-cols-2';
+
   return (
-    <div className="grid grid-cols-1 gap-x-3 gap-y-1 sm:col-span-2 sm:grid-cols-2">
+    <div className={wrapClass}>
       <ICTransferFormField
         label={`${MANAGER_FIELD_LABEL} *`}
-        className={noManagersAssigned ? 'sm:col-span-2' : undefined}
+        compact={inline || contentsGrid}
+        className={`min-w-0 ${noManagersAssigned && !contentsGrid ? 'sm:col-span-2' : ''}`}
       >
         {noManagersAssigned ? (
           <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -105,18 +124,24 @@ export default function ManagerCustomerFields({
             onSelectId={id => onManagerChange(id)}
             placeholder={managerPlaceholder}
             disabled={disabled}
+            inputClassName={inputClassName}
+            showDetailLine={!inline}
           />
         )}
       </ICTransferFormField>
-      <ICTransferFormField label={`${CUSTOMER_FIELD_LABEL} *`}>
-        <EntitySearchSelect
-          options={customerOptions}
-          selectedId={customerId}
-          onSelectId={id => onCustomerChange(id)}
-          placeholder={managerId ? 'Select customer' : 'Pick a manager first'}
-          disabled={disabled || !managerId}
-        />
-      </ICTransferFormField>
+      {managerOnly ? null : (
+        <ICTransferFormField label={`${CUSTOMER_FIELD_LABEL} *`} compact={inline || contentsGrid} className="min-w-0">
+          <EntitySearchSelect
+            options={customerOptions}
+            selectedId={customerId}
+            onSelectId={id => onCustomerChange(id)}
+            placeholder={managerId ? 'Select customer' : 'Pick a manager first'}
+            disabled={disabled || !managerId}
+            inputClassName={inputClassName}
+            showDetailLine={!inline}
+          />
+        </ICTransferFormField>
+      )}
     </div>
   );
 }

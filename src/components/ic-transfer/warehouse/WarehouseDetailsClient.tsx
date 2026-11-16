@@ -22,6 +22,7 @@ import { useICTransferFilters } from '@/components/ic-transfer/ui';
 import AddPurchaseModal from '@/components/ic-transfer/purchase/AddPurchaseModal';
 import AddSaleModal from '@/components/ic-transfer/sales/AddSaleModal';
 import { asicBtnOutline } from '@/components/asic/ui';
+import PartyPaymentReceiptModal from '@/components/ic-transfer/shared/PartyPaymentReceiptModal';
 import { useWriteAccess } from '@/context/RbacWriteContext';
 import { formatStreetCityState } from '@/lib/geo/simpleAddress';
 
@@ -49,6 +50,8 @@ export default function WarehouseDetailsClient({
   const [editOpen, setEditOpen] = useState(false);
   const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
   const [saleModalOpen, setSaleModalOpen] = useState(false);
+  const [prModal, setPrModal] = useState<'payment' | 'receipt' | null>(null);
+  const [prRefreshToken, setPrRefreshToken] = useState(0);
 
   const salesPaused = !icTransferSettings.salesEnabled;
 
@@ -178,6 +181,22 @@ export default function WarehouseDetailsClient({
             <button
               type="button"
               className={`${asicBtnOutline}${!canWrite ? ' cursor-not-allowed opacity-50' : ''}`}
+              onClick={canWrite ? () => setPrModal('receipt') : undefined}
+              {...wp()}
+            >
+              Receipt
+            </button>
+            <button
+              type="button"
+              className={`${asicBtnOutline}${!canWrite ? ' cursor-not-allowed opacity-50' : ''}`}
+              onClick={canWrite ? () => setPrModal('payment') : undefined}
+              {...wp()}
+            >
+              Payment
+            </button>
+            <button
+              type="button"
+              className={`${asicBtnOutline}${!canWrite ? ' cursor-not-allowed opacity-50' : ''}`}
               onClick={canWrite ? () => setEditOpen(true) : undefined}
               {...wp()}
             >
@@ -203,6 +222,7 @@ export default function WarehouseDetailsClient({
         portalMode={portalMode}
         branchSlug={branchSlug}
         purchaseBranchId={purchaseBranchId}
+        refreshToken={prRefreshToken}
       />
 
       <WarehouseModal
@@ -226,6 +246,16 @@ export default function WarehouseDetailsClient({
         warehouses={warehouse ? [warehouse] : undefined}
         lockedWarehouseId={warehouse.id}
       />
+
+      {prModal ? (
+        <PartyPaymentReceiptModal
+          open
+          mode={{ book: 'INR', warehouse }}
+          voucherType={prModal}
+          onClose={() => setPrModal(null)}
+          onSaved={() => setPrRefreshToken(t => t + 1)}
+        />
+      ) : null}
     </div>
   );
 }

@@ -59,17 +59,11 @@ export async function assertManagerCustomerAllowedAtWarehouse(params: {
     return { error: 'Select a customer counterparty.' };
   }
 
-  const homeManagerId = custRes.rows[0].home_manager_id ? String(custRes.rows[0].home_manager_id) : null;
-
   if (deskKind === 'branch' && assigned.length === 0) {
     return { error: 'Assign at least one manager to this branch before recording deposits.' };
   }
 
   if (assigned.length === 0) {
-    if (!managerId) return null;
-    if (homeManagerId && homeManagerId !== managerId) {
-      return { error: 'Customer does not belong to this manager.' };
-    }
     return null;
   }
 
@@ -78,9 +72,6 @@ export async function assertManagerCustomerAllowedAtWarehouse(params: {
   }
   if (!assigned.includes(managerId)) {
     return { error: 'This manager is not assigned to the selected warehouse.' };
-  }
-  if (!homeManagerId || homeManagerId !== managerId) {
-    return { error: 'Customer does not belong to this manager.' };
   }
 
   return null;

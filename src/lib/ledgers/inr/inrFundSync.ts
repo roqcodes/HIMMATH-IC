@@ -266,6 +266,8 @@ export async function postInrVoucherInTx(
     referenceType?: string | null;
     referenceId?: string | null;
     createdByName?: string | null;
+    managerId?: string | null;
+    aedAgentId?: string | null;
     /** When false, allow multiple active journals with the same reference (metal split legs). Default true. */
     dedupeReference?: boolean;
   },
@@ -309,8 +311,8 @@ export async function postInrVoucherInTx(
       `INSERT INTO inr_fund_vouchers (
          id, branch_id, voucher_no, voucher_type, voucher_date,
          debit_account_id, credit_account_id, amount, notes,
-         created_by_name, reference_type, reference_id, status
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'active')`,
+         created_by_name, reference_type, reference_id, status, manager_id, aed_agent_id
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'active',$13,$14)`,
       [
         id,
         params.branchId,
@@ -324,6 +326,8 @@ export async function postInrVoucherInTx(
         params.createdByName ?? SYNC_ACTOR,
         params.referenceType ?? null,
         params.referenceId ?? null,
+        params.managerId ?? null,
+        params.aedAgentId?.trim() || null,
       ],
     );
     return id;

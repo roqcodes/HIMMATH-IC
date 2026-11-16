@@ -22,12 +22,50 @@ export function isVoucherPartyAccount(
   if (st === 'ic_counterparty') {
     if (BLOCKED_COUNTERPARTY_SOURCE_IDS.has(sid)) return false;
     if (BLOCKED_SOURCE_ID_PREFIXES.some(prefix => sid.startsWith(prefix))) return false;
+    if (sid.startsWith('aed_agent:')) return false;
     return true;
   }
   if (st === 'ic_customer' || st === 'ic_supplier') return true;
   if (!st) return true;
-  if (st === 'ic_warehouse') return false;
+  if (st === 'ic_warehouse' || st === 'ic_branch') return false;
   return false;
+}
+
+export function isCashBankLedgerAccount(
+  account: Pick<ICFundAccount, 'accountType' | 'sourceType'>,
+): boolean {
+  if (account.accountType !== 'bank') return false;
+  return true;
+}
+
+const MANUAL_NON_CASH_TYPES: ReadonlySet<ICFundAccountType> = new Set([
+  'personal',
+  'income',
+  'profit',
+  'expense',
+  'd_expense',
+  'capital',
+]);
+
+/** Payment/receipt “other” side — customers and manually created ledgers, not cash boxes. */
+export function isVoucherNonCashSideAccount(
+  account: Pick<ICFundAccount, 'accountType' | 'sourceType' | 'sourceId'>,
+): boolean {
+  if (isCashBankLedgerAccount(account)) return false;
+  if (isVoucherPartyAccount(account)) return true;
+  const st = (account.sourceType ?? '').toLowerCase();
+  if (st === 'ic_system' || st === 'system' || st === 'ic_warehouse' || st === 'ic_branch') return false;
+  if (!st && MANUAL_NON_CASH_TYPES.has(account.accountType as ICFundAccountType)) return true;
+  return false;
+}
+
+export function icBranchIdFromCashAccount(
+  account: Pick<ICFundAccount, 'sourceType' | 'sourceId'> | undefined,
+): string | null {
+  if (!account) return null;
+  if ((account.sourceType ?? '').toLowerCase() !== 'ic_branch') return null;
+  const id = String(account.sourceId ?? '').trim();
+  return id || null;
 }
 
 /** Counterparty / customer / supplier ledgers (excludes deal & clearing system accounts). */
@@ -38,8 +76,7 @@ export function voucherPartyAccountSubtitle(
 ): string {
   const st = account.sourceType ?? '';
   const sid = account.sourceId ?? '';
-  if (st === 'ic_counterparty' && sid.startsWith('aed_agent:')) return 'Agent';
-  if (st === 'ic_counterparty') return 'Counterparty';
+  if (st === 'ic_counterparty') return 'Customer';
   if (st === 'ic_customer') return 'Customer';
   if (st === 'ic_supplier') return 'Supplier';
   if (!st) return 'Party';
@@ -68,6 +105,7 @@ export function ledgerAccountTypeCaption(
     const st = (account.sourceType ?? '').toLowerCase();
     if (st === 'ic_system' || st === 'system') return 'System ledger';
     if (st === 'ic_warehouse') return 'Warehouse';
+    if (st === 'ic_branch') return 'Branch locker';
     if (st) return 'Internal ledger';
   }
   return accountTypeLabel(account.accountType as ICFundAccountType);

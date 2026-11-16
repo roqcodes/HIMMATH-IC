@@ -40,18 +40,15 @@ export const addSupplierSchema = z.object({
   subdivision: z.string().optional().nullable().or(z.literal('')),
   locality: z.string().optional().nullable().or(z.literal('')),
   branchId: z.string().optional().nullable(),
-  kind: z.enum(['manager', 'customer']).optional().default('customer'),
+  kind: z.enum(['manager', 'customer', 'agent']).optional().default('customer'),
   homeManagerId: z.string().uuid().optional().nullable(),
   roles: z.array(z.enum(['supplier', 'party', 'agent'])).optional(),
 }).superRefine((data, ctx) => {
   const kind = data.kind ?? 'customer';
-  if (kind === 'manager') return;
+  if (kind === 'manager' || kind === 'agent') return;
   const roles = data.roles ?? [];
   if (roles.length < 1) {
     ctx.addIssue({ code: 'custom', message: 'Pick at least one customer role', path: ['roles'] });
-  }
-  if (!data.homeManagerId?.trim()) {
-    ctx.addIssue({ code: 'custom', message: 'Home manager is required for customers', path: ['homeManagerId'] });
   }
 });
 

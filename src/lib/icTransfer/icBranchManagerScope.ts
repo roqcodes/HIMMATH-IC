@@ -51,8 +51,6 @@ export async function assertManagerCustomerAllowedAtIcBranch(params: {
     return { error: 'Select a customer counterparty.' };
   }
 
-  const homeManagerId = custRes.rows[0].home_manager_id ? String(custRes.rows[0].home_manager_id) : null;
-
   if (assigned.length === 0) {
     return { error: 'Assign at least one manager to this branch before recording deposits.' };
   }
@@ -62,9 +60,6 @@ export async function assertManagerCustomerAllowedAtIcBranch(params: {
   }
   if (!assigned.includes(managerId)) {
     return { error: 'This manager is not assigned to the selected branch.' };
-  }
-  if (!homeManagerId || homeManagerId !== managerId) {
-    return { error: 'Customer does not belong to this manager.' };
   }
 
   return null;

@@ -7,8 +7,8 @@ import { useApp } from '@/context/AppContext';
 import { findCounterpartyByRouteParam } from '@/lib/counterparties/counterpartySlug';
 import { counterpartyListPath } from '@/lib/counterparties/navigation';
 import {
+  counterpartyIsAgent,
   counterpartyIsManager,
-  filterCustomersUnderManager,
   formatCounterpartyRolesLabel,
 } from '@/lib/counterparties/roles';
 import CounterpartyDetailTabs from '@/components/counterparties/CounterpartyDetailTabs';
@@ -79,15 +79,17 @@ export default function CounterpartyDetailsClient({ counterpartyId, branchSlug }
   );
 
   const isManager = counterparty ? counterpartyIsManager(counterparty) : false;
+  const isAgent = counterparty ? counterpartyIsAgent(counterparty) : false;
+  const noPartyLedger = isManager || isAgent;
 
   const reloadLedgerKpis = useCallback(() => {
-    if (!counterparty?.id || isManager) return;
+    if (!counterparty?.id || noPartyLedger) return;
     void getCounterpartyLedgerKpisAction({
       counterpartyId: counterparty.id,
       startDate: range.startDate ?? undefined,
       endDate: range.endDate ?? undefined,
     }).then(setLedger);
-  }, [counterparty?.id, range.startDate, range.endDate, isManager]);
+  }, [counterparty?.id, range.startDate, range.endDate, noPartyLedger]);
 
   useEffect(() => {
     reloadLedgerKpis();
@@ -97,11 +99,6 @@ export default function CounterpartyDetailsClient({ counterpartyId, branchSlug }
     if (!counterparty?.id || !voucherPostedTargetsCounterparty(detail, counterparty.id)) return;
     reloadLedgerKpis();
   });
-
-  const managerCustomers = useMemo(
-    () => (counterparty ? filterCustomersUnderManager(icSuppliers, counterparty.id) : []),
-    [icSuppliers, counterparty],
-  );
 
   const managerPeriodDeposits = useMemo(
     () => filterCounterpartyDeposits(managerDeposits, range),
@@ -135,7 +132,7 @@ export default function CounterpartyDetailsClient({ counterpartyId, branchSlug }
     branchSlug,
   });
 
-  const showPartyLedgerActions = !isManager;
+  const showPartyLedgerActions = !noPartyLedger;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -188,7 +185,7 @@ export default function CounterpartyDetailsClient({ counterpartyId, branchSlug }
 
       {isManager ? (
         <AsicKpiStrip
-          columns={4}
+          columns={3}
           metrics={[
             {
               label: 'Period deposits (AED)',
@@ -201,18 +198,23 @@ export default function CounterpartyDetailsClient({ counterpartyId, branchSlug }
               hint: 'UAE branch desks',
             },
             {
-              label: 'Customers',
-              value: String(managerCustomers.length),
-              hint: 'Active under manager',
-            },
-            {
               label: 'Scope',
               value: 'Manager',
-              hint: 'No manager ledger balance',
+              hint: 'Deals & P&R tagged with this manager',
             },
           ]}
         />
-      ) : (
+      ) : isAgent ? (
+        <AsicKpiStrip
+          columns={2}
+          metrics={[
+            { label: 'Scope', value: 'Agent', hint: 'Metal AED routing tag — no ledger' },
+            { label: 'Period', value: rangeLabel, hint: 'Filter' },
+          ]}
+        />
+      ) : null}
+
+      {!noPartyLedger ? (
         <>
           <AsicKpiStrip
             columns={4}
@@ -231,7 +233,7 @@ export default function CounterpartyDetailsClient({ counterpartyId, branchSlug }
             })}
           />
         </>
-      )}
+      ) : null}
 
       {isManager ? (
         <CounterpartyManagerScopeTabs

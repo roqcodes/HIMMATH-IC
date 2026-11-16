@@ -33,27 +33,27 @@ import {
   counterpartyIdsFromVoucherAccounts,
   notifyIcFundsVoucherPosted,
 } from '@/lib/icFunds/voucherPostedNotify';
+import IcFundsBookToggle from '@/components/ic-funds/IcFundsBookToggle';
+import IcFundsAccountVoucherModal from '@/components/ic-funds/IcFundsAccountVoucherModal';
+import IcFundsContraModal from '@/components/ic-funds/IcFundsContraModal';
+import AsicPageHeader from '@/components/asic/AsicPageHeader';
 
 type LedgerBook = 'AED' | 'INR';
 
 const BOOK_STORAGE_KEY = 'asic_ic_funds_voucher_book';
 
-function bookToggleClass(active: boolean) {
-  return `inline-flex h-8 min-w-[3.25rem] items-center justify-center rounded-md px-3 text-xs font-semibold transition-colors ${
-    active
-      ? 'bg-red-600 text-white shadow-sm shadow-red-600/25'
-      : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-red-50 hover:text-red-700 hover:ring-red-200'
-  }`;
-}
-
 export default function VoucherScreen({
   branchId,
   voucherType,
   branchSlug,
+  headerTitle,
+  headerMeta,
 }: {
   branchId: string;
   voucherType: ICFundVoucherType;
   branchSlug?: string;
+  headerTitle: string;
+  headerMeta?: React.ReactNode;
 }) {
   const { showToast, currentSlug, branches } = useApp();
   const { canWrite, buttonProps } = useWriteAccess();
@@ -66,6 +66,9 @@ export default function VoucherScreen({
   const [saving, setSaving] = useState(false);
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
+  const [paymentReceiptOpen, setPaymentReceiptOpen] = useState(false);
+  const [contraOpen, setContraOpen] = useState(false);
+  const [deepLinkPartyAccountId, setDeepLinkPartyAccountId] = useState<string | undefined>();
   const [kpi, setKpi] = useState({
     entries: 0,
     voided: 0,
@@ -87,6 +90,7 @@ export default function VoucherScreen({
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const cashBookEnabled = voucherType === 'payment' || voucherType === 'receipt';
+  const modalEntry = voucherType === 'payment' || voucherType === 'receipt' || voucherType === 'contra';
   const [book, setBook] = useState<LedgerBook>('AED');
   const saveIdempotencyKey = useRef<string | null>(null);
   const deepLinkPartyApplied = useRef(false);
@@ -142,8 +146,8 @@ export default function VoucherScreen({
     const partyId = searchParams.get('partyAccountId')?.trim();
     if (!partyId || accounts.length === 0) return;
     if (!accounts.some(a => a.id === partyId)) return;
-    if (voucherType === 'payment') setDebitId(partyId);
-    else if (voucherType === 'receipt') setCreditId(partyId);
+    setDeepLinkPartyAccountId(partyId);
+    setPaymentReceiptOpen(true);
     deepLinkPartyApplied.current = true;
   }, [accounts, cashBookEnabled, searchParams, voucherType]);
 
@@ -321,7 +325,7 @@ export default function VoucherScreen({
   const creditAccount = accounts.find(a => a.id === creditId);
 
   const currencyBlockReason =
-    debitAccount && creditAccount
+    !modalEntry && debitAccount && creditAccount
       ? validateVoucherCurrencyPolicy(
           { account_type: debitAccount.accountType, currency: book },
           { account_type: creditAccount.accountType, currency: book },
@@ -329,16 +333,23 @@ export default function VoucherScreen({
       : null;
 
   let amountBlockReason: string | null = null;
-  if (!amount.trim()) {
-    amountBlockReason = 'Enter amount';
-  } else {
-    const parsed = parseFormAmount(amount);
-    if (parsed === null) amountBlockReason = 'Enter a valid amount';
-    else if (parsed <= 0) amountBlockReason = 'Amount must be greater than zero';
+  if (!modalEntry) {
+    if (!amount.trim()) {
+      amountBlockReason = 'Enter amount';
+    } else {
+      const parsed = parseFormAmount(amount);
+      if (parsed === null) amountBlockReason = 'Enter a valid amount';
+      else if (parsed <= 0) amountBlockReason = 'Amount must be greater than zero';
+    }
   }
 
   const canSaveEntry =
+    !modalEntry &&
     Boolean(debitId && creditId && voucherDate && !currencyBlockReason && !amountBlockReason);
+
+  const refreshAfterPost = async () => {
+    await Promise.all([loadVouchers(), loadAccounts()]);
+  };
 
   const kpiMetrics = useMemo(
     () => computeVoucherKpis(kpi, voucherType, cashBookEnabled ? book : 'AED'),
@@ -363,89 +374,111 @@ export default function VoucherScreen({
   const pageStart = total === 0 ? 0 : offset + 1;
   const pageEnd = Math.min(offset + VOUCHER_LIST_PAGE_SIZE, total);
 
+  const newEntryButton =
+    voucherType === 'contra' ? (
+      <button
+        type="button"
+        className={icfBtnPrimary}
+        onClick={() => setContraOpen(true)}
+        {...buttonProps()}
+      >
+        New bank contra
+      </button>
+    ) : (
+      <button
+        type="button"
+        className={icfBtnPrimary}
+        onClick={() => {
+          setDeepLinkPartyAccountId(undefined);
+          setPaymentReceiptOpen(true);
+        }}
+        {...buttonProps()}
+      >
+        New {voucherType}
+      </button>
+    );
+
   return (
     <div className="space-y-2">
       {confirmDialog}
 
+      <AsicPageHeader
+        title={headerTitle}
+        meta={headerMeta}
+        actions={modalEntry ? newEntryButton : undefined}
+      />
+
       <AsicKpiStrip metrics={kpiMetrics} />
 
+      {modalEntry ? null : (
       <div className={icfCard}>
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-3 py-2">
+        <div className="border-b border-slate-200 px-3 py-2">
           <p className="text-sm font-medium text-slate-900">New entry</p>
-          {cashBookEnabled ? (
-            <div className="flex items-center gap-1" role="group" aria-label="Settlement currency">
-              <button type="button" className={bookToggleClass(book === 'AED')} onClick={() => selectBook('AED')}>
-                AED
-              </button>
-              <button type="button" className={bookToggleClass(book === 'INR')} onClick={() => selectBook('INR')}>
-                INR
+        </div>
+          <div className="grid grid-cols-1 gap-2 overflow-visible p-3 sm:grid-cols-2 lg:grid-cols-12 lg:items-end">
+            <div className="sm:col-span-1 lg:col-span-2">
+              <label className={icfLabel} htmlFor={`${voucherType}-date`}>Date</label>
+              <input id={`${voucherType}-date`} type="date" className={icfInput} value={voucherDate} onChange={e => setVoucherDate(e.target.value)} />
+            </div>
+            <div className="min-w-0 sm:col-span-2 lg:col-span-3">
+              <AccountPicker
+                label={labels.credit}
+                accounts={accounts}
+                allowedTypes={allowedAccountTypesForVoucher(voucherType, 'credit')}
+                value={creditId}
+                excludeId={debitId}
+                onChange={setCreditId}
+                book={cashBookEnabled ? book : 'AED'}
+                partyOnly={false}
+              />
+            </div>
+            <div className="min-w-0 sm:col-span-2 lg:col-span-3">
+              <AccountPicker
+                label={labels.debit}
+                accounts={accounts}
+                allowedTypes={allowedAccountTypesForVoucher(voucherType, 'debit')}
+                value={debitId}
+                excludeId={creditId}
+                onChange={setDebitId}
+                book={cashBookEnabled ? book : 'AED'}
+                partyOnly={false}
+              />
+            </div>
+            <div className="sm:col-span-1 lg:col-span-1">
+              <label className={icfLabel} htmlFor={`${voucherType}-amount`}>
+                Amount ({cashBookEnabled ? book : 'AED'})
+              </label>
+              <input
+                id={`${voucherType}-amount`}
+                className={`${icfInput} font-mono tabular-nums`}
+                inputMode="decimal"
+                value={amount}
+                onChange={e => setAmount(e.target.value)}
+                placeholder="0.00"
+              />
+            </div>
+            <div className="min-w-0 sm:col-span-1 lg:col-span-2">
+              <label className={icfLabel} htmlFor={`${voucherType}-notes`}>Notes</label>
+              <input id={`${voucherType}-notes`} className={icfInput} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Narration" />
+            </div>
+            <div className="sm:col-span-2 lg:col-span-1">
+              {currencyBlockReason ? (
+                <p className="mb-1 text-[11px] font-medium text-red-600">{currencyBlockReason}</p>
+              ) : amountBlockReason ? (
+                <p className="mb-1 text-[11px] font-medium text-red-600">{amountBlockReason}</p>
+              ) : null}
+              <button
+                type="button"
+                className={`${icfBtnPrimary} w-full`}
+                {...buttonProps({ disabled: saving || !canSaveEntry })}
+                onClick={() => void handleSave()}
+              >
+                {saving ? 'Saving…' : 'Save'}
               </button>
             </div>
-          ) : null}
-        </div>
-        <div className="grid grid-cols-1 gap-2 overflow-visible p-3 sm:grid-cols-2 lg:grid-cols-12 lg:items-end">
-          <div className="sm:col-span-1 lg:col-span-2">
-            <label className={icfLabel} htmlFor={`${voucherType}-date`}>Date</label>
-            <input id={`${voucherType}-date`} type="date" className={icfInput} value={voucherDate} onChange={e => setVoucherDate(e.target.value)} />
           </div>
-          <div className="min-w-0 sm:col-span-2 lg:col-span-3">
-            <AccountPicker
-              label={labels.credit}
-              accounts={accounts}
-              allowedTypes={allowedAccountTypesForVoucher(voucherType, 'credit')}
-              value={creditId}
-              excludeId={debitId}
-              onChange={setCreditId}
-              book={cashBookEnabled ? book : 'AED'}
-              partyOnly={voucherType === 'receipt'}
-            />
-          </div>
-          <div className="min-w-0 sm:col-span-2 lg:col-span-3">
-            <AccountPicker
-              label={labels.debit}
-              accounts={accounts}
-              allowedTypes={allowedAccountTypesForVoucher(voucherType, 'debit')}
-              value={debitId}
-              excludeId={creditId}
-              onChange={setDebitId}
-              book={cashBookEnabled ? book : 'AED'}
-              partyOnly={voucherType === 'payment'}
-            />
-          </div>
-          <div className="sm:col-span-1 lg:col-span-1">
-            <label className={icfLabel} htmlFor={`${voucherType}-amount`}>
-              Amount ({cashBookEnabled ? book : 'AED'})
-            </label>
-            <input
-              id={`${voucherType}-amount`}
-              className={`${icfInput} font-mono tabular-nums`}
-              inputMode="decimal"
-              value={amount}
-              onChange={e => setAmount(e.target.value)}
-              placeholder="0.00"
-            />
-          </div>
-          <div className="min-w-0 sm:col-span-1 lg:col-span-2">
-            <label className={icfLabel} htmlFor={`${voucherType}-notes`}>Notes</label>
-            <input id={`${voucherType}-notes`} className={icfInput} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Narration" />
-          </div>
-          <div className="sm:col-span-2 lg:col-span-1">
-            {currencyBlockReason ? (
-              <p className="mb-1 text-[11px] font-medium text-red-600">{currencyBlockReason}</p>
-            ) : amountBlockReason ? (
-              <p className="mb-1 text-[11px] font-medium text-red-600">{amountBlockReason}</p>
-            ) : null}
-            <button
-              type="button"
-              className={`${icfBtnPrimary} w-full`}
-              {...buttonProps({ disabled: saving || !canSaveEntry })}
-              onClick={() => void handleSave()}
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-        </div>
       </div>
+      )}
 
       <div className={icfCard}>
         <div className="border-b border-slate-200 px-3 pt-2">
@@ -469,13 +502,8 @@ export default function VoucherScreen({
               />
             </div>
             {cashBookEnabled ? (
-              <div className="flex items-center gap-1 pb-0.5" role="group" aria-label="List settlement currency">
-                <button type="button" className={bookToggleClass(book === 'AED')} onClick={() => selectBook('AED')}>
-                  AED
-                </button>
-                <button type="button" className={bookToggleClass(book === 'INR')} onClick={() => selectBook('INR')}>
-                  INR
-                </button>
+              <div className="pb-0.5">
+                <IcFundsBookToggle value={book} onChange={selectBook} aria-label="List settlement currency" />
               </div>
             ) : null}
             <span className="pb-1 text-[11px] text-slate-500">
@@ -600,6 +628,35 @@ export default function VoucherScreen({
           </div>
         ) : null}
       </div>
+      {paymentReceiptOpen && (voucherType === 'payment' || voucherType === 'receipt') ? (
+        <IcFundsAccountVoucherModal
+          open
+          branchId={branchId}
+          voucherType={voucherType}
+          book={book}
+          onBookChange={selectBook}
+          defaultVoucherDate={defaultVoucherDate}
+          initialOtherAccountId={deepLinkPartyAccountId}
+          onClose={() => {
+            setPaymentReceiptOpen(false);
+            setDeepLinkPartyAccountId(undefined);
+          }}
+          onSaved={() => {
+            void refreshAfterPost();
+          }}
+        />
+      ) : null}
+      {contraOpen && voucherType === 'contra' ? (
+        <IcFundsContraModal
+          open
+          branchId={branchId}
+          defaultVoucherDate={defaultVoucherDate}
+          onClose={() => setContraOpen(false)}
+          onSaved={() => {
+            void refreshAfterPost();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

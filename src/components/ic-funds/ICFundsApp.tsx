@@ -146,9 +146,6 @@ export default function ICFundsApp({
 
   return (
     <div>
-      {section !== 'accounts' && section !== 'reports' ? (
-        <AsicPageHeader title={sectionLabel(section)} meta={ledgerPicker} />
-      ) : null}
       {voucherType ? (
         <Suspense fallback={<ASICPageSkeleton />}>
           <VoucherScreen
@@ -156,9 +153,14 @@ export default function ICFundsApp({
             branchId={branchId!}
             voucherType={voucherType}
             branchSlug={fundSlug}
+            headerTitle={sectionLabel(section)}
+            headerMeta={ledgerPicker}
           />
         </Suspense>
-      ) : section === 'accounts' ? (
+      ) : section !== 'accounts' && section !== 'reports' ? (
+        <AsicPageHeader title={sectionLabel(section)} meta={ledgerPicker} />
+      ) : null}
+      {voucherType ? null : section === 'accounts' ? (
         <AccountsScreen
           branchId={branchId!}
           navSlug={fundSlug}

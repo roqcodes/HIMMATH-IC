@@ -25,7 +25,12 @@ import {
   openStatementOfAccountPreview,
   type StatementOfAccountExportData,
 } from '@/lib/icFunds/statementOfAccountExport';
+import {
+  exportWarehouseStatementPdf,
+  openWarehouseStatementPreview,
+} from '@/lib/icFunds/warehouseStatementExport';
 import { reportCatalogTitle } from '@/lib/icFunds/reportCatalog';
+import { issueReportDocumentNo, reportFileName } from '@/lib/icFunds/reportDocument';
 import {
   DEFAULT_REPORT_FILTERS,
   filterAccounts,
@@ -61,7 +66,7 @@ import { useICFundsDateFilter } from '@/components/ic-funds/useICFundsDateFilter
 import VoucherUserCell from '@/components/ic-funds/VoucherUserCell';
 import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import { BalanceWithPendingCell } from '@/components/ic-funds/BalanceWithPending';
-import StatementParticularsCell from '@/components/ic-funds/StatementParticularsCell';
+import StatementLedgerTable from '@/components/ic-funds/reports/StatementLedgerTable';
 import { resolveAccountDetailHref } from '@/lib/icFunds/accountNavigation';
 import { useApp } from '@/context/AppContext';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
@@ -557,6 +562,7 @@ export default function BooksScreen({
   ]);
 
   const handleExportCsv = useCallback(() => {
+    const fileId = issueReportDocumentNo(reportView);
     if (reportView === 'fund-trades' || reportView === 'metal-trades') {
       if (!filteredSettlementReport) return;
       const isMetal = filteredSettlementReport.settlementMode === 'metal';
@@ -610,7 +616,7 @@ export default function BooksScreen({
         ];
       });
       downloadCsv(
-        reportView === 'metal-trades' ? 'metal-register.csv' : 'fund-register.csv',
+        reportFileName(fileId, 'csv'),
         headers,
         rows,
       );
@@ -658,14 +664,13 @@ export default function BooksScreen({
         }
       }
 
-      const slugName = targetAccount.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-      downloadCsv(`statement-${slugName}.csv`, headers, rows);
+      downloadCsv(reportFileName(fileId, 'csv'), headers, rows);
       return;
     }
 
     if (reportView === 'warehouse-pl' && warehousePl) {
       downloadCsv(
-        'warehouse-statement.csv',
+        reportFileName(fileId, 'csv'),
         [
           'Warehouse',
           'Opening units',
@@ -702,7 +707,7 @@ export default function BooksScreen({
 
     if (reportView === 'all-vouchers') {
       downloadCsv(
-        'day-book.csv',
+        reportFileName(fileId, 'csv'),
         ['Date', 'Vch #', 'Type', 'Debit', 'Credit', 'Amount', 'Notes'],
         [
           ...filteredAllVouchers.map(v => [
@@ -721,7 +726,7 @@ export default function BooksScreen({
 
     if (reportView === 'd-expenses') {
       downloadCsv(
-        'expense-register.csv',
+        reportFileName(fileId, 'csv'),
         ['Date', 'Vch #', 'Type', 'Debit', 'Credit', 'Amount', 'Notes'],
         [
           ...filteredExpenseRegister.map(v => [
@@ -740,7 +745,7 @@ export default function BooksScreen({
 
     if (reportView === 'trial-balance') {
       downloadCsv(
-        'trial-balance.csv',
+        reportFileName(fileId, 'csv'),
         ['Account', 'Type', 'Opening Dr', 'Opening Cr', 'Period Dr', 'Period Cr', 'Closing Dr', 'Closing Cr'],
         [
           ...filteredTrialBalance.map(l => [
@@ -760,7 +765,7 @@ export default function BooksScreen({
 
     if (reportView === 'profit-loss' && plReport?.plStatement) {
       const s = plReport.plStatement;
-      downloadCsv('profit-and-loss.csv', ['Section', 'Amount (AED)'], [
+      downloadCsv(reportFileName(fileId, 'csv'), ['Section', 'Amount (AED)'], [
         ['Sales / income', s.salesTotal],
         ['Direct costs', -s.directCostsTotal],
         ['Gross result', s.grossResult],
@@ -814,10 +819,11 @@ export default function BooksScreen({
 
     return {
       account: targetAccount,
-      branchName: branch?.name ?? 'Himmath HQ',
+      branchName: branch?.name ?? 'HO',
       periodLabel,
       startDate,
       endDate,
+      preferredBook: statementBook === 'inr' ? 'INR' : 'AED',
       inrLedgerLinked: Boolean(inrAccountId),
       aedStatement: statement
         ? {
@@ -847,6 +853,7 @@ export default function BooksScreen({
     reportFilters,
     startDate,
     statement,
+    statementBook,
   ]);
 
   const handleView = useCallback(async () => {
@@ -860,11 +867,49 @@ export default function BooksScreen({
         });
         return;
       }
-      openStatementOfAccountPreview(exportData);
+      openStatementOfAccountPreview({
+        ...exportData,
+        documentNo: issueReportDocumentNo('statement'),
+      });
       return;
     }
-    openReportPreviewNewTab('icf-report-print', { title: reportTitle, subtitle: exportSubtitle });
-  }, [alert, exportSubtitle, prepareStatementExportData, reportTitle, reportView]);
+    if (reportView === 'warehouse-pl') {
+      if (!warehousePl) {
+        await alert({
+          title: 'No warehouse statement',
+          message: 'Warehouse statement has not loaded yet.',
+          variant: 'info',
+        });
+        return;
+      }
+      openWarehouseStatementPreview({
+        branchName: branch?.name ?? 'HO',
+        periodLabel,
+        book: warehouseStatementBook,
+        warehouses: filteredWarehouseSummaries,
+        lines: filteredWarehouseLines,
+        documentNo: issueReportDocumentNo('warehouse-pl'),
+      });
+      return;
+    }
+    openReportPreviewNewTab('icf-report-print', {
+      title: reportTitle,
+      subtitle: exportSubtitle,
+      fileName: issueReportDocumentNo(reportView),
+    });
+  }, [
+    alert,
+    branch?.name,
+    exportSubtitle,
+    filteredWarehouseLines,
+    filteredWarehouseSummaries,
+    periodLabel,
+    prepareStatementExportData,
+    reportTitle,
+    reportView,
+    warehousePl,
+    warehouseStatementBook,
+  ]);
 
   const handleExportPdf = useCallback(async () => {
     if (reportView === 'statement') {
@@ -877,11 +922,49 @@ export default function BooksScreen({
         });
         return;
       }
-      exportStatementOfAccountPdf(exportData);
+      exportStatementOfAccountPdf({
+        ...exportData,
+        documentNo: issueReportDocumentNo('statement'),
+      });
       return;
     }
-    exportReportPdfFromElement('icf-report-print', { title: reportTitle, subtitle: exportSubtitle });
-  }, [alert, exportSubtitle, prepareStatementExportData, reportTitle, reportView]);
+    if (reportView === 'warehouse-pl') {
+      if (!warehousePl) {
+        await alert({
+          title: 'No warehouse statement',
+          message: 'Warehouse statement has not loaded yet.',
+          variant: 'info',
+        });
+        return;
+      }
+      exportWarehouseStatementPdf({
+        branchName: branch?.name ?? 'HO',
+        periodLabel,
+        book: warehouseStatementBook,
+        warehouses: filteredWarehouseSummaries,
+        lines: filteredWarehouseLines,
+        documentNo: issueReportDocumentNo('warehouse-pl'),
+      });
+      return;
+    }
+    exportReportPdfFromElement('icf-report-print', {
+      title: reportTitle,
+      subtitle: exportSubtitle,
+      fileName: issueReportDocumentNo(reportView),
+    });
+  }, [
+    alert,
+    branch?.name,
+    exportSubtitle,
+    filteredWarehouseLines,
+    filteredWarehouseSummaries,
+    periodLabel,
+    prepareStatementExportData,
+    reportTitle,
+    reportView,
+    warehousePl,
+    warehouseStatementBook,
+  ]);
 
   const headerToolbar = useMemo(
     () => (
@@ -1015,12 +1098,6 @@ export default function BooksScreen({
     </div>
   );
 
-  const totalDr =
-    activeStatement?.lines.reduce((s, l) => s + (l.status === 'pending' ? 0 : l.debit), 0) ?? 0;
-  const totalCr =
-    activeStatement?.lines.reduce((s, l) => s + (l.status === 'pending' ? 0 : l.credit), 0) ?? 0;
-  const statementCurrency = activeStatement?.currency ?? 'AED';
-
   return (
     <div>
       {confirmDialog}
@@ -1089,81 +1166,16 @@ export default function BooksScreen({
               Choose an account above to load its statement of account.
             </p>
           ) : (
-            <div className={icfTableWrap}>
-              <table className="w-full min-w-[760px] text-left">
-                <thead>
-                  <tr className={icfTheadRow}>
-                    <th className={icfTh}>Date</th>
-                    <th className={icfTh}>#</th>
-                    <th className={icfTh}>Type</th>
-                    <th className={icfTh}>Particulars</th>
-                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.debit}</th>
-                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.credit}</th>
-                    <th className={icfThAlign('right')}>{icfLedgerColumnLabel.balance}</th>
-                    <th className={icfTh}>User</th>
-                    <th className={icfTh}>Remark</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading && statementBook === 'aed' ? (
-                    <ASICTableRowsSkeleton rows={8} cols={9} />
-                  ) : loading && statementBook === 'inr' ? (
-                    <ASICTableRowsSkeleton rows={8} cols={9} />
-                  ) : (
-                    activeStatement?.lines.map((line, i) => (
-                      <tr
-                        key={`${line.voucherNo}-${i}`}
-                        className={`border-b border-slate-100 hover:bg-slate-50 ${line.status === 'pending' ? 'bg-amber-50/40' : ''}`}
-                      >
-                        <td className={`${icfTd} tabular-nums`}>{line.date ? fmtICDate(line.date) : '—'}</td>
-                        <td className={`${icfTd} font-mono tabular-nums text-slate-500`}>
-                          {line.voucherNo || '—'}
-                          {line.status === 'pending' ? (
-                            <span className="ml-1 text-[10px] font-semibold uppercase text-amber-600">PENDING</span>
-                          ) : null}
-                        </td>
-                        <td className={icfTd}>{line.voucherNo === 0 ? 'OB' : IC_FUND_VOUCHER_LABELS[line.voucherType]}</td>
-                        <td className={`${icfTd} font-medium`}>
-                          <StatementParticularsCell slug={slug} line={line} accounts={accounts} />
-                        </td>
-                        <AmountCell n={line.debit} currency={statementCurrency} />
-                        <AmountCell n={line.credit} danger currency={statementCurrency} />
-                        <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                          <FmtLedgerAmount amount={line.balance} book={statementCurrency} />
-                        </td>
-                        <td className={icfTd}>
-                          <VoucherUserCell
-                            voucher={{
-                              createdByName: line.userName,
-                              createdAt: line.userAt ?? '',
-                            }}
-                          />
-                        </td>
-                        <td className={`${icfTd} max-w-[12rem] truncate text-slate-500`}>{line.notes || '—'}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-                {activeStatement ? (
-                  <tfoot>
-                    <tr className="border-t border-slate-200 bg-slate-50 font-medium">
-                      <td className={icfTd} colSpan={4}>Totals</td>
-                      <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                        <FmtLedgerAmount amount={totalDr} book={statementCurrency} />
-                      </td>
-                      <td className={`${icfTd} text-right font-mono tabular-nums text-red-600`}>
-                        <FmtLedgerAmount amount={totalCr} book={statementCurrency} />
-                      </td>
-                      <td className={`${icfTd} text-right font-mono tabular-nums`}>
-                        <FmtLedgerAmount amount={activeStatement.closing} book={statementCurrency} />
-                      </td>
-                      <td className={icfTd} />
-                      <td className={icfTd} />
-                    </tr>
-                  </tfoot>
-                ) : null}
-              </table>
-            </div>
+            <StatementLedgerTable
+              lines={activeStatement?.lines ?? []}
+              opening={activeStatement?.opening ?? 0}
+              closing={activeStatement?.closing ?? 0}
+              currency={activeStatement?.currency ?? 'AED'}
+              branchLabel={branch?.name ?? 'HO'}
+              slug={slug}
+              accounts={accounts}
+              loading={loading}
+            />
           )
         ) : null}
 

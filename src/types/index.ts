@@ -942,6 +942,7 @@ export interface ICFundVoucher {
   voidedByName?: string;
   referenceType?: string;
   referenceId?: string;
+  managerId?: string;
   /** AED IC Funds vs INR metal ledger. */
   book?: 'AED' | 'INR';
 }
@@ -966,6 +967,8 @@ export interface ICFundTrialBalanceLine {
 
 export interface ICFundStatementLine {
   date: string;
+  /** Operational branch recorded by this voucher, when it uses a branch locker. */
+  branchName?: string;
   voucherNo: number;
   voucherType: ICFundVoucherType;
   particulars: string;

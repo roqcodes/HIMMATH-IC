@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS public.ic_counterparties (
     subdivision VARCHAR(255),
     locality VARCHAR(255),
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
-    kind VARCHAR(20) NOT NULL DEFAULT 'customer' CHECK (kind IN ('manager', 'customer')),
+    kind VARCHAR(20) NOT NULL DEFAULT 'customer' CHECK (kind IN ('manager', 'customer', 'agent')),
     home_manager_id UUID REFERENCES public.ic_counterparties(id) ON DELETE SET NULL,
     balance NUMERIC(15, 2) NOT NULL DEFAULT 0,
     opening_aed NUMERIC(15, 2) NOT NULL DEFAULT 0,
@@ -79,8 +79,8 @@ CREATE TABLE IF NOT EXISTS public.ic_counterparties (
     CONSTRAINT ic_counterparties_roles_check CHECK (
       roles <@ ARRAY['supplier', 'party', 'agent']::TEXT[]
       AND (
-        (kind = 'manager' AND cardinality(roles) = 0)
-        OR (COALESCE(kind, 'customer') <> 'manager' AND cardinality(roles) >= 1)
+        (kind IN ('manager', 'agent') AND cardinality(roles) = 0)
+        OR (kind = 'customer' AND cardinality(roles) >= 1)
       )
     )
 );
@@ -397,6 +397,8 @@ CREATE TABLE IF NOT EXISTS public.ic_fund_vouchers (
     reference_id VARCHAR(80),
     version INTEGER NOT NULL DEFAULT 1,
     idempotency_key VARCHAR(80),
+    manager_id UUID REFERENCES public.ic_counterparties(id) ON DELETE SET NULL,
+    aed_agent_id UUID REFERENCES public.ic_aed_agents(id) ON DELETE SET NULL,
     CONSTRAINT ic_fund_voucher_distinct_accounts CHECK (debit_account_id <> credit_account_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_fund_vouchers_branch_no ON public.ic_fund_vouchers (branch_id, voucher_no);
@@ -590,6 +592,8 @@ CREATE TABLE IF NOT EXISTS public.inr_fund_vouchers (
     voided_at TIMESTAMPTZ,
     reference_type VARCHAR(30),
     reference_id VARCHAR(80),
+    manager_id UUID REFERENCES public.ic_counterparties(id) ON DELETE SET NULL,
+    aed_agent_id UUID REFERENCES public.ic_aed_agents(id) ON DELETE SET NULL,
     CONSTRAINT inr_fund_voucher_distinct_accounts CHECK (debit_account_id <> credit_account_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_inr_fund_vouchers_active_ref

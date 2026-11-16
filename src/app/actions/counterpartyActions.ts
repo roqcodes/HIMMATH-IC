@@ -99,9 +99,6 @@ export async function saveCounterpartyAction(
     const kind = normalizeCounterpartyKind(data.kind);
     const homeManagerId =
       kind === 'customer' && data.homeManagerId?.trim() ? data.homeManagerId.trim() : null;
-    if (kind === 'customer' && !homeManagerId) {
-      return { success: false, error: 'Customers must belong to a home manager.' };
-    }
     const roles = rolesForCounterpartyKind(kind, data.roles);
     const hasOpenings = data.openingAed !== undefined || data.openingInr !== undefined;
     const opening = hasOpenings
@@ -178,9 +175,11 @@ export async function saveCounterpartyAction(
       await syncCounterpartyAedAgent({ query }, {
         counterpartyId: data.id,
         name: data.name.trim(),
-        hasAgentRole: kind === 'customer' && roles.includes('agent'),
+        hasAgentRole: kind === 'agent',
       });
-      await syncICCounterpartyFundAccount(data.id);
+      if (kind === 'customer') {
+        await syncICCounterpartyFundAccount(data.id);
+      }
       revalidateCounterpartyPaths(slug);
       return { success: true, id: data.id };
     }
@@ -213,9 +212,11 @@ export async function saveCounterpartyAction(
     await syncCounterpartyAedAgent({ query }, {
       counterpartyId: id,
       name: data.name.trim(),
-      hasAgentRole: kind === 'customer' && roles.includes('agent'),
+      hasAgentRole: kind === 'agent',
     });
-    await syncICCounterpartyFundAccount(id);
+    if (kind === 'customer') {
+      await syncICCounterpartyFundAccount(id);
+    }
     revalidateCounterpartyPaths(slug);
     return { success: true, id };
   } catch (err: unknown) {

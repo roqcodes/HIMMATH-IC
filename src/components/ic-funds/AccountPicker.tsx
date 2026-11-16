@@ -5,7 +5,11 @@ import { createPortal } from 'react-dom';
 import type { ICFundAccount } from '@/types';
 import type { ICFundAccountType } from '@/lib/icFunds/constants';
 import { accountTypeLabel } from '@/lib/icFunds/constants';
-import { isVoucherPartyAccount, voucherPartyAccountSubtitle } from '@/lib/icFunds/voucherPartyAccounts';
+import {
+  isVoucherPartyAccount,
+  voucherPartyAccountSubtitle,
+  isCashBankLedgerAccount,
+} from '@/lib/icFunds/voucherPartyAccounts';
 import { FmtLedgerAed, FmtLedgerInr } from '@/lib/icFunds/format';
 import { icfInput, icfLabel } from '@/components/ic-funds/ui';
 
@@ -76,6 +80,10 @@ export default function AccountPicker({
   excludeId,
   book = 'AED',
   partyOnly = false,
+  accountFilter,
+  hideLabel = false,
+  compact = false,
+  inputClassName = icfInput,
 }: {
   label: string;
   accounts: ICFundAccount[];
@@ -86,6 +94,12 @@ export default function AccountPicker({
   book?: 'AED' | 'INR';
   /** Payments / receipts: hide deal-posted system & P&L ledgers. */
   partyOnly?: boolean;
+  accountFilter?: (account: ICFundAccount) => boolean;
+  /** When the parent already renders the field label (e.g. AsicFormField). */
+  hideLabel?: boolean;
+  /** Deposit-modal row: single-line control, no Dr/Cr/Bal above the input. */
+  compact?: boolean;
+  inputClassName?: string;
 }) {
   const listboxId = useId();
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -115,13 +129,19 @@ export default function AccountPicker({
         if (a.status !== 'active') return false;
         if (!allowedTypes.has(a.accountType)) return false;
         if (partyOnly && !isVoucherPartyAccount(a)) return false;
+        if (accountFilter && !accountFilter(a)) return false;
         return matchAccount(a, query);
       }),
-    [accounts, allowedTypes, excludeId, partyOnly, query],
+    [accounts, allowedTypes, excludeId, partyOnly, accountFilter, query],
   );
 
-  const typeSubtitle = (account: ICFundAccount) =>
-    partyOnly ? voucherPartyAccountSubtitle(account) : accountTypeLabel(account.accountType);
+  const typeSubtitle = (account: ICFundAccount) => {
+    if (partyOnly) return voucherPartyAccountSubtitle(account);
+    if (isCashBankLedgerAccount(account) && (account.sourceType ?? '').toLowerCase() === 'ic_branch') {
+      return 'Branch locker';
+    }
+    return accountTypeLabel(account.accountType);
+  };
 
   const updateMenuPosition = () => {
     const anchor = anchorRef.current;
@@ -202,10 +222,12 @@ export default function AccountPicker({
 
   return (
     <div ref={wrapperRef} className="min-w-0">
-      <label className={icfLabel} htmlFor={`${listboxId}-input`}>
-        {label}
-      </label>
-      {selected ? <AccountLedgerTotals account={selected} book={book} /> : null}
+      {hideLabel ? null : (
+        <label className={icfLabel} htmlFor={`${listboxId}-input`}>
+          {label}
+        </label>
+      )}
+      {selected && !compact ? <AccountLedgerTotals account={selected} book={book} /> : null}
       <div ref={anchorRef} className="relative">
         <input
           ref={inputRef}
@@ -216,7 +238,7 @@ export default function AccountPicker({
           aria-controls={listboxId}
           aria-autocomplete="list"
           autoComplete="off"
-          className={icfInput}
+          className={inputClassName || icfInput}
           value={displayValue}
           placeholder="Search account"
           onFocus={() => {

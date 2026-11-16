@@ -9,7 +9,6 @@ import {
   filterManagerCustomerSales,
   filterCounterpartyDeposits,
 } from '@/lib/counterparties/counterpartyActivity';
-import { filterCustomersUnderManager } from '@/lib/counterparties/roles';
 import { counterpartyDetailPath } from '@/lib/counterparties/navigation';
 import CounterpartyLink from '@/components/counterparties/CounterpartyLink';
 import type { DateFilterRange } from '@/lib/dateFilterRange';
@@ -56,7 +55,7 @@ import { useOnIcFundsVoucherPosted } from '@/hooks/useOnIcFundsVoucherPosted';
 import type { ICBranchDeposit, ICFundVoucher, ICSale } from '@/types';
 import Link from 'next/link';
 
-type TabId = 'customers' | 'deposits' | 'sales' | 'journals';
+type TabId = 'deposits' | 'sales' | 'journals';
 
 type Props = {
   managerId: string;
@@ -72,7 +71,7 @@ export default function CounterpartyManagerScopeTabs({
   onDepositsLoaded,
 }: Props) {
   const { icSales, icWarehouses, icSuppliers, icPurchases } = useApp();
-  const [tab, setTab] = useState<TabId>('customers');
+  const [tab, setTab] = useState<TabId>('deposits');
   const [search, setSearch] = useState('');
   const [deposits, setDeposits] = useState<ICBranchDeposit[]>([]);
   const [depositsLoading, setDepositsLoading] = useState(false);
@@ -84,11 +83,6 @@ export default function CounterpartyManagerScopeTabs({
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
   const icFundsSlug = branchSlug || HQ_IC_FUNDS_BRANCH_SLUG;
-
-  const customers = useMemo(
-    () => filterCustomersUnderManager(icSuppliers, managerId),
-    [icSuppliers, managerId],
-  );
 
   const scopedSales = useMemo(
     () => filterManagerCustomerSales(icSales, managerId, icSuppliers, range),
@@ -161,7 +155,6 @@ export default function CounterpartyManagerScopeTabs({
 
   const tabs = useMemo(
     () => [
-      { id: 'customers', label: 'Customers', count: customers.length },
       { id: 'deposits', label: 'Deposits', count: periodDeposits.length },
       { id: 'sales', label: 'Sales', count: scopedSales.length },
       {
@@ -170,7 +163,7 @@ export default function CounterpartyManagerScopeTabs({
         count: journals.filter(v => v.status !== 'void').length,
       },
     ],
-    [customers.length, periodDeposits.length, scopedSales.length, journals],
+    [periodDeposits.length, scopedSales.length, journals],
   );
 
   const sortedSales = useMemo(
@@ -195,17 +188,6 @@ export default function CounterpartyManagerScopeTabs({
         });
     return sortDealJournals(rows);
   }, [journals, search, icPurchases, icSales]);
-
-  const filteredCustomers = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return customers;
-    return customers.filter(
-      c =>
-        c.name.toLowerCase().includes(q) ||
-        (c.code || '').toLowerCase().includes(q) ||
-        (c.phone || '').includes(q),
-    );
-  }, [customers, search]);
 
   const filteredDeposits = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -236,40 +218,6 @@ export default function CounterpartyManagerScopeTabs({
         <div className="border-b border-slate-100 px-3 py-2 sm:px-4">
           <AsicTabBar tabs={tabs} activeTab={tab} onTabChange={id => setTab(id as TabId)} />
         </div>
-
-        {tab === 'customers' ? (
-          <ICTransferDataTableShell
-            title="Customers under this manager"
-            search={search}
-            onSearchChange={setSearch}
-            searchPlaceholder="Search customers…"
-            columns={[
-              { id: 'Name', label: 'Customer', align: 'left' },
-              { id: 'Code', label: 'Code', align: 'left' },
-            ]}
-            sortField="Name"
-            sortOrder="asc"
-            onSort={() => undefined}
-            isEmpty={filteredCustomers.length === 0}
-            emptyMessage="No active customers linked to this manager."
-          >
-            {filteredCustomers.map(c => (
-              <tr key={c.id} className="border-b border-slate-100 hover:bg-slate-50/80">
-                <td className={icTdClass('left')}>
-                  <Link
-                    href={counterpartyDetailPath(c.id, { branchSlug })}
-                    className="text-sm font-medium text-sky-800 hover:underline"
-                  >
-                    {c.name}
-                  </Link>
-                </td>
-                <td className={icTdClass('left')}>
-                  <span className="font-mono text-xs text-slate-500">{c.code?.trim() || '—'}</span>
-                </td>
-              </tr>
-            ))}
-          </ICTransferDataTableShell>
-        ) : null}
 
         {tab === 'deposits' ? (
           <ICTransferDataTableShell
@@ -318,7 +266,7 @@ export default function CounterpartyManagerScopeTabs({
 
         {tab === 'sales' ? (
           <ICTransferDataTableShell
-            title="India sales (manager customers)"
+            title="Sales tagged with this manager"
             search={search}
             onSearchChange={setSearch}
             searchPlaceholder="Search sales…"
