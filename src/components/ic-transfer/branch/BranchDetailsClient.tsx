@@ -164,11 +164,11 @@ export default function BranchDetailsClient({
 
       <BranchDetailKpiGrid
         rangeLabel={rangeLabel}
-        branchCashBalance={branch.cashBalance ?? null}
         openingAed={0}
         depositKpis={branchDepositKpis}
         icBranchId={branch.id}
         icFundsSlug={branchSlug}
+        refreshToken={depositRefreshToken}
       />
 
       <BranchDetailTabs

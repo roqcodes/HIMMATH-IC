@@ -12,23 +12,23 @@ import { HQ_IC_FUNDS_BRANCH_SLUG } from '@/lib/icFunds/hqBranch';
 
 type Props = {
   rangeLabel: string;
-  branchCashBalance: number | null;
   openingAed?: number;
   depositKpis: BranchDepositKpis;
   icBranchId?: string | null;
   icFundsSlug?: string;
+  refreshToken?: number;
 };
 
 export default function BranchDetailKpiGrid({
   rangeLabel,
-  branchCashBalance,
   openingAed = 0,
   depositKpis,
   icBranchId,
   icFundsSlug,
+  refreshToken,
 }: Props) {
   const fundsSlug = icFundsSlug || HQ_IC_FUNDS_BRANCH_SLUG;
-  const [tillAccount, setTillAccount] = useState<{ id: string; name: string } | null>(null);
+  const [tillAccount, setTillAccount] = useState<{ id: string; name: string; balance: number } | null>(null);
 
   useEffect(() => {
     const id = icBranchId?.trim();
@@ -37,13 +37,13 @@ export default function BranchDetailKpiGrid({
       return;
     }
     void resolveBranchTillAccountAction(id).then(setTillAccount);
-  }, [icBranchId]);
+  }, [icBranchId, refreshToken]);
   const kpis = depositKpis;
-  const till = branchCashBalance ?? 0;
+  const bankBalance = tillAccount?.balance ?? null;
 
   return (
     <div className="mb-8 flex flex-col gap-4">
-      <section className={`${icfCard} overflow-hidden`} aria-label="Deposits and till">
+      <section className={`${icfCard} overflow-hidden`} aria-label="Deposits and branch bank account">
         <div className="grid grid-cols-2 divide-x divide-y divide-slate-100 border-b border-slate-100 dark:divide-slate-800 dark:border-slate-800 sm:grid-cols-3 lg:grid-cols-6">
           <WarehouseKpiCell
             label="Cash deposits"
@@ -63,8 +63,8 @@ export default function BranchDetailKpiGrid({
             }
           />
           <WarehouseKpiCell
-            label="AED till"
-            value={branchCashBalance != null ? <FmtLedgerAed amount={till} /> : '—'}
+            label="Branch bank balance"
+            value={bankBalance != null ? <FmtLedgerAed amount={bankBalance} /> : '—'}
             tone="blue"
             sub={
               tillAccount ? (
@@ -75,7 +75,7 @@ export default function BranchDetailKpiGrid({
                   className="text-[11px] text-sky-700 hover:underline"
                 />
               ) : (
-                <span className="text-slate-400">Branch cash balance</span>
+                <span className="text-slate-400">Current account balance</span>
               )
             }
           />
@@ -119,12 +119,11 @@ export default function BranchDetailKpiGrid({
           <div className="px-3 py-2">
             <div className="flex items-baseline justify-between">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                Cash till (AED)
+                Branch bank balance (AED)
               </span>
-              <span className="text-[11px] text-slate-400">{rangeLabel}</span>
             </div>
             <p className="text-base font-bold tabular-nums text-slate-900 sm:text-lg dark:text-slate-100">
-              {branchCashBalance != null ? <FmtLedgerAed amount={till} /> : '—'}
+              {bankBalance != null ? <FmtLedgerAed amount={bankBalance} /> : '—'}
             </p>
           </div>
         </div>
@@ -149,9 +148,9 @@ export default function BranchDetailKpiGrid({
             count={kpis.cashCount}
           />
           <WarehouseKpiCell
-            label="AED closing"
-            value={branchCashBalance != null ? <FmtLedgerAed amount={till} /> : '—'}
-            tone={till >= 0 ? 'amber' : 'red'}
+            label="Bank account balance"
+            value={bankBalance != null ? <FmtLedgerAed amount={bankBalance} /> : '—'}
+            tone={bankBalance == null || bankBalance >= 0 ? 'amber' : 'red'}
           />
         </div>
       </section>

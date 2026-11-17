@@ -30,6 +30,7 @@ import BranchDetailDepositsPanel, {
   type BranchDetailContentTab,
   type BranchDepositModeTab,
 } from '@/components/ic-transfer/branch/BranchDetailDepositsPanel';
+import BranchDetailAllEntriesPanel from '@/components/ic-transfer/branch/BranchDetailAllEntriesPanel';
 import LocationPartyPrVouchersPanel from '@/components/ic-transfer/shared/LocationPartyPrVouchersPanel';
 import type { DateFilterRange } from '@/lib/dateFilterRange';
 import type { ICBranchDeposit, ICFundVoucher } from '@/types';
@@ -174,7 +175,7 @@ export default function BranchDetailTabs({
 
   const tabs = useMemo(
     () => [
-      { id: 'all', label: 'All', count: depositModeCounts?.all },
+      { id: 'all', label: 'All', count: (depositModeCounts?.all ?? 0) + (paymentCount ?? 0) + (receiptCount ?? 0) },
       { id: 'cash', label: 'AED', count: depositModeCounts?.cash },
       { id: 'metal', label: 'Metal', count: depositModeCounts?.metal },
       { id: 'payments', label: 'Payments', count: paymentCount },
@@ -215,7 +216,20 @@ export default function BranchDetailTabs({
           />
         </div>
 
-        {isDepositTab(viewTab) ? (
+        {viewTab === 'all' ? (
+          <BranchDetailAllEntriesPanel
+            icBranchId={icBranchId}
+            branchSlug={branchSlug}
+            range={range}
+            rangeLabel={rangeLabel}
+            refreshToken={refreshToken}
+            onDepositsLoaded={onDepositsLoaded}
+            canDelete={canDelete}
+            onDeleted={onDeleted}
+          />
+        ) : null}
+
+        {viewTab === 'cash' || viewTab === 'metal' ? (
           <BranchDetailDepositsPanel
             icBranchId={icBranchId}
             branchSlug={branchSlug}

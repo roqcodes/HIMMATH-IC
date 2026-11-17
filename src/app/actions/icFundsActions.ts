@@ -1326,7 +1326,14 @@ export async function listLocationPartyVouchersAction(params: {
       const { icBranchTillSourceIdsForLookup } = await import('@/lib/icFunds/icBranchTill');
       const sourceIds = icBranchTillSourceIdsForLookup(icBranchId);
       const res = await query(
-        `SELECT ${VOUCHER_DETAIL_SELECT_COLUMNS}, 'AED'::text AS book, v.manager_id::text AS manager_id
+        `SELECT ${VOUCHER_DETAIL_SELECT_COLUMNS},
+                'AED'::text AS book,
+                v.manager_id::text AS manager_id,
+                CASE
+                  WHEN da.source_type IN ('ic_counterparty', 'ic_customer') THEN da.source_id
+                  WHEN ca.source_type IN ('ic_counterparty', 'ic_customer') THEN ca.source_id
+                  ELSE NULL
+                END AS customer_id
          ${VOUCHER_FROM_SQL}
          WHERE v.branch_id = $1
            AND v.voucher_type = $2
@@ -1344,6 +1351,7 @@ export async function listLocationPartyVouchersAction(params: {
       return res.rows.map(r => ({
         ...mapVoucher(r as Record<string, unknown>),
         managerId: r.manager_id ? String(r.manager_id) : undefined,
+        referenceId: r.customer_id ? String(r.customer_id) : r.reference_id ? String(r.reference_id) : undefined,
       }));
     }
 
@@ -1443,7 +1451,7 @@ export async function listBranchDeskVouchersAction(params: {
 /** HQ till account auto-created for branch cash (Dr on customer deposits). */
 export async function resolveBranchTillAccountAction(
   icBranchId: string,
-): Promise<{ id: string; name: string } | null> {
+): Promise<{ id: string; name: string; balance: number } | null> {
   const branchLockerId = String(icBranchId || '').trim();
   if (!branchLockerId) return null;
   const access = await requireICFundsAccess(HQ_IC_FUNDS_BRANCH_ID, 'read');
@@ -1451,23 +1459,29 @@ export async function resolveBranchTillAccountAction(
   try {
     const { icBranchTillSourceIdsForLookup } = await import('@/lib/icFunds/icBranchTill');
     const sourceIds = icBranchTillSourceIdsForLookup(branchLockerId);
-    const res = await query<{ id: string; name: string }>(
-      `SELECT id, name FROM ic_fund_accounts
-       WHERE branch_id = $1
+    const res = await query<{ id: string; name: string; balance: number | string }>(
+      `SELECT a.id, a.name, ${accountBalanceSql()} AS balance
+       FROM ic_fund_accounts a
+       ${accountMovementJoinSql({ branchParam: '$1' })}
+       WHERE a.branch_id = $1
          AND (
-           (source_type = 'ic_branch' AND source_id = ANY($2::text[]))
-           OR (source_type = 'ic_system' AND source_id = ANY($2::text[]))
+           (a.source_type = 'ic_branch' AND a.source_id = ANY($2::text[]))
+           OR (a.source_type = 'ic_system' AND a.source_id = ANY($2::text[]))
          )
        ORDER BY CASE
-         WHEN source_type = 'ic_branch' AND source_id = $3 THEN 0
-         WHEN source_id = $3 THEN 1
+         WHEN a.source_type = 'ic_branch' AND a.source_id = $3 THEN 0
+         WHEN a.source_id = $3 THEN 1
          ELSE 2
        END
        LIMIT 1`,
       [HQ_IC_FUNDS_BRANCH_ID, sourceIds, branchLockerId],
     );
     if (res.rows.length === 0) return null;
-    return { id: String(res.rows[0].id), name: String(res.rows[0].name) };
+    return {
+      id: String(res.rows[0].id),
+      name: String(res.rows[0].name),
+      balance: Number(res.rows[0].balance) || 0,
+    };
   } catch (err) {
     logger.error({ err, icBranchId: branchLockerId }, 'resolveBranchTillAccountAction');
     return null;
