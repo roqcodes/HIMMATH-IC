@@ -296,38 +296,39 @@ export async function postInrVoucherInTx(
   );
   if (accounts.length !== 2) throw new Error('INR ledger accounts not found');
 
-  const counter = await client.query(
-    `INSERT INTO inr_fund_voucher_counters (branch_id, last_no)
-     VALUES ($1, 1)
-     ON CONFLICT (branch_id) DO UPDATE SET last_no = inr_fund_voucher_counters.last_no + 1
-     RETURNING last_no`,
-    [params.branchId],
-  );
-  const voucherNo = Number(counter.rows[0]?.last_no) || 1;
   const id = `INFV-${crypto.randomUUID().slice(0, 10).toUpperCase()}`;
 
+  // Single CTE: atomically increment the INR voucher counter and insert the voucher row
+  // in one round-trip instead of two separate queries.
   try {
     await client.query(
-      `INSERT INTO inr_fund_vouchers (
+      `WITH ctr AS (
+         INSERT INTO inr_fund_voucher_counters (branch_id, last_no)
+         VALUES ($1, 1)
+         ON CONFLICT (branch_id) DO UPDATE SET last_no = inr_fund_voucher_counters.last_no + 1
+         RETURNING last_no
+       )
+       INSERT INTO inr_fund_vouchers (
          id, branch_id, voucher_no, voucher_type, voucher_date,
          debit_account_id, credit_account_id, amount, notes,
          created_by_name, reference_type, reference_id, status, manager_id, aed_agent_id
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'active',$13,$14)`,
+       )
+       SELECT $2, $1, ctr.last_no, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'active', $12, $13
+       FROM ctr`,
       [
-        id,
-        params.branchId,
-        voucherNo,
-        voucherType,
-        params.voucherDate,
-        params.debitAccountId,
-        params.creditAccountId,
-        amount,
-        params.notes,
-        params.createdByName ?? SYNC_ACTOR,
-        params.referenceType ?? null,
-        params.referenceId ?? null,
-        params.managerId ?? null,
-        params.aedAgentId?.trim() || null,
+        params.branchId,                    // $1
+        id,                                 // $2
+        voucherType,                        // $3
+        params.voucherDate,                 // $4
+        params.debitAccountId,              // $5
+        params.creditAccountId,             // $6
+        amount,                             // $7
+        params.notes,                       // $8
+        params.createdByName ?? SYNC_ACTOR, // $9
+        params.referenceType ?? null,       // $10
+        params.referenceId ?? null,         // $11
+        params.managerId ?? null,           // $12
+        params.aedAgentId?.trim() || null,  // $13
       ],
     );
     return id;

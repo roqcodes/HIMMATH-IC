@@ -139,49 +139,54 @@ export async function syncMetalPurchaseLedgers(
   if (lines.length === 0) return;
 
   const needsSupplier = lines.some(l => l.debit === 'supplier' || l.credit === 'supplier');
+  const needsMetalStock = lines.some(l => l.debit === 'metal_stock' || l.credit === 'metal_stock');
+  const needsAedSettlement = lines.some(
+    l => l.debit === 'aed_settlement' || l.credit === 'aed_settlement',
+  );
+  const needsCustomerAed = lines.some(l => l.debit === 'customer_aed' || l.credit === 'customer_aed');
+  const needsMetalAed = lines.some(l => l.debit === 'metal_aed' || l.credit === 'metal_aed');
+
+  // Resolve supplier sequentially first (requires a DB lookup to build its own query).
   const supplierAccountId = needsSupplier ? await resolveSupplierInrAccount() : null;
   if (needsSupplier && !supplierAccountId) {
     throw new Error('Could not resolve INR account for metal purchase supplier');
   }
 
-  const metalStockInr = lines.some(l => l.debit === 'metal_stock' || l.credit === 'metal_stock')
-    ? await ensureInrSystemAccount(client, branchId, 'Metal Stock', 'inventory', 'metal_inventory')
-    : null;
+  // Resolve all independent system accounts in parallel to cut sequential round-trips.
+  const purchaseCounterpartyId = purchase.counterparty_id ? String(purchase.counterparty_id) : null;
+  const [metalStockInr, aedSettlementInr, aedAccountPair] = await Promise.all([
+    needsMetalStock
+      ? ensureInrSystemAccount(client, branchId, 'Metal Stock', 'inventory', 'metal_inventory')
+      : Promise.resolve(null as string | null),
+    needsAedSettlement
+      ? ensureInrSystemAccount(client, branchId, 'Metal AED settlement', 'inventory', 'metal_aed_settlement')
+      : Promise.resolve(null as string | null),
+    (needsCustomerAed || needsMetalAed)
+      ? (async (): Promise<{ customerAed: string | null; metalAed: string | null }> => {
+          const [cpResult, metalAed] = await Promise.all([
+            purchaseCounterpartyId
+              ? client.query(`SELECT name FROM ic_counterparties WHERE id = $1 LIMIT 1`, [purchaseCounterpartyId])
+              : Promise.resolve(null),
+            ensureMetalAedAccount(client, branchId),
+          ]);
+          const customerAed = cpResult && cpResult.rows[0]
+            ? await ensureLinkedAccount(client, {
+                branchId,
+                sourceType: 'ic_counterparty',
+                sourceId: purchaseCounterpartyId!,
+                name: String(cpResult.rows[0].name),
+              })
+            : null;
+          return { customerAed, metalAed };
+        })()
+      : Promise.resolve({ customerAed: null as string | null, metalAed: null as string | null }),
+  ]);
 
-  const needsAedSettlement = lines.some(
-    l => l.debit === 'aed_settlement' || l.credit === 'aed_settlement',
-  );
-  const aedSettlementInr = needsAedSettlement
-    ? await ensureInrSystemAccount(
-        client,
-        branchId,
-        'Metal AED settlement',
-        'inventory',
-        'metal_aed_settlement',
-      )
-    : null;
   if (needsAedSettlement && !aedSettlementInr) {
     throw new Error('Could not resolve INR account for metal AED settlement clearing');
   }
-
-  const needsCustomerAed = lines.some(l => l.debit === 'customer_aed' || l.credit === 'customer_aed');
-  let customerAedAccountId: string | null = null;
-  let metalAedAccountId: string | null = null;
-  if (needsCustomerAed || lines.some(l => l.debit === 'metal_aed' || l.credit === 'metal_aed')) {
-    const counterpartyId = purchase.counterparty_id ? String(purchase.counterparty_id) : null;
-    if (counterpartyId) {
-      const cpRes = await client.query(`SELECT name FROM ic_counterparties WHERE id = $1 LIMIT 1`, [
-        counterpartyId,
-      ]);
-      customerAedAccountId = await ensureLinkedAccount(client, {
-        branchId,
-        sourceType: 'ic_counterparty',
-        sourceId: counterpartyId,
-        name: cpRes.rows[0] ? String(cpRes.rows[0].name) : 'Customer',
-      });
-    }
-    metalAedAccountId = await ensureMetalAedAccount(client, branchId);
-  }
+  const customerAedAccountId = aedAccountPair.customerAed;
+  const metalAedAccountId = aedAccountPair.metalAed;
   if (needsCustomerAed && !customerAedAccountId) {
     throw new Error('Could not resolve AED account for metal purchase customer');
   }
@@ -395,76 +400,96 @@ export async function syncMetalSaleLedgers(
   if (lines.length === 0) return;
 
   const needsCustomer = lines.some(l => l.debit === 'customer' || l.credit === 'customer');
-  const customerAccountId = needsCustomer ? await ensureMetalSaleCustomerInrAccount(client, branchId, sale) : null;
-  if (needsCustomer && !customerAccountId) {
-    throw new Error('Could not resolve INR account for metal sale customer');
-  }
-
-  const metalStockInr = lines.some(l => l.debit === 'metal_stock' || l.credit === 'metal_stock')
-    ? await ensureInrSystemAccount(client, branchId, 'Metal Stock', 'inventory', 'metal_inventory')
-    : null;
-  const metalSalesInr = lines.some(l => l.debit === 'metal_sales' || l.credit === 'metal_sales')
-    ? await ensureInrSystemAccount(client, branchId, 'Metal Sales', 'income', 'metal_sales')
-    : null;
-  const metalCostInr = lines.some(l => l.debit === 'metal_cost' || l.credit === 'metal_cost')
-    ? await ensureInrSystemAccount(client, branchId, 'Cost of Metal Sold', 'expense', 'metal_cost')
-    : null;
-  const metalProfitInr = lines.some(l => l.debit === 'metal_profit' || l.credit === 'metal_profit')
-    ? await ensureInrSystemAccount(client, branchId, 'Metal Profit', 'profit', 'metal_profit')
-    : null;
-  const metalFxAed = lines.some(l => l.debit === 'metal_fx' || l.credit === 'metal_fx')
-    ? await ensureSystemAccount(client, branchId, 'Metal FX Profit', 'profit', 'metal_fx_profit')
-    : null;
-
+  const needsMetalStockSale = lines.some(l => l.debit === 'metal_stock' || l.credit === 'metal_stock');
+  const needsMetalSales = lines.some(l => l.debit === 'metal_sales' || l.credit === 'metal_sales');
+  const needsMetalCost = lines.some(l => l.debit === 'metal_cost' || l.credit === 'metal_cost');
+  const needsMetalProfit = lines.some(l => l.debit === 'metal_profit' || l.credit === 'metal_profit');
+  const needsMetalFx = lines.some(l => l.debit === 'metal_fx' || l.credit === 'metal_fx');
   const needsAedSettlement = lines.some(
     l => l.debit === 'aed_settlement' || l.credit === 'aed_settlement',
   );
-  const aedSettlementInr = needsAedSettlement
-    ? await ensureInrSystemAccount(
-        client,
-        branchId,
-        'Metal AED settlement',
-        'inventory',
-        'metal_aed_settlement',
-      )
-    : null;
+  const needsCustomerAed = lines.some(l => l.debit === 'customer_aed' || l.credit === 'customer_aed');
+  const needsMetalAedProceeds = lines.some(
+    l => l.debit === 'metal_aed_proceeds' || l.credit === 'metal_aed_proceeds',
+  );
+  const needsMetalAedAny = lines.some(
+    l =>
+      l.debit === 'metal_aed' ||
+      l.credit === 'metal_aed' ||
+      l.debit === 'metal_aed_proceeds' ||
+      l.credit === 'metal_aed_proceeds',
+  );
+
+  // Resolve all independent system accounts in parallel to cut sequential round-trips.
+  const saleCounterpartyId = sale.counterparty_id ? String(sale.counterparty_id) : null;
+
+  const [
+    customerAccountId,
+    metalStockInr,
+    metalSalesInr,
+    metalCostInr,
+    metalProfitInr,
+    metalFxAed,
+    aedSettlementInr,
+    metalAedProceedsId,
+    aedAccountPairSale,
+  ] = await Promise.all([
+    needsCustomer
+      ? ensureMetalSaleCustomerInrAccount(client, branchId, sale)
+      : Promise.resolve(null as string | null),
+    needsMetalStockSale
+      ? ensureInrSystemAccount(client, branchId, 'Metal Stock', 'inventory', 'metal_inventory')
+      : Promise.resolve(null as string | null),
+    needsMetalSales
+      ? ensureInrSystemAccount(client, branchId, 'Metal Sales', 'income', 'metal_sales')
+      : Promise.resolve(null as string | null),
+    needsMetalCost
+      ? ensureInrSystemAccount(client, branchId, 'Cost of Metal Sold', 'expense', 'metal_cost')
+      : Promise.resolve(null as string | null),
+    needsMetalProfit
+      ? ensureInrSystemAccount(client, branchId, 'Metal Profit', 'profit', 'metal_profit')
+      : Promise.resolve(null as string | null),
+    needsMetalFx
+      ? ensureSystemAccount(client, branchId, 'Metal FX Profit', 'profit', 'metal_fx_profit')
+      : Promise.resolve(null as string | null),
+    needsAedSettlement
+      ? ensureInrSystemAccount(client, branchId, 'Metal AED settlement', 'inventory', 'metal_aed_settlement')
+      : Promise.resolve(null as string | null),
+    needsMetalAedProceeds
+      ? ensureMetalAedProceedsAccount(client, branchId)
+      : Promise.resolve(null as string | null),
+    (needsCustomerAed || needsMetalAedAny)
+      ? (async (): Promise<{ customerAed: string | null; metalAed: string | null }> => {
+          const [cpResult, metalAed] = await Promise.all([
+            saleCounterpartyId
+              ? client.query(`SELECT name FROM ic_counterparties WHERE id = $1 LIMIT 1`, [saleCounterpartyId])
+              : Promise.resolve(null),
+            ensureMetalAedAccount(client, branchId),
+          ]);
+          const customerAed = cpResult && cpResult.rows[0]
+            ? await ensureLinkedAccount(client, {
+                branchId,
+                sourceType: 'ic_counterparty',
+                sourceId: saleCounterpartyId!,
+                name: String(cpResult.rows[0].name),
+              })
+            : null;
+          return { customerAed, metalAed };
+        })()
+      : Promise.resolve({ customerAed: null as string | null, metalAed: null as string | null }),
+  ]);
+
+  if (needsCustomer && !customerAccountId) {
+    throw new Error('Could not resolve INR account for metal sale customer');
+  }
   if (needsAedSettlement && !aedSettlementInr) {
     throw new Error('Could not resolve INR account for metal AED settlement clearing');
   }
 
-  const needsCustomerAed = lines.some(l => l.debit === 'customer_aed' || l.credit === 'customer_aed');
-  let customerAedAccountId: string | null = null;
-  let metalAedAccountId: string | null = null;
-  const needsMetalAedProceeds = lines.some(
-    l => l.debit === 'metal_aed_proceeds' || l.credit === 'metal_aed_proceeds',
-  );
-  const metalAedProceedsId = needsMetalAedProceeds
-    ? await ensureMetalAedProceedsAccount(client, branchId)
-    : null;
+  const customerAedAccountId = aedAccountPairSale.customerAed;
+  let metalAedAccountId: string | null = aedAccountPairSale.metalAed;
 
-  if (
-    needsCustomerAed ||
-    lines.some(
-      l =>
-        l.debit === 'metal_aed' ||
-        l.credit === 'metal_aed' ||
-        l.debit === 'metal_aed_proceeds' ||
-        l.credit === 'metal_aed_proceeds',
-    )
-  ) {
-    const counterpartyId = sale.counterparty_id ? String(sale.counterparty_id) : null;
-    if (counterpartyId) {
-      const cpRes = await client.query(`SELECT name FROM ic_counterparties WHERE id = $1 LIMIT 1`, [
-        counterpartyId,
-      ]);
-      customerAedAccountId = await ensureLinkedAccount(client, {
-        branchId,
-        sourceType: 'ic_counterparty',
-        sourceId: counterpartyId,
-        name: cpRes.rows[0] ? String(cpRes.rows[0].name) : 'Customer',
-      });
-    }
-    metalAedAccountId = await ensureMetalAedAccount(client, branchId);
+  if (needsCustomerAed || needsMetalAedAny) {
     const needsAedBook = lines.some(l => l.book === 'AED');
     if (needsAedBook && needsCustomerAed && !customerAedAccountId) {
       throw new Error('Could not resolve AED account for metal sale customer');

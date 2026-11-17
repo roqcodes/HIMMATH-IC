@@ -6,13 +6,17 @@ import { getSessionUser } from '@/lib/auth';
 import { assertStaffWriteAccess } from '@/app/actions/permissionActions';
 import { logger } from '@/lib/logger';
 import {
-  removeICBranchDepositFromICFunds,
+  ensureLinkedAccount,
+  postVoucherInTx,
   syncICBranchDepositToICFunds,
+  voidVoucherByReference,
 } from '@/lib/icFunds/icTransferFundSync';
+import { ensureHqIcFundsBranch } from '@/lib/icFunds/ensureHqBranch';
 import { mapBranchDepositRow } from '@/lib/icTransfer/branchDepositMapper';
 import { assertManagerCustomerAllowedAtIcBranch } from '@/lib/icTransfer/icBranchManagerScope';
 import { loadBranchTimeZoneInTx } from '@/lib/branchTimeZoneDb';
 import { ledgerVoucherDateFromInstant } from '@/lib/toIsoDateString';
+import { roundLedgerAmount } from '@/lib/icFunds/currencyPolicy';
 import { HQ_IC_FUNDS_BRANCH_ID } from '@/lib/icFunds/hqBranch';
 import type { BranchDepositKpis } from '@/lib/icTransfer/branchDepositKpis';
 import type { ICBranchDeposit } from '@/types';
@@ -65,18 +69,31 @@ export async function createBranchDepositAction(
     const depositId = crypto.randomUUID();
     const depositInstant = new Date().toISOString();
 
+    // ensureHqIcFundsBranch uses the global pool — call before opening transaction
+    await ensureHqIcFundsBranch();
+
     await withTransaction(async client => {
-      const brRes = await client.query<{ timezone: string | null }>(
-        `SELECT timezone FROM ic_branches WHERE id = $1 LIMIT 1`,
+      // 1. Validate branch + load timezone
+      const brRes = await client.query<{ timezone: string | null; name: string | null }>(
+        `SELECT timezone, name FROM ic_branches WHERE id = $1 LIMIT 1`,
         [icBranchId],
       );
       if (brRes.rows.length === 0) throw new Error('Branch not found.');
       const branchTz = String(brRes.rows[0].timezone || 'Asia/Dubai').trim();
+      const deskName = (brRes.rows[0].name ? String(brRes.rows[0].name) : '').trim() || icBranchId;
       await loadBranchTimeZoneInTx(client, HQ_IC_FUNDS_BRANCH_ID);
+
+      // 2. Resolve customer name for journal notes
+      const custRes = await client.query<{ name: string | null }>(
+        `SELECT name FROM ic_counterparties WHERE id = $1 LIMIT 1`,
+        [parsed.customerId],
+      );
+      const customerName = custRes.rows[0] ? String(custRes.rows[0].name || 'Customer') : 'Customer';
 
       const depositDate =
         parsed.depositDate?.trim() || ledgerVoucherDateFromInstant(depositInstant, branchTz);
 
+      // 3. Insert the deposit row
       await client.query(
         `INSERT INTO ic_branch_deposits (
            id, branch_id, ic_branch_id, manager_id, customer_id,
@@ -99,13 +116,52 @@ export async function createBranchDepositAction(
           user.name || null,
         ],
       );
+
+      // 4. Update the branch cash balance
       await client.query(
         `UPDATE ic_branches SET cash_balance = COALESCE(cash_balance, 0) + $2 WHERE id = $1`,
         [icBranchId, parsed.amountAed],
       );
-    });
 
-    await syncICBranchDepositToICFunds(depositId);
+      // 5. Post the IC Funds AED journal — inlined from syncICBranchDepositToICFunds
+      const amount = roundLedgerAmount(parsed.amountAed);
+      if (amount > 0) {
+        await voidVoucherByReference(client, HQ_IC_FUNDS_BRANCH_ID, 'ic_branch_deposit', depositId);
+
+        const tillAccountId = await ensureLinkedAccount(client, {
+          branchId: HQ_IC_FUNDS_BRANCH_ID,
+          sourceType: 'ic_branch',
+          sourceId: icBranchId,
+          name: deskName,
+        });
+        const customerAccountId = await ensureLinkedAccount(client, {
+          branchId: HQ_IC_FUNDS_BRANCH_ID,
+          sourceType: 'ic_counterparty',
+          sourceId: parsed.customerId,
+          name: customerName,
+        });
+        if (!tillAccountId || !customerAccountId) {
+          throw new Error('Could not resolve IC Funds accounts for branch deposit');
+        }
+
+        const notes =
+          parsed.settlementMode === 'metal'
+            ? `Metal deposit at ${deskName} · ${parsed.metalWeightG ?? 0}g · ${depositId.slice(0, 8)}`
+            : `AED deposit at ${deskName} · ${depositId.slice(0, 8)}`;
+
+        await postVoucherInTx(client, {
+          branchId: HQ_IC_FUNDS_BRANCH_ID,
+          voucherType: 'journal',
+          voucherDate: depositDate,
+          debitAccountId: tillAccountId,
+          creditAccountId: customerAccountId,
+          amount,
+          notes,
+          referenceType: 'ic_branch_deposit',
+          referenceId: depositId,
+        });
+      }
+    });
 
     revalidatePath('/admin/branches');
     revalidatePath(`/admin/branches/[id]`, 'page');
@@ -141,13 +197,17 @@ export async function deleteBranchDepositAction(slug: string, depositId: string)
     const denied = await assertStaffWriteAccess(user, 'warehouse', HQ_IC_FUNDS_BRANCH_ID);
     if (denied) return { success: false, error: denied };
 
-    await removeICBranchDepositFromICFunds(id);
-
     await withTransaction(async client => {
+      // 1. Void the IC Funds journal inside the same tx (atomic with delete)
+      await voidVoucherByReference(client, HQ_IC_FUNDS_BRANCH_ID, 'ic_branch_deposit', id);
+
+      // 2. Delete the deposit row
       const del = await client.query(`DELETE FROM ic_branch_deposits WHERE id = $1 RETURNING id`, [id]);
       if (del.rows.length === 0) {
         throw new Error('Deposit not found.');
       }
+
+      // 3. Reverse the branch cash balance
       if (amount > 0 && icBranchId) {
         await client.query(
           `UPDATE ic_branches SET cash_balance = COALESCE(cash_balance, 0) - $2 WHERE id = $1`,

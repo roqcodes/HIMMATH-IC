@@ -80,6 +80,7 @@ import {
   removeICPurchaseFundLedger,
 } from '@/lib/icTransfer/fundLedgerSync';
 import { syncICSupplierFundAccount, syncICWarehouseFundAccount } from '@/lib/icFunds/icTransferFundSync';
+import { ensureHqIcFundsBranch } from '@/lib/icFunds/ensureHqBranch';
 import { parseAedInrOpenings, parseWarehouseOpenings, type AedInrOpenings, type WarehouseOpenings } from '@/lib/icFunds/entityOpenings';
 import { syncWarehouseIcStockColumn } from '@/lib/icTransfer/warehouseIcStock';
 import { resolveAedAgentIdForCounterpartyWithClient, syncCounterpartyAedAgent } from '@/lib/counterparties/aedAgentSync';
@@ -1094,6 +1095,7 @@ export async function dbAddICPurchaseAction(
       return { success: false, error: 'Select an AED agent for metal purchases paid in AED or split.' };
     }
 
+    await ensureHqIcFundsBranch();
     const row = await withTransaction(async (client) => {
       const party = await loadCounterpartyLink(client, String(parsed.counterpartyId));
       if (!party) throw new Error('Counterparty not found');
@@ -1178,11 +1180,12 @@ export async function dbAddICPurchaseAction(
         }
       }
 
+      await syncICPurchaseFundLedger(String(res.rows[0].id), client);
+
       return res.rows[0];
     });
 
-    scheduleIcFundLedgerSync(() => syncICPurchaseFundLedger(String(row.id)));
-  const purchaseRow = await loadICPurchaseRowById(String(row.id));
+    const purchaseRow = await loadICPurchaseRowById(String(row.id));
     return { success: true, data: purchaseRow ?? mapICPurchaseRow(row) };
   } catch (err: unknown) {
     logger.error({ err, purchase }, 'Validation error in dbAddICPurchaseAction');
@@ -1437,6 +1440,7 @@ export async function dbAddICSaleAction(
 
     const collectedUnitsFinal = instantComplete ? normalized.units : null;
 
+    await ensureHqIcFundsBranch();
     const row = await withTransaction(async (client) => {
       let aedAgentRecordId: string | null = metalLotSale?.aedAgentId ?? null;
       if (aedAgentRecordId && metalLotSale && needsMetalAedAgent(metalLotSale.metalPaymentMethod)) {
@@ -1542,18 +1546,12 @@ export async function dbAddICSaleAction(
         await adjustWarehouseStock(client, salePayload.warehouseId, -normalized.units);
       }
 
+      await syncICSaleFundLedger(String(res.rows[0].id), client);
+
       return res.rows[0];
     });
 
   const saleId = String(row.id);
-  // Metal sales are completed at creation time, so persist their stock and deal
-  // journals before returning success. Deferred sync can otherwise be interrupted
-  // after the sale row is saved, leaving the AED FX voucher missing.
-  if (isMetalSale) {
-    await syncICSaleFundLedger(saleId);
-  } else {
-    scheduleIcFundLedgerSync(() => syncICSaleFundLedger(saleId));
-  }
   const saleRow = await loadICSaleRowById(saleId);
   return { success: true, data: saleRow ?? mapICSaleRow(row) };
   } catch (err: unknown) {
@@ -1698,6 +1696,7 @@ export async function dbUpdateICPurchaseAction(
     const oldGrams = Number(existingRow.metal_weight_g) || 0;
     const newGrams = isMetalPurchase ? Number(normalized.metalWeightG) || 0 : 0;
 
+    await ensureHqIcFundsBranch();
     const res = await withTransaction(async (client) => {
       const setClauses: string[] = [];
       const values: unknown[] = [];
@@ -1739,11 +1738,12 @@ export async function dbUpdateICPurchaseAction(
         }
       }
 
+      await syncICPurchaseFundLedger(parsedId, client);
+
       return updateRes.rows[0];
     });
 
-    await syncICPurchaseFundLedger(parsedId);
-  const purchaseRow = await loadICPurchaseRowById(parsedId);
+    const purchaseRow = await loadICPurchaseRowById(parsedId);
     return { success: true, data: purchaseRow ?? mapICPurchaseRow(res) };
   } catch (err: unknown) {
     logger.error({ err, id, updates }, 'Error in dbUpdateICPurchaseAction');
@@ -1867,6 +1867,7 @@ export async function dbUpdateICSaleAction(
     const keys = Object.keys(dbUpdates).filter(k => (dbUpdates as Record<string, unknown>)[k] !== undefined);
     if (keys.length === 0) return { success: false, error: 'No fields to update' };
 
+    await ensureHqIcFundsBranch();
     const row = await withTransaction(async (client) => {
       const setClauses: string[] = [];
       const values: unknown[] = [];
@@ -1909,10 +1910,11 @@ export async function dbUpdateICSaleAction(
         }
       }
 
+      await syncICSaleFundLedger(parsedId, client);
+
       return updateRes.rows[0];
     });
 
-    await syncICSaleFundLedger(parsedId);
     const saleRow = await loadICSaleRowById(parsedId);
     return { success: true, data: saleRow ?? mapICSaleRow(row) };
   } catch (err: unknown) {
@@ -1941,8 +1943,9 @@ export async function dbDeleteICPurchaseAction(id: string): Promise<DbActionResu
       return { success: false, error: 'Cannot delete a metal purchase that already has sales.' };
     }
 
-    await removeICPurchaseFundLedger(parsedId);
+    await ensureHqIcFundsBranch();
     await withTransaction(async (client) => {
+      await removeICPurchaseFundLedger(parsedId, client);
       await client.query(
         `DELETE FROM ic_warehouse_transactions
          WHERE reference_id = $1 AND reference_type IN ('purchase', 'metal_purchase')`,
@@ -1988,8 +1991,9 @@ export async function dbDeleteICSaleAction(id: string): Promise<DbActionResult<n
       return { success: false, error: 'Completed orders cannot be deleted' };
     }
 
-    await removeICSaleFundLedger(parsedId);
+    await ensureHqIcFundsBranch();
     await withTransaction(async (client) => {
+      await removeICSaleFundLedger(parsedId, client);
       await client.query(
         `DELETE FROM ic_warehouse_transactions
          WHERE reference_id = $1

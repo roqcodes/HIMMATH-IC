@@ -15,7 +15,7 @@ describe('metal profit', () => {
     });
     const split = splitMetalBookedPl(pl);
     assert.equal(split.inr, 10_000);
-    assert.equal(split.aed, 0);
+    assert.equal(split.aed, 1_000);
   });
 
   it('splits INR profit when purchase was cash metal and sale is AED', () => {

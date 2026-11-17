@@ -839,3 +839,45 @@ CREATE POLICY asic_user_page_permissions ON public.user_page_permissions FOR ALL
 GRANT USAGE ON SCHEMA public TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO authenticated;
+
+-- ── 2026-11-17: Atomic Performance & Subsecond Idempotency Indexes ──
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_ic_fund_vouchers_active_ref
+  ON public.ic_fund_vouchers (branch_id, reference_type, reference_id)
+  WHERE status IN ('active', 'pending');
+
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_inr_fund_vouchers_active_ref
+  ON public.inr_fund_vouchers (branch_id, reference_type, reference_id)
+  WHERE status = 'active';
+
+CREATE INDEX IF NOT EXISTS idx_ic_fund_vouchers_ref_status
+  ON public.ic_fund_vouchers (branch_id, reference_type, reference_id, status)
+  WHERE status IN ('active', 'pending', 'void');
+
+CREATE INDEX IF NOT EXISTS idx_inr_fund_vouchers_ref_status
+  ON public.inr_fund_vouchers (branch_id, reference_type, reference_id, status)
+  WHERE status IN ('active', 'void');
+
+CREATE INDEX IF NOT EXISTS idx_ic_purchases_warehouse_created
+  ON public.ic_purchases (warehouse_id, created_at, id)
+  WHERE COALESCE(settlement_mode, 'cash') <> 'metal';
+
+CREATE INDEX IF NOT EXISTS idx_ic_sales_warehouse_completed
+  ON public.ic_sales (warehouse_id, order_status, COALESCE(status_updated_at, created_at), created_at, id)
+  WHERE order_status = 'completed';
+
+CREATE INDEX IF NOT EXISTS idx_ic_sales_metal_purchase
+  ON public.ic_sales (metal_purchase_id, settlement_mode, order_status)
+  WHERE settlement_mode = 'metal' AND order_status = 'completed';
+
+CREATE INDEX IF NOT EXISTS idx_ic_fund_accounts_source
+  ON public.ic_fund_accounts (branch_id, source_type, source_id)
+  WHERE source_type IS NOT NULL AND source_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_inr_fund_accounts_source
+  ON public.inr_fund_accounts (branch_id, source_id)
+  WHERE source_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_inr_fund_vouchers_metal_deal
+  ON public.inr_fund_vouchers (branch_id, reference_id)
+  WHERE status = 'active';
+

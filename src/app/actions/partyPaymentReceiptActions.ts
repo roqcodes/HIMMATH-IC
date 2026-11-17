@@ -153,7 +153,7 @@ export async function postPartyPaymentReceiptAction(
             access.user.id ?? null,
             access.user.name ?? null,
             access.user.id ?? null,
-            customerId,
+            voucherId,
             managerId,
             aedAgentId,
           ],
@@ -205,7 +205,7 @@ export async function postPartyPaymentReceiptAction(
         notes: notes?.trim() ?? '',
         createdByName: access.user.name ?? access.user.id ?? null,
         referenceType: 'party_pr',
-        referenceId: customerId,
+        referenceId: crypto.randomUUID(),
         managerId,
         aedAgentId,
       });

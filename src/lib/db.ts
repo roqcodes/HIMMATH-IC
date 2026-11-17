@@ -38,13 +38,14 @@ function resolvePoolMax(): number {
   const raw = process.env.PG_POOL_MAX;
   if (raw) {
     const n = Number.parseInt(raw, 10);
-    if (Number.isFinite(n) && n >= 1 && n <= 10) return n;
+    if (Number.isFinite(n) && n >= 1 && n <= 20) return n;
   }
   if (isSessionPooler) {
     // One slot per warm serverless instance — still risky at high concurrency; prefer port 6543.
-    return isServerless ? 1 : 3;
+    return isServerless ? 1 : 4;
   }
-  return isServerless ? 2 : 6;
+  // Transaction pooler: higher concurrency is safe — PgBouncer multiplexes real connections.
+  return isServerless ? 3 : 8;
 }
 
 /** Parallel queries per HTTP request — must stay ≤ pool max on session pooler. */
@@ -75,9 +76,11 @@ const pool =
       ssl: isLocalhost ? false : { rejectUnauthorized: false },
       max: resolvePoolMax(),
       idleTimeoutMillis: isServerless ? 1_000 : 5_000,
-      connectionTimeoutMillis: 8_000,
+      connectionTimeoutMillis: 4_000,
       allowExitOnIdle: isServerless,
-      options: '-c statement_timeout=20000',
+      // lock_timeout prevents long waits on row-level locks during concurrent posting.
+      // statement_timeout guards against runaway queries; subsecond OLTP should finish well within 10s.
+      options: '-c statement_timeout=15000 -c lock_timeout=5000',
     }));
 
 export type SqlQuery = {

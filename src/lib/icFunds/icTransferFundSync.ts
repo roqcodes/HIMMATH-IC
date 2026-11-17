@@ -23,7 +23,7 @@ import { logger } from '@/lib/logger';
 import { loadBranchTimeZoneInTx } from '@/lib/branchTimeZoneDb';
 import { ledgerVoucherDateFromInstant } from '@/lib/toIsoDateString';
 
-type DbClient = {
+export type DbClient = {
   query: (text: string, params?: unknown[]) => Promise<QueryResult>;
 };
 
@@ -922,38 +922,38 @@ export async function postVoucherInTx(
   const currencyError = validateVoucherCurrencyPolicy(debit, credit);
   if (currencyError) throw new Error(currencyError);
 
-  await client.query(
-    `INSERT INTO ic_fund_voucher_counters (branch_id, last_no) VALUES ($1, 0) ON CONFLICT (branch_id) DO NOTHING`,
-    [params.branchId],
-  );
-  const counter = await client.query(
-    `UPDATE ic_fund_voucher_counters SET last_no = last_no + 1 WHERE branch_id = $1 RETURNING last_no`,
-    [params.branchId],
-  );
-  const voucherNo = Number(counter.rows[0]?.last_no) || 1;
   const id = `ICFV-${crypto.randomUUID().slice(0, 10).toUpperCase()}`;
 
+  // Single CTE: atomically increment the voucher counter and insert the voucher row
+  // in one round-trip instead of two separate queries.
   try {
     await client.query(
-      `INSERT INTO ic_fund_vouchers (
+      `WITH ctr AS (
+         INSERT INTO ic_fund_voucher_counters (branch_id, last_no)
+         VALUES ($1, 1)
+         ON CONFLICT (branch_id) DO UPDATE SET last_no = ic_fund_voucher_counters.last_no + 1
+         RETURNING last_no
+       )
+       INSERT INTO ic_fund_vouchers (
          id, branch_id, voucher_no, voucher_type, voucher_date,
          debit_account_id, credit_account_id, amount, notes,
          created_by_name, reference_type, reference_id, status
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+       )
+       SELECT $2, $1, ctr.last_no, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+       FROM ctr`,
       [
-        id,
-        params.branchId,
-        voucherNo,
-        params.voucherType,
-        params.voucherDate,
-        params.debitAccountId,
-        params.creditAccountId,
-        amount,
-        params.notes,
-        SYNC_ACTOR,
-        params.referenceType,
-        params.referenceId,
-        voucherStatus,
+        params.branchId,       // $1
+        id,                    // $2
+        params.voucherType,    // $3
+        params.voucherDate,    // $4
+        params.debitAccountId, // $5
+        params.creditAccountId,// $6
+        amount,                // $7
+        params.notes,          // $8
+        SYNC_ACTOR,            // $9
+        params.referenceType,  // $10
+        params.referenceId,    // $11
+        voucherStatus,         // $12
       ],
     );
     return id;
@@ -970,8 +970,7 @@ export async function postVoucherInTx(
     );
     if (again.rows.length > 0) return String(again.rows[0].id);
     throw err;
-  }
-}
+  }}
 
 /** IC Transfer journals always post to the HQ cash book (receipts, payments, counterparties). */
 function resolveIcFundsLedgerBranchId(_explicitBranchId?: string | null): string {
@@ -1071,10 +1070,10 @@ export async function syncICWarehouseFundAccount(warehouseId: string): Promise<v
   }
 }
 
-export async function syncICPurchaseToICFunds(purchaseId: string): Promise<void> {
+export async function syncICPurchaseToICFunds(purchaseId: string, transactionClient?: DbClient): Promise<void> {
   try {
-    await ensureHqIcFundsBranch();
-    await withTransaction(async (client) => {
+    if (!transactionClient) await ensureHqIcFundsBranch();
+    const sync = async (client: DbClient) => {
       await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`ic_purchase_sync:${purchaseId}`]);
       const purchaseRes = await client.query(`SELECT * FROM ic_purchases WHERE id = $1 LIMIT 1`, [purchaseId]);
       if (purchaseRes.rows.length === 0) return;
@@ -1154,7 +1153,9 @@ export async function syncICPurchaseToICFunds(purchaseId: string): Promise<void>
       if (warehouseId) {
         await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId, branchTz);
       }
-    });
+    };
+    if (transactionClient) await sync(transactionClient);
+    else await withTransaction(sync);
   } catch (err) {
     logger.error({ err, purchaseId }, 'Failed to sync IC purchase to IC Funds');
     throw err;
@@ -1162,24 +1163,26 @@ export async function syncICPurchaseToICFunds(purchaseId: string): Promise<void>
 }
 
 /** Void HQ AED/INR journals for a purchase (safe after the purchase row is deleted). */
-export async function removeICPurchaseFromICFunds(purchaseId: string): Promise<void> {
+export async function removeICPurchaseFromICFunds(purchaseId: string, transactionClient?: DbClient): Promise<void> {
   try {
-    await withTransaction(async client => {
+    const remove = async (client: DbClient) => {
       const branchId = HQ_IC_FUNDS_BRANCH_ID;
       const { voidMetalPurchaseLedgers } = await import('@/lib/metal/posting');
       await voidMetalPurchaseLedgers(client, branchId, purchaseId);
       await voidVoucherByReference(client, branchId, 'ic_purchase', purchaseId);
-    });
+    };
+    if (transactionClient) await remove(transactionClient);
+    else await withTransaction(remove);
   } catch (err) {
     logger.error({ err, purchaseId }, 'Failed to remove IC purchase from IC Funds');
     throw err;
   }
 }
 
-export async function syncICSaleToICFunds(saleId: string): Promise<void> {
+export async function syncICSaleToICFunds(saleId: string, transactionClient?: DbClient): Promise<void> {
   try {
-    await ensureHqIcFundsBranch();
-    await withTransaction(async (client) => {
+    if (!transactionClient) await ensureHqIcFundsBranch();
+    const sync = async (client: DbClient) => {
       await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`ic_sale_sync:${saleId}`]);
       const saleRes = await client.query(`SELECT * FROM ic_sales WHERE id = $1 LIMIT 1`, [saleId]);
       if (saleRes.rows.length === 0) return;
@@ -1234,7 +1237,9 @@ export async function syncICSaleToICFunds(saleId: string): Promise<void> {
       } else {
         await voidSaleMarginVouchers(client, branchId, saleId);
       }
-    });
+    };
+    if (transactionClient) await sync(transactionClient);
+    else await withTransaction(sync);
   } catch (err) {
     logger.error({ err, saleId }, 'Failed to sync IC sale to IC Funds');
     throw err;
@@ -1242,15 +1247,17 @@ export async function syncICSaleToICFunds(saleId: string): Promise<void> {
 }
 
 /** Void HQ AED/INR journals for a sale (safe after the sale row is deleted). */
-export async function removeICSaleFromICFunds(saleId: string): Promise<void> {
+export async function removeICSaleFromICFunds(saleId: string, transactionClient?: DbClient): Promise<void> {
   try {
-    await withTransaction(async client => {
+    const remove = async (client: DbClient) => {
       const branchId = HQ_IC_FUNDS_BRANCH_ID;
       const { voidMetalSaleLedgers } = await import('@/lib/metal/posting');
       await voidMetalSaleLedgers(client, branchId, saleId);
       await voidVoucherByReference(client, branchId, 'ic_sale', saleId);
       await voidSaleMarginVouchers(client, branchId, saleId);
-    });
+    };
+    if (transactionClient) await remove(transactionClient);
+    else await withTransaction(remove);
   } catch (err) {
     logger.error({ err, saleId }, 'Failed to remove IC sale from IC Funds');
     throw err;
