@@ -122,18 +122,44 @@ export async function applyAedAccountOpening(
   );
   if (current.rows.length === 0) return;
   const prev = Number(current.rows[0].opening_balance) || 0;
-  if (prev === next) return;
+  if (prev !== next) {
+    const used = await client.query(
+      `SELECT 1 FROM ic_fund_vouchers
+       WHERE debit_account_id = $1 OR credit_account_id = $1
+       LIMIT 1`,
+      [accountId],
+    );
+    if (used.rows.length > 0) {
+      throw new Error('Opening balance is locked after entries exist. Post a journal adjustment instead.');
+    }
+    await client.query(`UPDATE ic_fund_accounts SET opening_balance = $2 WHERE id = $1`, [accountId, next]);
+  }
 
-  const used = await client.query(
-    `SELECT 1 FROM ic_fund_vouchers
-     WHERE debit_account_id = $1 OR credit_account_id = $1
-     LIMIT 1`,
+  // Opening balances are included in ledger balances without vouchers, so balance
+  // their net debit/credit position through a dedicated opening-equity account.
+  const branchRes = await client.query(
+    `SELECT branch_id FROM ic_fund_accounts WHERE id = $1 LIMIT 1`,
     [accountId],
   );
-  if (used.rows.length > 0) {
-    throw new Error('Opening balance is locked after entries exist. Post a journal adjustment instead.');
-  }
-  await client.query(`UPDATE ic_fund_accounts SET opening_balance = $2 WHERE id = $1`, [accountId, next]);
+  const branchId = branchRes.rows[0]?.branch_id ? String(branchRes.rows[0].branch_id) : null;
+  if (!branchId) return;
+
+  const equityId = `ICFA-OBE-${branchId}`;
+  const netRes = await client.query(
+    `SELECT COALESCE(SUM(opening_balance), 0)::text AS net_opening
+     FROM ic_fund_accounts
+     WHERE branch_id = $1 AND id <> $2`,
+    [branchId, equityId],
+  );
+  const equityOpening = roundLedgerAmount(-(Number(netRes.rows[0]?.net_opening) || 0));
+  await client.query(
+    `INSERT INTO ic_fund_accounts (
+       id, branch_id, name, account_type, opening_balance, notes, source_type, source_id
+     ) VALUES ($1, $2, 'Opening Balance Equity', 'profit', $3,
+       'System offset for account opening balances', 'system', 'opening_balance_equity')
+     ON CONFLICT (id) DO UPDATE SET opening_balance = EXCLUDED.opening_balance`,
+    [equityId, branchId, equityOpening],
+  );
 }
 
 export async function ensureLinkedAccount(

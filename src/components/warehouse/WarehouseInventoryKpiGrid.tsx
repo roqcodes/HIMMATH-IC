@@ -90,45 +90,18 @@ export default function WarehouseInventoryKpiGrid({ metrics, books, rangeLabel }
             value={<FmtLedgerInr amount={metrics.cashPurchaseInr} />}
             tone="red"
             count={metrics.cashPurchases}
-            sub={
-              Math.abs(metrics.cashPurchaseAed) >= 0.005 ? (
-                <span className="text-slate-400">
-                  Booked <FmtLedgerAed amount={metrics.cashPurchaseAed} />
-                </span>
-              ) : null
-            }
+            sub={<FmtLedgerAed amount={metrics.cashPurchaseAed} />}
           />
           <WarehouseKpiCell
             label="IC Sales"
             value={<FmtLedgerInr amount={metrics.cashSaleInr} />}
             tone="emerald"
             count={metrics.cashSales}
-            sub={
-              Math.abs(metrics.cashSaleAed) >= 0.005 ? (
-                <span className="text-slate-400">
-                  Booked <FmtLedgerAed amount={metrics.cashSaleAed} />
-                </span>
-              ) : null
-            }
+            sub={<FmtLedgerAed amount={metrics.cashSaleAed} />}
           />
           <WarehouseKpiCell
             label="IC Stock"
             value={<FmtLedgerInr amount={metrics.currentStock * INR_PER_UNIT} />}
-            sub={
-              Math.abs(metrics.icStockAvgAedRate) >= 0.00005 ? (
-                <span
-                  title="Weighted average AED rate per IC unit (cash IC purchases + metal INR sales that add stock)."
-                  className="inline-flex flex-wrap items-baseline gap-x-1"
-                >
-                  <span className="font-semibold text-slate-400 dark:text-slate-500">Avg rate</span>
-                  <span className="tabular-nums text-slate-600 dark:text-slate-300">
-                    {formatIcAvgAedRate(metrics.icStockAvgAedRate)}
-                  </span>
-                </span>
-              ) : (
-                <span className="text-slate-400">Avg rate —</span>
-              )
-            }
           />
 
           <WarehouseKpiCell 
@@ -160,16 +133,31 @@ export default function WarehouseInventoryKpiGrid({ metrics, books, rangeLabel }
         </div>
 
         <div className="grid grid-cols-2 divide-x divide-slate-100 bg-slate-50/50 dark:divide-slate-800 dark:bg-slate-900/20">
-          <div className="px-3 py-2">
-             <div className="flex items-baseline justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">IC P&L</span>
-                <span className="text-[11px] text-slate-400">{rangeLabel}</span>
-             </div>
-             <p
+          <div className="grid min-w-0 grid-cols-[2fr_1fr] divide-x divide-slate-200 dark:divide-slate-800">
+            <div className="min-w-0 px-3 py-2">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">IC P&amp;L</span>
+                <span className="truncate text-[11px] text-slate-400">{rangeLabel}</span>
+              </div>
+              <p
                 className={`text-base font-bold tabular-nums sm:text-lg ${metrics.cashGrossProfitAed >= 0 ? 'text-emerald-600' : 'text-red-600'}`}
-             >
+              >
                 <FmtLedgerAed amount={metrics.cashGrossProfitAed} />
-             </p>
+              </p>
+            </div>
+            <div className="min-w-0 px-3 py-2">
+              <p
+                className="truncate text-[10px] font-bold uppercase tracking-wider text-slate-400"
+                title="Weighted average AED rate per IC unit (cash IC purchases + metal INR sales that add stock)."
+              >
+                Avg rate
+              </p>
+              <p className="mt-1 truncate text-base font-bold tabular-nums text-slate-700 dark:text-slate-200 sm:text-lg">
+                {Math.abs(metrics.icStockAvgAedRate) >= 0.00005
+                  ? formatIcAvgAedRate(metrics.icStockAvgAedRate)
+                  : '—'}
+              </p>
+            </div>
           </div>
           <div className="grid min-w-0 grid-cols-2">
             <div className="min-w-0 px-3 py-2">

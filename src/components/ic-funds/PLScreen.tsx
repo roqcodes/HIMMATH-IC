@@ -2,15 +2,14 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { getICFundPlLedgerScreenAction } from '@/app/actions/icFundsActions';
+import { getICFundPlLedgerScreenAction, getICFundProfitLossReportAction } from '@/app/actions/icFundsActions';
 import {
   accountTypeLabel,
   IC_FUND_VOUCHER_LABELS,
   isPLAccountType,
 } from '@/lib/icFunds/constants';
-import { fmtICAmount, fmtICDate, fmtLedgerAed, icfLedgerColumnLabel, FmtLedgerAed } from '@/lib/icFunds/format';
+import { fmtICAmount, fmtICDate, icfLedgerColumnLabel, FmtLedgerAed } from '@/lib/icFunds/format';
 import AsicKpiStrip from '@/components/asic/AsicKpiStrip';
-import { computePlKpis } from '@/lib/icFunds/kpiMetrics';
 import { icfCard, icfInput, icfLabel, icfTableWrap, icfTd, icfTh, icfThAlign, icfTheadRow, icfAccountLink } from '@/components/ic-funds/ui';
 import { ASICPageSkeleton, ASICTableRowsSkeleton, ASICTableSkeleton } from '@/components/asic/ASICTableSkeleton';
 import ICFundsDateFilterBar from '@/components/ic-funds/ICFundsDateFilterBar';
@@ -20,14 +19,12 @@ import ICFundAccountLink from '@/components/ic-funds/ICFundAccountLink';
 import { BalanceWithPendingCell } from '@/components/ic-funds/BalanceWithPending';
 import { plDisplayBalance, plPeriodMovementFromLedger } from '@/lib/icFunds/accountBalance';
 import { resolveAccountDetailHref } from '@/lib/icFunds/accountNavigation';
-import { computeDealProfit } from '@/lib/icTransfer/dealProfit';
-import { formatMetalPlKpi } from '@/lib/icTransfer/inventoryKpiMetrics';
-import { ledgerAedNode } from '@/lib/icFunds/formatDisplay';
 import { useApp } from '@/context/AppContext';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { logClientActionError } from '@/lib/errors/actionError';
 import { trackLoading } from '@/lib/loadingBar';
 import type { ICFundAccount, ICFundAccountType, ICFundVoucher } from '@/types';
+import type { ICFundProfitLossReport } from '@/lib/icFunds/plReportTypes';
 
 type PlLedgerPayload = NonNullable<
   Extract<Awaited<ReturnType<typeof getICFundPlLedgerScreenAction>>, { success: true }>['data']
@@ -68,7 +65,7 @@ export default function PLScreen({
   slug: string;
   portal?: 'admin' | 'branch';
 }) {
-  const { branches, icPurchases, icSales, icWarehouses } = useApp();
+  const { branches } = useApp();
   const { alert } = useConfirmDialog();
   const branch = branches.find(b => b.slug === slug);
   const {
@@ -83,6 +80,7 @@ export default function PLScreen({
   } = useICFundsDateFilter(branch?.timezone);
 
   const [payload, setPayload] = useState<PlLedgerPayload | null>(null);
+  const [operationalPl, setOperationalPl] = useState<ICFundProfitLossReport | null>(null);
   const [accountFilter, setAccountFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -90,18 +88,35 @@ export default function PLScreen({
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const result = await trackLoading(() => getICFundPlLedgerScreenAction({ branchId, startDate, endDate }));
+    const [result, operationalResult] = await trackLoading(() => Promise.all([
+      getICFundPlLedgerScreenAction({ branchId, startDate, endDate }),
+      getICFundProfitLossReportAction({ branchId, startDate, endDate }),
+    ]));
     if (!result.success) {
-      logClientActionError('PLScreen.load', result.error);
-      setError(result.error);
+      const errorMessage = result.error;
+      logClientActionError('PLScreen.load', errorMessage);
+      setError(errorMessage);
       setPayload(null);
+      setOperationalPl(null);
       await alert({
         title: 'Could not load P&L',
-        message: result.error,
+        message: errorMessage,
+        variant: 'danger',
+      });
+    } else if (!operationalResult.success) {
+      const errorMessage = operationalResult.error;
+      logClientActionError('PLScreen.load', errorMessage);
+      setError(errorMessage);
+      setPayload(null);
+      setOperationalPl(null);
+      await alert({
+        title: 'Could not load P&L',
+        message: errorMessage,
         variant: 'danger',
       });
     } else {
       setPayload(result.data);
+      setOperationalPl(operationalResult.data);
     }
     setLoading(false);
   }, [alert, branchId, endDate, startDate]);
@@ -137,49 +152,28 @@ export default function PLScreen({
       });
   }, [accountFilter, payload]);
 
-  const summary = payload?.profitLoss;
-  const plKpiMetrics = useMemo(
-    () => (summary ? computePlKpis(summary, plVouchers.length) : []),
-    [summary, plVouchers.length],
-  );
-
-  const dealPl = useMemo(
-    () =>
-      computeDealProfit({
-        purchases: icPurchases,
-        sales: icSales,
-        range: { startDate: startDate || null, endDate: endDate || null },
-        warehouses: icWarehouses,
-      }),
-    [icPurchases, icSales, icWarehouses, startDate, endDate],
-  );
-
   const dealKpiMetrics = useMemo(
-    () => [
+    () => operationalPl ? [
       {
-        label: 'IC gross profit',
-        value: ledgerAedNode(dealPl.cashGrossProfitAed),
-        valueTitle: fmtLedgerAed(dealPl.cashGrossProfitAed),
-        hint: 'Operational WAC on cash IC sales',
-        tone: dealPl.cashGrossProfitAed >= 0 ? ('emerald' as const) : ('red' as const),
+        label: 'IC gross profit (AED)',
+        value: <FmtLedgerAed amount={operationalPl.icProfit.grossProfit} />,
+        hint: 'Total warehouse IC sales less WAC cost',
+        tone: operationalPl.icProfit.grossProfit >= 0 ? ('emerald' as const) : ('red' as const),
       },
       {
-        label: 'Metal P&L (INR)',
-        ...formatMetalPlKpi({
-          metalProfitAed: dealPl.metalProfitAed,
-          metalProfitInr: dealPl.metalProfitInr,
-          rangeLabel: `${dealPl.metalSoldG.toLocaleString(undefined, { maximumFractionDigits: 2 })} g · ${dealPl.metalSaleCount} sales`,
-        }),
+        label: 'Metal profit (INR)',
+        value: <span className="font-mono tabular-nums">₹{operationalPl.metalPl.metalProfitInr.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>,
+        hint: 'Metal lot profit, kept separate from IC',
+        tone: operationalPl.metalPl.metalProfitInr >= 0 ? ('emerald' as const) : ('red' as const),
       },
       {
         label: 'Metal FX profit (AED)',
-        value: ledgerAedNode(dealPl.metalProfitAed),
-        valueTitle: fmtLedgerAed(dealPl.metalProfitAed),
-        hint: 'Secondary AED FX profit on agent deals',
-        tone: dealPl.metalProfitAed >= 0 ? ('emerald' as const) : ('red' as const),
+        value: <FmtLedgerAed amount={operationalPl.metalPl.metalFxProfitAed} />,
+        hint: 'Secondary FX result on metal deals',
+        tone: operationalPl.metalPl.metalFxProfitAed >= 0 ? ('emerald' as const) : ('red' as const),
       },
-    ],
-    [dealPl],
+    ] : [],
+    [operationalPl],
   );
 
   return (
@@ -199,7 +193,6 @@ export default function PLScreen({
         <p className="text-sm text-red-600">{error}</p>
       ) : payload ? (
         <>
-          {plKpiMetrics.length > 0 ? <AsicKpiStrip metrics={plKpiMetrics} /> : null}
           <AsicKpiStrip metrics={dealKpiMetrics} columns={3} />
 
           <div className={icfCard}>

@@ -3379,12 +3379,7 @@ export async function getICFundProfitLossReportAction(
       tzRes.rows[0]?.timezone != null ? String(tzRes.rows[0].timezone) : null,
     );
 
-    const [accountLedgers, periodPL, metalPl] = await Promise.all([
-      fetchAccountPeriodLedgers(parsed.data.branchId, startDate, endDate),
-      queryProfitLossTotals(parsed.data.branchId, {
-        startDate: parsed.data.startDate,
-        endDate: parsed.data.endDate,
-      }),
+    const [metalPl, warehousePl] = await Promise.all([
       queryMetalPlPeriodKpis({
         branchId: parsed.data.branchId,
         startDate,
@@ -3392,23 +3387,45 @@ export async function getICFundProfitLossReportAction(
         warehouseId: parsed.data.warehouseId,
         branchTimeZone,
       }),
+      getICWarehousePLReportAction({
+        branchId: parsed.data.branchId,
+        startDate: startDate ?? undefined,
+        endDate: endDate ?? undefined,
+      }),
     ]);
 
-    const { income, profit, expense, dExpense } = periodPL;
-    const plStatement = buildPlStatement(accountLedgers, [], periodPL);
+    if (!warehousePl.success) {
+      return { success: false, error: warehousePl.error };
+    }
+    const selectedWarehouses = parsed.data.warehouseId
+      ? warehousePl.data.warehouses.filter(w => w.warehouseId === parsed.data.warehouseId)
+      : warehousePl.data.warehouses;
+    const icProfit = {
+      revenue: Number(selectedWarehouses.reduce((s, w) => s + w.revenue, 0).toFixed(2)),
+      cogs: Number(selectedWarehouses.reduce((s, w) => s + w.cogs, 0).toFixed(2)),
+      grossProfit: Number(selectedWarehouses.reduce((s, w) => s + w.grossProfit, 0).toFixed(2)),
+    };
+    // This report's AED result is the warehouse IC margin, not ledger journal movement.
+    const plStatement = buildPlStatement([], [], {
+      income: icProfit.revenue,
+      profit: 0,
+      expense: 0,
+      dExpense: icProfit.cogs,
+    });
 
     return {
       success: true,
       data: {
         plStatement,
         profitLoss: {
-          income: Number(income.toFixed(2)),
-          profit: Number(profit.toFixed(2)),
-          expense: Number(expense.toFixed(2)),
-          dExpense: Number(dExpense.toFixed(2)),
-          net: Number((income + profit - expense - dExpense).toFixed(2)),
+          income: icProfit.revenue,
+          profit: 0,
+          expense: 0,
+          dExpense: icProfit.cogs,
+          net: icProfit.grossProfit,
         },
         metalPl,
+        icProfit,
         startDate,
         endDate,
       },

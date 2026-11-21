@@ -597,6 +597,8 @@ export default function BooksScreen({
             lines: filteredWarehouseLines,
           }
         : null,
+      metalProfitInr: plReport?.metalPl.metalProfitInr,
+      metalSoldG: plReport?.metalPl.metalSoldG,
       settlementTradeReport: filteredSettlementReport,
       statement: activeStatement,
       ledgerBook: activeLedgerBook,
@@ -840,15 +842,11 @@ export default function BooksScreen({
 
     if (reportView === 'profit-loss' && plReport?.plStatement) {
       const s = plReport.plStatement;
-      downloadCsv(reportFileName(fileId, 'csv'), ['Section', 'Amount (AED)'], [
-        ['Sales / income', s.salesTotal],
-        ['Direct costs', -s.directCostsTotal],
-        ['Gross result', s.grossResult],
-        ['Operating expenses', -s.operatingTotal],
-        ['Net for period', s.netForPeriod],
-        ...(warehousePl
-          ? [['Metal P&L (INR, operational)', warehousePl.totals.metalProfitInr]]
-          : []),
+      downloadCsv(reportFileName(fileId, 'csv'), ['Section', 'Amount', 'Currency'], [
+        ['IC sales', plReport.icProfit.revenue, 'AED'],
+        ['IC cost of goods sold', -plReport.icProfit.cogs, 'AED'],
+        ['IC profit', plReport.icProfit.grossProfit, 'AED'],
+        ['Metal profit', plReport.metalPl.metalProfitInr, 'INR'],
       ]);
     }
   }, [
@@ -1386,8 +1384,8 @@ export default function BooksScreen({
           <ProfitLossReport
             statement={plReport.plStatement}
             periodLabel={periodLabel}
-            slug={slug}
-            accounts={accounts}
+            icRevenueAed={plReport.icProfit.revenue}
+            icCogsAed={plReport.icProfit.cogs}
             periodMetalPlInr={plReport.metalPl.metalProfitInr}
             metalSoldG={plReport.metalPl.metalSoldG}
             metalSaleInr={plReport.metalPl.metalSaleInr}

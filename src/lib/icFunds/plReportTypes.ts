@@ -1,4 +1,5 @@
 import type { PlStatement } from '@/lib/icFunds/reportPresentation';
+import type { ICWarehousePLReport } from '@/lib/icFunds/warehouseProfit';
 
 export type MetalPlPeriodKpis = {
   metalSoldG: number;
@@ -18,6 +19,8 @@ export type ICFundProfitLossReport = {
     net: number;
   };
   metalPl: MetalPlPeriodKpis;
+  /** Operational IC profit, sourced from warehouse sales and WAC cost for the selected period. */
+  icProfit: Pick<ICWarehousePLReport['totals'], 'revenue' | 'cogs' | 'grossProfit'>;
   startDate: string | null;
   endDate: string | null;
 };

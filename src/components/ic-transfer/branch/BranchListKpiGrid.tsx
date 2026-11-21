@@ -10,10 +10,11 @@ import type { PortfolioBranchKpis } from '@/lib/icTransfer/branchDepositKpis';
 type Props = {
   rangeLabel: string;
   kpis: PortfolioBranchKpis;
+  periodProfitLoss: number;
   loading?: boolean;
 };
 
-export default function BranchListKpiGrid({ rangeLabel, kpis, loading }: Props) {
+export default function BranchListKpiGrid({ rangeLabel, kpis, periodProfitLoss, loading }: Props) {
   if (loading) {
     return (
       <div className={`${icfCard} mb-4 h-28 animate-pulse bg-slate-50/80`} aria-hidden>
@@ -67,14 +68,10 @@ export default function BranchListKpiGrid({ rangeLabel, kpis, loading }: Props) 
             sub={<span className="text-slate-400">HQ branch cash</span>}
           />
           <WarehouseKpiCell
-            label="Deposit entries"
-            value={kpis.depositCount.toLocaleString()}
-            tone="slate"
-            sub={
-              <span className="text-slate-400">
-                {kpis.cashCount} cash · {kpis.metalCount} metal
-              </span>
-            }
+            label="P&L"
+            value={<FmtLedgerAed amount={periodProfitLoss} />}
+            tone={periodProfitLoss < 0 ? 'red' : 'emerald'}
+            sub={<span className="text-slate-400">{rangeLabel}</span>}
           />
         </div>
       </section>

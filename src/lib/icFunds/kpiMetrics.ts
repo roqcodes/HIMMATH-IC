@@ -22,33 +22,30 @@ type ProfitLossSummary = {
   net: number;
 };
 
-function computePlKpisFromStatement(statement: PlStatement, voucherCount?: number): AsicKpiMetric[] {
+function computePlKpisFromStatement(statement: PlStatement): AsicKpiMetric[] {
   const metrics: AsicKpiMetric[] = [
     {
-      label: 'Sales',
+      label: 'IC sales',
       value: ledgerAedNode(statement.salesTotal),
-      hint: 'Income plus transfers to reserve',
+      hint: 'Completed warehouse sales in period',
       tone: statement.salesTotal > 0 ? 'emerald' : 'slate',
     },
     {
       label: 'Direct costs',
       value: ledgerAedNode(statement.directCostsTotal),
-      hint: 'COGS on completed sales (WAC); unsold stock stays in inventory',
+      hint: 'Warehouse WAC cost on completed sales',
       tone: statement.directCostsTotal > 0 ? 'red' : 'slate',
     },
     {
-      label: 'Gross result',
+      label: 'IC gross profit',
       value: ledgerAedNode(statement.grossResult),
-      hint: 'Sales less direct costs',
+      hint: 'IC sales less warehouse cost',
       tone: statement.grossResult >= 0 ? 'emerald' : 'red',
     },
     {
       label: 'Net result',
       value: ledgerAedNode(statement.netForPeriod),
-      hint:
-        voucherCount != null
-          ? `${voucherCount} P&L ${voucherCount === 1 ? 'voucher' : 'vouchers'} in period`
-          : 'After operating expenses',
+      hint: 'Total IC profit across selected warehouses',
       tone: statement.netForPeriod >= 0 ? 'emerald' : 'red',
     },
   ];
@@ -298,6 +295,8 @@ export function computeBooksKpis(input: {
   receivables?: ICFundAccount[];
   payables?: ICFundAccount[];
   warehousePl?: ICWarehousePLReport | null;
+  metalProfitInr?: number;
+  metalSoldG?: number;
   settlementTradeReport?: ICSettlementTradeReport | null;
   statement?: {
     opening: number;
@@ -319,15 +318,17 @@ export function computeBooksKpis(input: {
     receivables = [],
     payables = [],
     warehousePl,
+    metalProfitInr,
+    metalSoldG,
     settlementTradeReport,
     statement,
     ledgerBook = 'AED',
   } = input;
 
   if (reportView === 'profit-loss' && plStatement) {
-    const metrics = computePlKpisFromStatement(plStatement, vouchers.length);
-    const metalInr = warehousePl?.totals.metalProfitInr;
-    if (metalInr != null && (Math.abs(metalInr) > 0.005 || warehousePl!.totals.metalSoldG > 0)) {
+    const metrics = computePlKpisFromStatement(plStatement);
+    const metalInr = metalProfitInr ?? warehousePl?.totals.metalProfitInr;
+    if (metalInr != null && (Math.abs(metalInr) > 0.005 || (metalSoldG ?? warehousePl?.totals.metalSoldG ?? 0) > 0)) {
       metrics.push({
         label: 'Metal P&L (INR)',
         value: ledgerInrNode(metalInr),

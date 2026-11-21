@@ -74,7 +74,7 @@ export const REPORT_CATALOG_GROUPS: ReadonlyArray<{
         id: 'profit-loss',
         title: 'Profit & loss',
         description:
-          'AED ledger profit, or metal profit in rupees — pick a tab. The two are never added together.',
+          'IC warehouse profit in AED, or metal profit in INR — pick a tab. The two are shown separately.',
       },
       {
         id: 'balance-sheet',

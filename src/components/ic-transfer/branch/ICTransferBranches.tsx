@@ -9,6 +9,8 @@ import BranchListKpiGrid from '@/components/ic-transfer/branch/BranchListKpiGrid
 import ICTransferDateFilterBar from '@/components/ic-transfer/shared/ICTransferDateFilterBar';
 import AsicPageHeader from '@/components/asic/AsicPageHeader';
 import { listBranchDepositSummariesAction } from '@/app/actions/branchDepositActions';
+import { getICWarehousePLReportAction } from '@/app/actions/icFundsActions';
+import { HQ_IC_FUNDS_BRANCH_ID } from '@/lib/icFunds/hqBranch';
 import {
   computePortfolioBranchKpis,
   EMPTY_BRANCH_DEPOSIT_KPIS,
@@ -39,6 +41,8 @@ export default function ICTransferBranches({ branchCustomerIds: _branchCustomerI
 
   const [depositByBranchId, setDepositByBranchId] = useState<Map<string, BranchDepositKpis>>(new Map());
   const [summariesLoading, setSummariesLoading] = useState(true);
+  const [periodProfitLoss, setPeriodProfitLoss] = useState(0);
+  const [profitLossLoading, setProfitLossLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -55,6 +59,23 @@ export default function ICTransferBranches({ branchCustomerIds: _branchCustomerI
       }
       setDepositByBranchId(map);
       setSummariesLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [range.startDate, range.endDate]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setProfitLossLoading(true);
+    void getICWarehousePLReportAction({
+      branchId: HQ_IC_FUNDS_BRANCH_ID,
+      startDate: range.startDate ?? undefined,
+      endDate: range.endDate ?? undefined,
+    }).then(result => {
+      if (cancelled) return;
+      setPeriodProfitLoss(result.success ? result.data.totals.grossProfit : 0);
+      setProfitLossLoading(false);
     });
     return () => {
       cancelled = true;
@@ -95,7 +116,12 @@ export default function ICTransferBranches({ branchCustomerIds: _branchCustomerI
         setCustomEndDate={setCustomEndDate}
       />
 
-      <BranchListKpiGrid rangeLabel={rangeLabel} kpis={portfolioKpis} loading={summariesLoading} />
+      <BranchListKpiGrid
+        rangeLabel={rangeLabel}
+        kpis={portfolioKpis}
+        periodProfitLoss={periodProfitLoss}
+        loading={summariesLoading || profitLossLoading}
+      />
 
       <ManageBranchesSection
         branches={icBranches}
