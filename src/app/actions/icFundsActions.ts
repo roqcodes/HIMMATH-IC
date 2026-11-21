@@ -3515,9 +3515,29 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
       branchParams,
     );
 
-    const [purchasesRes, allSalesRes] = await Promise.all([purchasesQuery, salesQuery]);
+    const warehousesQuery = query(
+      `SELECT w.id, w.name, w.opening_stock, w.opening_aed
+       FROM ic_warehouses w
+       WHERE true ${branchFilter}`,
+      isHqLedger ? [] : [branchId],
+    );
+
+    const [purchasesRes, allSalesRes, warehousesRes] = await Promise.all([
+      purchasesQuery,
+      salesQuery,
+      warehousesQuery,
+    ]);
 
     const warehouseMeta = new Map<string, string>();
+    const warehouseOpening = new Map<string, { units: number; aed: number }>();
+    for (const row of warehousesRes.rows) {
+      const id = String(row.id);
+      warehouseMeta.set(id, String(row.name ?? 'Warehouse'));
+      warehouseOpening.set(id, {
+        units: Number(row.opening_stock) || 0,
+        aed: Number(row.opening_aed) || 0,
+      });
+    }
     const purchasesByWarehouse = new Map<string, ICPurchase[]>();
     const salesByWarehouseForIc = new Map<string, ICSale[]>();
     const salesByWarehouse = new Map<
@@ -3772,7 +3792,18 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
     function icEventsForWarehouse(warehouseId: string): WarehouseInventoryEvent[] {
       const purchases = purchasesByWarehouse.get(warehouseId) ?? [];
       const sales = (salesByWarehouseForIc.get(warehouseId) ?? []).filter(isDealSaleActive);
-      return buildIcStockInventoryEvents(purchases, sales);
+      const events = buildIcStockInventoryEvents(purchases, sales);
+      const opening = warehouseOpening.get(warehouseId);
+      if (opening && opening.units > 0 && opening.aed > 0) {
+        events.push({
+          kind: 'purchase',
+          at: 0,
+          sortKey: 'opening-balance',
+          units: opening.units,
+          cost: opening.aed,
+        });
+      }
+      return events;
     }
 
     function movementForWarehouse(warehouseId: string) {
@@ -3785,10 +3816,10 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
       const closingMetalG = metalStockThrough(metalEv, periodEndMs);
       const { metalInG, metalOutG } = metalMovementInPeriod(metalEv, periodStartMs, periodEndMs);
       return {
-        openingUnits: Number(openingUnits.toFixed(4)),
-        unitsIn: Number(unitsIn.toFixed(4)),
-        unitsOut: Number(unitsOut.toFixed(4)),
-        closingUnits: Number(closingUnits.toFixed(4)),
+        openingUnits: Number(openingUnits.toFixed(8)),
+        unitsIn: Number(unitsIn.toFixed(8)),
+        unitsOut: Number(unitsOut.toFixed(8)),
+        closingUnits: Number(closingUnits.toFixed(8)),
         openingMetalG: Number(openingMetalG.toFixed(4)),
         metalInG: Number(metalInG.toFixed(4)),
         metalOutG: Number(metalOutG.toFixed(4)),
@@ -3797,6 +3828,7 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
     }
 
     const icWarehouseIds = new Set<string>([
+      ...warehouseMeta.keys(),
       ...purchasesByWarehouse.keys(),
       ...salesByWarehouseForIc.keys(),
     ]);
@@ -3847,10 +3879,10 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
 
       warehouseSummaries.set(warehouseId, {
         warehouseName,
-        purchaseUnits: Number(pool.units.toFixed(4)),
+        purchaseUnits: Number(pool.units.toFixed(8)),
         purchaseCost: Number(pool.cost.toFixed(2)),
-        weightedAvgRate: Number(remainingStockWac(pool).toFixed(4)),
-        saleUnits: Number(periodSaleUnits.toFixed(4)),
+        weightedAvgRate: Number(remainingStockWac(pool).toFixed(2)),
+        saleUnits: Number(periodSaleUnits.toFixed(8)),
         revenue: Number(periodRevenue.toFixed(2)),
         cogs: Number(periodCogs.toFixed(2)),
         grossProfit: Number(periodGrossProfit.toFixed(2)),

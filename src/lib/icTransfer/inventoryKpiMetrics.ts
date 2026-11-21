@@ -27,7 +27,7 @@ export function formatMetalPlKpi(opts: {
   };
 }
 
-const fmtUnits = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 4 });
+const fmtUnits = (n: number) => n.toLocaleString('en-IN', { maximumFractionDigits: 8 });
 
 /** IC warehouse on-hand units → INR (1 unit = 1 lakh). */
 export function icStockInrFromUnits(units: number): number {

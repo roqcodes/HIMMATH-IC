@@ -223,7 +223,13 @@ function computeRow(
     metalStockInr: remainingCashMetalInrCost(warehousePurchases, warehouseSales, {
       through: range.endDate,
     }),
-    icStockAvgAedRate: computeWarehouseIcStockWac(warehousePurchases, warehouseSales, warehouse.id),
+    icStockAvgAedRate: computeWarehouseIcStockWac(
+      warehousePurchases,
+      warehouseSales,
+      warehouse.id,
+      warehouse.openingStock,
+      warehouse.openingAed,
+    ),
   };
 }
 
@@ -392,7 +398,7 @@ function formatMatrixCount(value: number): string {
 }
 
 function formatMatrixStock(value: number): string {
-  return value.toLocaleString('en-US', { maximumFractionDigits: 4 });
+  return value.toLocaleString('en-US', { maximumFractionDigits: 8 });
 }
 
 function formatMatrixMoney(value: number): string {

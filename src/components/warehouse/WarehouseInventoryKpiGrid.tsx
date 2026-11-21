@@ -20,7 +20,7 @@ function formatIcAvgAedRate(rate: number): string {
   if (!Number.isFinite(rate) || Math.abs(rate) < 0.00005) return '';
   return rate.toLocaleString('en-IN', {
     minimumFractionDigits: 2,
-    maximumFractionDigits: 4,
+    maximumFractionDigits: 2,
   });
 }
 

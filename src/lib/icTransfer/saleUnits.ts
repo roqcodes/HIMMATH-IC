@@ -10,7 +10,7 @@ export function formatInr(units: number): string {
 }
 
 export function formatUnits(units: number): string {
-  return Number(units).toLocaleString(undefined, { maximumFractionDigits: 4 });
+  return Number(units).toLocaleString('en-IN', { maximumFractionDigits: 8 });
 }
 
 /** Scale financial fields when splitting or partial-delivering a sale. */

@@ -246,18 +246,23 @@ export function computeCombinedTradeBookKpis(
   purchases: ICPurchase[],
   sales: ICSale[],
   range: DateFilterRange,
+  openingBalances: { aed?: number; inr?: number } = {},
 ): DealBookPair {
   const pRows = mapPurchases(purchases);
   const sRows = mapSales(sales);
   const inrFlow = buildCombinedBookSnapshot(pRows, sRows, range, 'inr');
   return {
-    aed: buildCombinedBookSnapshot(pRows, sRows, range, 'aed'),
+    aed: (() => {
+      const flow = buildCombinedBookSnapshot(pRows, sRows, range, 'aed');
+      const opening = (Number(openingBalances.aed) || 0) + flow.opening;
+      return { ...flow, opening: round2(opening), closing: round2(opening + flow.periodDebit - flow.periodCredit) };
+    })(),
     inr: {
       ...inrFlow,
       opening: range.startDate
-        ? remainingCashMetalInrCost(purchases, sales, { before: range.startDate })
-        : 0,
-      closing: remainingCashMetalInrCost(purchases, sales, { through: range.endDate }),
+        ? (Number(openingBalances.inr) || 0) + remainingCashMetalInrCost(purchases, sales, { before: range.startDate })
+        : Number(openingBalances.inr) || 0,
+      closing: (Number(openingBalances.inr) || 0) + remainingCashMetalInrCost(purchases, sales, { through: range.endDate }),
     },
   };
 }

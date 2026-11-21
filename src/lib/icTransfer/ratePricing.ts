@@ -776,8 +776,8 @@ export function resolveGroupOrderRate(
     >;
     const typePricing =
       byType[type] ??
-      (type === 'sdm'
-        ? byType.transfer ?? byType.cdm ?? byType.nre
+      (type === 'cdm'
+        ? byType.sdm ?? byType.transfer ?? byType.nre
         : undefined);
     if (typePricing) {
       return resolveFromTransactionPricing(typePricing, units, fallback);

@@ -96,8 +96,11 @@ export default function ICTransferWarehouse({
   );
 
   const tradeBookKpis = useMemo(
-    () => computeCombinedTradeBookKpis(scopedPurchases, scopedSales, range),
-    [scopedPurchases, scopedSales, range],
+    () => computeCombinedTradeBookKpis(scopedPurchases, scopedSales, range, {
+      aed: scopedWarehouses.reduce((sum, warehouse) => sum + (Number(warehouse.openingAed) || 0), 0),
+      inr: scopedWarehouses.reduce((sum, warehouse) => sum + (Number(warehouse.openingInr) || 0), 0),
+    }),
+    [scopedPurchases, scopedSales, scopedWarehouses, range],
   );
 
   const openAddWarehouseRef = useRef<(() => void) | null>(null);

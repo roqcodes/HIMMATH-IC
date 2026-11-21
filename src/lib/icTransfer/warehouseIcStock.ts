@@ -18,8 +18,10 @@ export function computeWarehouseIcStockWac(
   purchases: ICPurchase[],
   sales: ICSale[],
   warehouseId: string,
+  openingStock = 0,
+  openingAed = 0,
 ): number {
-  return remainingIcStockWac(purchases, sales, warehouseId).rate;
+  return remainingIcStockWac(purchases, sales, warehouseId, openingStock, openingAed).rate;
 }
 
 /** Reconcile `ic_warehouses.current_stock` from purchase/sale rows (fixes legacy double-counts). */

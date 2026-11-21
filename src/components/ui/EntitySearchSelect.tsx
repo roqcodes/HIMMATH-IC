@@ -22,6 +22,8 @@ type Props = {
   showDetailLine?: boolean;
   /** Inside the input, before the search icon. */
   inputTrailing?: React.ReactNode;
+  createOptionLabel?: (name: string) => string;
+  onCreateOption?: (name: string) => Promise<EntitySearchOption | null>;
 };
 
 /** Searchable picker that commits a stable entity id (supplier, warehouse, etc.). */
@@ -36,10 +38,19 @@ export default function EntitySearchSelect({
   onFocusRefresh,
   showDetailLine = true,
   inputTrailing,
+  createOptionLabel,
+  onCreateOption,
 }: Props) {
+  const [createdOptions, setCreatedOptions] = useState<EntitySearchOption[]>([]);
+  const [isCreating, setIsCreating] = useState(false);
+  const allOptions = useMemo(() => {
+    const byId = new Map(options.map(option => [option.value, option]));
+    for (const option of createdOptions) byId.set(option.value, option);
+    return [...byId.values()];
+  }, [options, createdOptions]);
   const selected = useMemo(
-    () => options.find(o => o.value === selectedId) ?? null,
-    [options, selectedId],
+    () => allOptions.find(o => o.value === selectedId) ?? null,
+    [allOptions, selectedId],
   );
   const [draft, setDraft] = useState(selected ? formatEntitySelectLabel(selected.label, selected.code) : '');
 
@@ -47,7 +58,7 @@ export default function EntitySearchSelect({
     setDraft(selected ? formatEntitySelectLabel(selected.label, selected.code) : '');
   }, [selected?.label, selected?.code, selectedId]);
 
-  const comboOptions = useMemo(() => entitySearchOptionsToComboOptions(options), [options]);
+  const comboOptions = useMemo(() => entitySearchOptionsToComboOptions(allOptions), [allOptions]);
 
   return (
     <div className={className}>
@@ -58,7 +69,7 @@ export default function EntitySearchSelect({
           if (selectedId) onSelectId('', null);
         }}
         onSelectOption={(opt: ComboOption) => {
-          const match = options.find(o => o.value === opt.value) ?? null;
+          const match = allOptions.find(o => o.value === opt.value) ?? null;
           if (match) {
             onSelectId(match.value, match);
             setDraft(formatEntitySelectLabel(match.label, match.code));
@@ -73,6 +84,22 @@ export default function EntitySearchSelect({
         disabled={disabled}
         onFocus={onFocusRefresh}
         trailing={inputTrailing}
+        createOptionLabel={createOptionLabel}
+        creatingOption={isCreating}
+        onCreateOption={onCreateOption ? async name => {
+          if (isCreating) return;
+          setIsCreating(true);
+          try {
+            const created = await onCreateOption(name);
+            if (!created) return;
+            setCreatedOptions(current => [...current.filter(o => o.value !== created.value), created]);
+            onSelectId(created.value, created);
+            setDraft(formatEntitySelectLabel(created.label, created.code));
+            onFocusRefresh?.();
+          } finally {
+            setIsCreating(false);
+          }
+        } : undefined}
       />
       {showDetailLine ? (
         <p

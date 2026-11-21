@@ -53,7 +53,7 @@ export default function ManagerCustomerFields({
   contentsGrid,
   inputClassName = asicInput,
 }: Props) {
-  const { icSuppliers } = useApp();
+  const { icSuppliers, quickCreateICCounterparty } = useApp();
 
   const noManagersAssigned =
     allowedManagerIds !== null && allowedManagerIds !== undefined && allowedManagerIds.length === 0;
@@ -122,6 +122,11 @@ export default function ManagerCustomerFields({
             options={managerOptions}
             selectedId={managerId}
             onSelectId={id => onManagerChange(id)}
+            createOptionLabel={name => `Create manager “${name}”`}
+            onCreateOption={async name => {
+              const manager = await quickCreateICCounterparty(name, 'manager', branchId);
+              return manager ? { value: manager.id, label: manager.name, code: manager.code } : null;
+            }}
             placeholder={managerPlaceholder}
             disabled={disabled}
             inputClassName={inputClassName}
@@ -135,6 +140,17 @@ export default function ManagerCustomerFields({
             options={customerOptions}
             selectedId={customerId}
             onSelectId={id => onCustomerChange(id)}
+            createOptionLabel={name => `Create ${mode === 'purchase' ? 'supplier' : 'customer'} “${name}”`}
+            onCreateOption={async name => {
+              const customer = await quickCreateICCounterparty(
+                name,
+                'customer',
+                branchId,
+                managerId || null,
+                [mode === 'purchase' ? 'supplier' : 'party'],
+              );
+              return customer ? { value: customer.id, label: customer.name, code: customer.code } : null;
+            }}
             placeholder={managerId ? 'Select customer' : 'Pick a manager first'}
             disabled={disabled || !managerId}
             inputClassName={inputClassName}

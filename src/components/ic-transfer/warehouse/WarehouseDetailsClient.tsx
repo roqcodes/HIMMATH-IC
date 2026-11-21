@@ -118,8 +118,11 @@ export default function WarehouseDetailsClient({
   );
 
   const tradeBookKpis = useMemo(
-    () => computeCombinedTradeBookKpis(warehousePurchases, warehouseSales, range),
-    [warehousePurchases, warehouseSales, range],
+    () => computeCombinedTradeBookKpis(warehousePurchases, warehouseSales, range, {
+      aed: warehouse?.openingAed,
+      inr: warehouse?.openingInr,
+    }),
+    [warehousePurchases, warehouseSales, range, warehouse?.openingAed, warehouse?.openingInr],
   );
 
   const purchaseBranchId =

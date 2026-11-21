@@ -197,8 +197,20 @@ export default function ICTransferDashboard() {
   }, [scopedSales, icWarehouses, selectedRegionIds, branchSlug, branches, allBranches, currentSlug]);
 
   const tradeBookKpis = useMemo(
-    () => computeCombinedTradeBookKpis(scopedPurchasesForKpi, scopedSalesForKpi, range),
-    [scopedPurchasesForKpi, scopedSalesForKpi, range],
+    () => {
+      const activeBranch = branches.find(b => b.slug === currentSlug)
+        || allBranches.find(b => b.slug === currentSlug);
+      const activeBranchId = activeBranch?.id;
+      const warehousesForKpi = icWarehouses.filter(
+        w => (!branchSlug ? !w.branchId : w.branchId === activeBranchId)
+          && matchesSelectedRegions(w.regionId, selectedRegionIds),
+      );
+      return computeCombinedTradeBookKpis(scopedPurchasesForKpi, scopedSalesForKpi, range, {
+        aed: warehousesForKpi.reduce((sum, w) => sum + (Number(w.openingAed) || 0), 0),
+        inr: warehousesForKpi.reduce((sum, w) => sum + (Number(w.openingInr) || 0), 0),
+      });
+    },
+    [scopedPurchasesForKpi, scopedSalesForKpi, range, icWarehouses, selectedRegionIds, branchSlug, branches, allBranches, currentSlug],
   );
 
   const tradeCountHint = useMemo(() => {

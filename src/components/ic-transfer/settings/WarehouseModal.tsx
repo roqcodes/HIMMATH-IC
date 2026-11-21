@@ -10,6 +10,7 @@ import { useApp } from '@/context/AppContext';
 import { parseFormAmount } from '@/lib/parseFormAmount';
 import type { ICWarehouse } from '@/types';
 import WarehouseManagersField from '@/components/ic-transfer/settings/WarehouseManagersField';
+import { INR_PER_UNIT } from '@/lib/icTransfer/rateCalculations';
 
 type Props = {
   open: boolean;
@@ -43,12 +44,14 @@ export default function WarehouseModal({
   const [openingMetalG, setOpeningMetalG] = useState('0');
   const [openingAed, setOpeningAed] = useState('0');
   const [openingInr, setOpeningInr] = useState('0');
-  const [openingStock, setOpeningStock] = useState('0');
   const [managerIds, setManagerIds] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
   const deskKind = warehouse?.deskKind ?? defaultDeskKind;
   const isBranchDesk = deskKind === 'branch';
+  const openingInrAmount = parseFormAmount(openingInr) ?? 0;
+  const openingAedAmount = parseFormAmount(openingAed) ?? 0;
+  const openingIcStock = openingInrAmount / INR_PER_UNIT;
 
   useEffect(() => {
     if (!open) return;
@@ -63,7 +66,6 @@ export default function WarehouseModal({
       setOpeningMetalG(String(warehouse.openingMetalG ?? 0));
       setOpeningAed(String(warehouse.openingAed ?? 0));
       setOpeningInr(String(warehouse.openingInr ?? 0));
-      setOpeningStock(String(warehouse.openingStock ?? 0));
       setManagerIds(warehouse.managerIds ? [...warehouse.managerIds] : []);
     } else {
       setName('');
@@ -76,7 +78,6 @@ export default function WarehouseModal({
       setOpeningMetalG('0');
       setOpeningAed('0');
       setOpeningInr('0');
-      setOpeningStock('0');
       setManagerIds([]);
     }
   }, [open, warehouse]);
@@ -95,17 +96,17 @@ export default function WarehouseModal({
     const metalG = parseFormAmount(openingMetalG);
     const aed = parseFormAmount(openingAed);
     const inr = parseFormAmount(openingInr);
-    const stock = parseFormAmount(openingStock);
-    if (metalG === null || aed === null || inr === null || stock === null) {
+    if (metalG === null || aed === null || inr === null) {
       alert('Enter valid opening balances');
       setIsSaving(false);
       return;
     }
-    if (metalG < 0 || stock < 0) {
-      alert('Opening metal and IC units cannot be negative');
+    if (metalG < 0 || inr < 0) {
+      alert('Opening metal and INR opening cannot be negative');
       setIsSaving(false);
       return;
     }
+    const stock = inr / INR_PER_UNIT;
     const openings = {
       openingMetalG: metalG,
       openingAed: aed,
@@ -305,17 +306,29 @@ export default function WarehouseModal({
                 />
               </AsicFormField>
               <AsicFormField
-                label="Opening IC units"
+                label="Opening IC stock (units)"
                 htmlFor="warehouse-opening-stock"
                 className={fieldClass}
-                hint="On-hand IC balance before recorded deals."
+                hint={`Calculated from INR opening ÷ ₹${INR_PER_UNIT.toLocaleString('en-IN')}.`}
               >
                 <input
                   id="warehouse-opening-stock"
                   className={`${asicInput} tabular-nums`}
-                  inputMode="decimal"
-                  value={openingStock}
-                  onChange={e => setOpeningStock(e.target.value)}
+                  value={openingIcStock.toFixed(8)}
+                  readOnly
+                />
+              </AsicFormField>
+              <AsicFormField
+                label="Opening average rate (AED/unit)"
+                htmlFor="warehouse-opening-rate"
+                className={fieldClass}
+                hint="Calculated from AED opening ÷ opening IC stock."
+              >
+                <input
+                  id="warehouse-opening-rate"
+                  className={`${asicInput} tabular-nums`}
+                  value={openingIcStock > 0 ? (openingAedAmount / openingIcStock / 100).toFixed(2) : '0.00'}
+                  readOnly
                 />
               </AsicFormField>
             </ModalFormSection>

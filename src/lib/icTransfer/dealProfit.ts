@@ -427,10 +427,17 @@ export function remainingIcStockWac(
   purchases: ICPurchase[],
   sales: ICSale[],
   warehouseId: string,
+  openingStock = 0,
+  openingAed = 0,
 ): { units: number; rate: number } {
   const whPurchases = purchases.filter(p => p.warehouseId === warehouseId);
   const whSales = sales.filter(s => s.warehouseId === warehouseId && isDealSaleActive(s));
   const events = buildIcStockInventoryEvents(whPurchases, whSales);
+  const stock = Number(openingStock) || 0;
+  const aed = Number(openingAed) || 0;
+  if (stock > 0 && aed > 0) {
+    events.push({ kind: 'purchase', at: 0, sortKey: 'opening-balance', units: stock, cost: aed });
+  }
   const { pool } = simulateWarehouseInventory(events);
   return {
     units: pool.units,

@@ -30,6 +30,9 @@ interface ComboSearchInputProps {
   onFocus?: () => void;
   /** Shown inside the field, before the search icon (e.g. available metal grams). */
   trailing?: React.ReactNode;
+  createOptionLabel?: (query: string) => string;
+  onCreateOption?: (query: string) => void;
+  creatingOption?: boolean;
 }
 
 const DROPDOWN_GAP = 4;
@@ -47,6 +50,9 @@ export default function ComboSearchInput({
   selectedValue,
   onFocus,
   trailing,
+  createOptionLabel,
+  onCreateOption,
+  creatingOption = false,
 }: ComboSearchInputProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -123,9 +129,14 @@ export default function ComboSearchInput({
       (o.detail ? o.detail.toLowerCase().includes(q) : false)
     );
   });
+  const createQuery = value.trim();
+  const hasExactMatch = options.some(o =>
+    (o.name ?? o.label).trim().toLocaleLowerCase() === createQuery.toLocaleLowerCase(),
+  );
+  const showCreateOption = Boolean(createQuery && createOptionLabel && onCreateOption && !hasExactMatch);
 
   const dropdown =
-    isOpen && filtered.length > 0 ? (
+    isOpen && (filtered.length > 0 || showCreateOption) ? (
       <div
         ref={dropdownRef}
         style={dropdownStyle}
@@ -164,6 +175,20 @@ export default function ComboSearchInput({
             </button>
           );
         })}
+        {showCreateOption ? (
+          <button
+            type="button"
+            className="mt-1 w-full rounded-lg border-t border-[var(--theme-border-subtle)] px-3 py-2 text-left text-sm font-semibold text-accent transition-colors hover:bg-accent/5 disabled:cursor-wait disabled:opacity-60"
+            disabled={creatingOption}
+            onMouseDown={e => e.preventDefault()}
+            onClick={() => {
+              setIsOpen(false);
+              onCreateOption?.(createQuery);
+            }}
+          >
+            {creatingOption ? 'Creating…' : createOptionLabel?.(createQuery)}
+          </button>
+        ) : null}
       </div>
     ) : null;
 

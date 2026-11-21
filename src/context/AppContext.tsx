@@ -144,6 +144,13 @@ interface AppContextType extends AppState {
     kind?: CounterpartyKind,
     homeManagerId?: string | null,
   ) => Promise<boolean>;
+  quickCreateICCounterparty: (
+    name: string,
+    kind: CounterpartyKind,
+    branchId?: string | null,
+    homeManagerId?: string | null,
+    roles?: CounterpartyRole[],
+  ) => Promise<ICSupplier | null>;
   updateICSupplier: (
     id: string,
     name: string,
@@ -603,6 +610,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return false;
     }
   }, [showToast, currentSlug]);
+
+  const quickCreateICCounterparty = useTrackedCallback(async (
+    name: string,
+    kind: CounterpartyKind,
+    branchId?: string | null,
+    homeManagerId?: string | null,
+    roles?: CounterpartyRole[],
+  ): Promise<ICSupplier | null> => {
+    const cleanName = name.trim();
+    if (!cleanName) return null;
+    try {
+      const res = await dbAddICSupplierAction(
+        cleanName,
+        null,
+        '',
+        0,
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        branchId,
+        branchId ? currentSlug ?? undefined : undefined,
+        roles,
+        undefined,
+        kind,
+        homeManagerId,
+      );
+      if (res.success && res.data) {
+        setState(s => ({
+          ...s,
+          icSuppliers: s.icSuppliers.some(item => item.id === res.data!.id)
+            ? s.icSuppliers
+            : [...s.icSuppliers, res.data!],
+        }));
+        showToast(`${kind === 'manager' ? 'Manager' : 'Customer'} created successfully`);
+        return res.data;
+      }
+      showToast(res.error || 'Failed to create record', 'error');
+      return null;
+    } catch {
+      showToast('Error creating record', 'error');
+      return null;
+    }
+  }, [currentSlug, showToast]);
 
   const updateICSupplier = useTrackedCallback(async (
     id: string,
@@ -1375,6 +1428,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateICRegion,
       deleteICRegion,
       addICSupplier,
+      quickCreateICCounterparty,
       updateICSupplier,
       deleteICSupplier,
       addICWarehouse,
@@ -1417,6 +1471,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     updateICRegion,
     deleteICRegion,
     addICSupplier,
+    quickCreateICCounterparty,
     updateICSupplier,
     deleteICSupplier,
     addICWarehouse,
