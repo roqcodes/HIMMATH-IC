@@ -1,6 +1,7 @@
 import { isDateInRange, type DateFilterRange } from '@/lib/dateFilterRange';
+import { DEFAULT_BRANCH_TIMEZONE, toBusinessDate } from '@/lib/businessTime';
 import { computeDealProfit } from '@/lib/icTransfer/dealProfit';
-import { computeWarehouseIcStockWac, computeWarehouseIcUnitsOnHand } from '@/lib/icTransfer/warehouseIcStock';
+import { computeWarehouseIcStockWac } from '@/lib/icTransfer/warehouseIcStock';
 import { dealPurchaseAed, dealSaleAed, remainingCashMetalInrCost } from '@/lib/icTransfer/dealBookKpis';
 import { resolvePurchaseInrDisplay, resolveSaleInrDisplay } from '@/lib/icTransfer/metalSettlement';
 import { INR_PER_UNIT } from '@/lib/icTransfer/rateCalculations';
@@ -133,7 +134,7 @@ export type WarehouseMatrixResult = {
 
 function txnInRange(createdAt: string | undefined, range: DateFilterRange): boolean {
   if (!createdAt) return !range.startDate && !range.endDate;
-  return isDateInRange(createdAt.slice(0, 10), range);
+  return isDateInRange(toBusinessDate(createdAt, DEFAULT_BRANCH_TIMEZONE), range);
 }
 
 function isMetalMode(mode: string | undefined): boolean {
@@ -187,12 +188,7 @@ function computeRow(
     warehouses: [warehouse],
   });
 
-  const currentStock = computeWarehouseIcUnitsOnHand(
-    warehousePurchases,
-    warehouseSales,
-    warehouse.id,
-    warehouse.openingStock,
-  );
+  const currentStock = Number(warehouse.currentStock) || 0;
 
   return {
     warehouseId: warehouse.id,
@@ -256,10 +252,10 @@ function weightedAverageIcStockRate(rows: { currentStock: number; icStockAvgAedR
 /** On-hand IC units at warehouse (no order reservation). */
 export function computeWarehouseAvailableUnits(
   warehouse: ICWarehouse,
-  purchases: ICPurchase[],
-  sales: ICSale[],
+  _purchases: ICPurchase[],
+  _sales: ICSale[],
 ): number {
-  return computeWarehouseIcUnitsOnHand(purchases, sales, warehouse.id, warehouse.openingStock);
+  return Number(warehouse.currentStock) || 0;
 }
 
 export function computeWarehouseMatrix(options: {

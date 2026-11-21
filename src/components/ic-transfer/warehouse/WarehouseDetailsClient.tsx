@@ -7,6 +7,8 @@ import WarehouseModal from '@/components/ic-transfer/settings/WarehouseModal';
 import { findWarehouseByRouteParam } from '@/lib/icTransfer/warehouseSlug';
 import { computeSingleWarehouseMetrics } from '@/lib/icTransfer/warehouseMatrixMetrics';
 import { computeCombinedTradeBookKpis } from '@/lib/icTransfer/dealBookKpis';
+import { HQ_IC_FUNDS_BRANCH_ID } from '@/lib/icFunds/hqBranch';
+import { useWarehouseInrLedgerKpis } from '@/lib/icTransfer/useWarehouseInrLedgerKpis';
 import WarehouseInventoryKpiGrid from '@/components/warehouse/WarehouseInventoryKpiGrid';
 import WarehouseDetailTabs from '@/components/ic-transfer/warehouse/WarehouseDetailTabs';
 import {
@@ -25,19 +27,13 @@ import { asicBtnOutline } from '@/components/asic/ui';
 import PartyPaymentReceiptModal from '@/components/ic-transfer/shared/PartyPaymentReceiptModal';
 import { useWriteAccess } from '@/context/RbacWriteContext';
 import { formatStreetCityState } from '@/lib/geo/simpleAddress';
+import { subtlePurchaseBtnClass, subtleSaleBtnClass } from './warehouseActionButtonStyles';
 
 interface Props {
   branchSlug: string;
   warehouseId: string;
   portalMode?: ICTransferPortalMode;
 }
-
-const subtleTxnBtnBase =
-  'inline-flex h-8 max-md:h-9 items-center justify-center gap-1.5 rounded-lg border px-3 text-sm font-medium shadow-surface-xs transition-colors disabled:pointer-events-none disabled:opacity-45';
-
-const subtlePurchaseBtnClass = `${subtleTxnBtnBase} border-sky-200/90 bg-sky-50/70 text-sky-900 hover:border-sky-300 hover:bg-sky-100/80 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-100 dark:hover:bg-sky-950/50`;
-
-const subtleSaleBtnClass = `${subtleTxnBtnBase} border-emerald-200/90 bg-emerald-50/70 text-emerald-900 hover:border-emerald-300 hover:bg-emerald-100/80 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-100 dark:hover:bg-emerald-950/50`;
 
 export default function WarehouseDetailsClient({
   branchSlug,
@@ -52,6 +48,7 @@ export default function WarehouseDetailsClient({
   const [saleModalOpen, setSaleModalOpen] = useState(false);
   const [prModal, setPrModal] = useState<'payment' | 'receipt' | null>(null);
   const [prRefreshToken, setPrRefreshToken] = useState(0);
+  const [inrLedgerRefreshToken, setInrLedgerRefreshToken] = useState(0);
 
   const salesPaused = !icTransferSettings.salesEnabled;
 
@@ -117,13 +114,32 @@ export default function WarehouseDetailsClient({
     [icSales, warehouse],
   );
 
-  const tradeBookKpis = useMemo(
+  const dealBookKpis = useMemo(
     () => computeCombinedTradeBookKpis(warehousePurchases, warehouseSales, range, {
       aed: warehouse?.openingAed,
       inr: warehouse?.openingInr,
     }),
     [warehousePurchases, warehouseSales, range, warehouse?.openingAed, warehouse?.openingInr],
   );
+  const { data: warehouseInrLedgers, status: inrLedgerStatus } = useWarehouseInrLedgerKpis({
+    branchId: portalMode === 'branch' && warehouse?.branchId
+      ? warehouse.branchId
+      : HQ_IC_FUNDS_BRANCH_ID,
+    warehouseIds: warehouse ? [warehouse.id] : [],
+    startDate: range.startDate,
+    endDate: range.endDate,
+    refreshKey: inrLedgerRefreshToken + prRefreshToken,
+  });
+  const tradeBookKpis = useMemo(() => ({
+    ...dealBookKpis,
+    inr: warehouseInrLedgers[warehouse?.id ?? ''] ?? {
+      opening: 0,
+      periodDebit: 0,
+      periodCredit: 0,
+      closing: 0,
+      accountFound: false,
+    },
+  }), [dealBookKpis, warehouseInrLedgers, warehouse?.id]);
 
   const purchaseBranchId =
     portalMode === 'branch' && warehouse?.branchId ? warehouse.branchId : undefined;
@@ -218,14 +234,20 @@ export default function WarehouseDetailsClient({
         setCustomEndDate={setCustomEndDate}
       />
 
-      <WarehouseInventoryKpiGrid metrics={kpiMetrics} books={tradeBookKpis} rangeLabel={rangeLabel} />
+      <WarehouseInventoryKpiGrid
+        metrics={kpiMetrics}
+        books={tradeBookKpis}
+        rangeLabel={rangeLabel}
+        inrLedgerStatus={inrLedgerStatus}
+      />
       <WarehouseDetailTabs
         warehouseId={warehouse.id}
         range={range}
         portalMode={portalMode}
         branchSlug={branchSlug}
         purchaseBranchId={purchaseBranchId}
-        refreshToken={prRefreshToken}
+        refreshToken={prRefreshToken + inrLedgerRefreshToken}
+        onLedgerChanged={() => setInrLedgerRefreshToken((token) => token + 1)}
       />
 
       <WarehouseModal
@@ -237,14 +259,20 @@ export default function WarehouseDetailsClient({
 
       <AddPurchaseModal
         open={purchaseModalOpen}
-        onClose={() => setPurchaseModalOpen(false)}
+        onClose={() => {
+          setPurchaseModalOpen(false);
+          setInrLedgerRefreshToken((token) => token + 1);
+        }}
         branchId={purchaseBranchId}
         warehouses={[warehouse]}
         lockedWarehouseId={warehouse.id}
       />
       <AddSaleModal
         open={saleModalOpen}
-        onClose={() => setSaleModalOpen(false)}
+        onClose={() => {
+          setSaleModalOpen(false);
+          setInrLedgerRefreshToken((token) => token + 1);
+        }}
         branchId={purchaseBranchId}
         warehouses={warehouse ? [warehouse] : undefined}
         lockedWarehouseId={warehouse.id}
@@ -255,8 +283,14 @@ export default function WarehouseDetailsClient({
           open
           mode={{ book: 'INR', warehouse }}
           voucherType={prModal}
-          onClose={() => setPrModal(null)}
-          onSaved={() => setPrRefreshToken(t => t + 1)}
+          onClose={() => {
+            setPrModal(null);
+            setInrLedgerRefreshToken((token) => token + 1);
+          }}
+          onSaved={() => {
+            setPrRefreshToken((token) => token + 1);
+            setInrLedgerRefreshToken((token) => token + 1);
+          }}
         />
       ) : null}
     </div>

@@ -75,6 +75,14 @@ export const icFundsDateRangeSchema = z.object({
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
 
+export const warehouseInrLedgerKpisSchema = icFundsDateRangeSchema.extend({
+  warehouseIds: z.array(z.string().uuid()).min(1).max(500),
+}).superRefine((data, ctx) => {
+  if (data.startDate && data.endDate && data.startDate > data.endDate) {
+    ctx.addIssue({ code: 'custom', message: 'Start date must be on or before end date', path: ['startDate'] });
+  }
+});
+
 const icFundsBooksReportViews = [
   'all-vouchers',
   'cash-bank',

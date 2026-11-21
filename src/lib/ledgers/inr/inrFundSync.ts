@@ -11,6 +11,32 @@ type DbClient = {
 };
 
 const SYNC_ACTOR = 'INR ledger sync';
+const INR_PER_IC_UNIT = 100_000;
+
+/** Keep the warehouse's display/cache balance derived from its INR ledger. */
+export async function syncWarehouseCurrentStockFromInrAccounts(
+  client: DbClient,
+  accountIds: string[],
+): Promise<void> {
+  const ids = sortedIds(accountIds);
+  if (!ids.length) return;
+  await client.query(
+    `UPDATE ic_warehouses w
+     SET current_stock = ROUND((a.opening_balance + COALESCE(v.net, 0)) / $2::numeric, 8)
+     FROM inr_fund_accounts a
+     LEFT JOIN LATERAL (
+       SELECT COALESCE(SUM(
+         CASE WHEN x.debit_account_id = a.id THEN x.amount ELSE 0 END
+         - CASE WHEN x.credit_account_id = a.id THEN x.amount ELSE 0 END
+       ), 0) AS net
+       FROM inr_fund_vouchers x
+       WHERE x.status = 'active' AND (x.debit_account_id = a.id OR x.credit_account_id = a.id)
+     ) v ON TRUE
+     WHERE a.id = ANY($1::varchar[]) AND a.source_type = 'ic_warehouse'
+       AND a.source_id = w.id::text`,
+    [ids, INR_PER_IC_UNIT],
+  );
+}
 
 async function lockInrAccounts(client: DbClient, accountIds: string[], branchId: string) {
   const ids = sortedIds(accountIds);
@@ -146,6 +172,7 @@ export async function applyInrAccountOpening(
      ON CONFLICT (id) DO UPDATE SET opening_balance = EXCLUDED.opening_balance`,
     [equityId, branchId, equityOpening],
   );
+  await syncWarehouseCurrentStockFromInrAccounts(client, [accountId]);
 }
 
 export async function ensureInrLinkedAccount(
@@ -185,6 +212,23 @@ export async function ensureInrLinkedAccount(
   return again.rows.length > 0 ? String(again.rows[0].id) : null;
 }
 
+export async function ensureInrWarehouseAccount(
+  client: DbClient,
+  warehouseId: string,
+  branchId = HQ_IC_FUNDS_BRANCH_ID,
+): Promise<string | null> {
+  const warehouse = await client.query(
+    `SELECT name, opening_inr FROM ic_warehouses WHERE id=$1 LIMIT 1`, [warehouseId],
+  );
+  const row = warehouse.rows[0];
+  if (!row) return null;
+  const accountId = await ensureInrLinkedAccount(
+    client, branchId, 'ic_warehouse', warehouseId, `Warehouse: ${String(row.name)}`,
+  );
+  if (accountId) await applyInrAccountOpening(client, accountId, Number(row.opening_inr) || 0);
+  return accountId;
+}
+
 export async function ensureInrCounterpartyAccount(
   client: DbClient,
   branchId: string,
@@ -203,6 +247,7 @@ const METAL_INR_ROLE_CODE: Record<string, string> = {
   metal_sales: 'sl',
   metal_cost: 'cs',
   metal_profit: 'pr',
+  warehouse_inr: 'wi',
 };
 
 function metalInrRoleCode(role: string): string {
@@ -238,6 +283,12 @@ export async function voidInrMetalDealVouchers(
   for (const row of existing.rows) {
     await voidCapitalAllocationsForVoucher(client, String(row.id), 'INR');
   }
+  const accounts = await client.query(
+    `SELECT DISTINCT account_id FROM (
+       SELECT debit_account_id AS account_id FROM inr_fund_vouchers WHERE branch_id=$1 AND status='active' AND ((reference_type=ANY($2::text[]) AND reference_id=$3) OR reference_id LIKE $4)
+       UNION SELECT credit_account_id FROM inr_fund_vouchers WHERE branch_id=$1 AND status='active' AND ((reference_type=ANY($2::text[]) AND reference_id=$3) OR reference_id LIKE $4)
+     ) q`, [branchId, referenceTypes, dealId, `${dealId}#%`],
+  );
   await client.query(
     `UPDATE inr_fund_vouchers
      SET status = 'void', voided_at = CURRENT_TIMESTAMP
@@ -248,6 +299,7 @@ export async function voidInrMetalDealVouchers(
        )`,
     [branchId, referenceTypes, dealId, `${dealId}#%`],
   );
+  await syncWarehouseCurrentStockFromInrAccounts(client, accounts.rows.map((r) => String(r.account_id)));
 }
 
 export async function voidInrVoucherByReference(
@@ -265,12 +317,19 @@ export async function voidInrVoucherByReference(
   for (const row of existing.rows) {
     await voidCapitalAllocationsForVoucher(client, String(row.id), 'INR');
   }
+  const accounts = await client.query(
+    `SELECT DISTINCT account_id FROM (
+       SELECT debit_account_id AS account_id FROM inr_fund_vouchers WHERE branch_id=$1 AND reference_type=$2 AND reference_id=$3 AND status='active'
+       UNION SELECT credit_account_id FROM inr_fund_vouchers WHERE branch_id=$1 AND reference_type=$2 AND reference_id=$3 AND status='active'
+     ) q`, [branchId, referenceType, referenceId],
+  );
   await client.query(
     `UPDATE inr_fund_vouchers
      SET status = 'void', voided_at = CURRENT_TIMESTAMP
      WHERE branch_id = $1 AND reference_type = $2 AND reference_id = $3 AND status = 'active'`,
     [branchId, referenceType, referenceId],
   );
+  await syncWarehouseCurrentStockFromInrAccounts(client, accounts.rows.map((r) => String(r.account_id)));
 }
 
 export async function ensureInrCashTill(client: DbClient, branchId: string): Promise<string> {
@@ -355,6 +414,7 @@ export async function postInrVoucherInTx(
         params.aedAgentId?.trim() || null,  // $13
       ],
     );
+    await syncWarehouseCurrentStockFromInrAccounts(client, [params.debitAccountId, params.creditAccountId]);
     return id;
   } catch (err) {
     const code = (err as { code?: string }).code;

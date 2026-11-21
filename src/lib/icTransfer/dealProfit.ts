@@ -6,6 +6,7 @@ import {
 } from '@/lib/icTransfer/rateCalculations';
 import { metalInrSaleIcUnitsFromFields } from '@/lib/icTransfer/metalSplit';
 import { isDateInRange, type DateFilterRange } from '@/lib/dateFilterRange';
+import { DEFAULT_BRANCH_TIMEZONE, toBusinessDate } from '@/lib/businessTime';
 import { isVoidIcSaleOrderStatus } from '@/lib/icFunds/icTransferReportFilters';
 import { computeMetalLotProfit } from '@/lib/icTransfer/metalInventory';
 import {
@@ -118,7 +119,7 @@ export function icStockInflowFromMetalInrSales(
     if (!isSaleCompleted(s.orderStatus)) continue;
     const units = metalInrSaleIcUnits(s);
     if (units <= 0) continue;
-    if (throughIso && !throughIso(s.statusUpdatedAt || s.createdAt)) continue;
+    if (throughIso && !throughIso(s.createdAt)) continue;
     events.push({
       kind: 'purchase',
       at: saleMs(s),
@@ -138,7 +139,7 @@ export function icStockSaleEvents(
   for (const s of sales) {
     if (isMetal(s.settlementMode)) continue;
     if (!isSaleCompleted(s.orderStatus)) continue;
-    const activityAt = s.statusUpdatedAt || s.createdAt;
+    const activityAt = s.createdAt;
     if (throughIso && !throughIso(activityAt)) continue;
     const units = Number(s.units) || 0;
     if (units <= 0) continue;
@@ -170,16 +171,16 @@ export function isDealSaleActive(sale: Pick<ICSale, 'orderStatus'>): boolean {
 function inRange(iso: string | undefined, range: DateFilterRange): boolean {
   if (!range.startDate && !range.endDate) return true;
   if (!iso) return false;
-  return isDateInRange(iso.slice(0, 10), range);
+  return isDateInRange(toBusinessDate(iso, DEFAULT_BRANCH_TIMEZONE), range);
 }
 
 function throughEnd(iso: string | undefined, range: DateFilterRange): boolean {
   if (!range.endDate || !iso) return true;
-  return iso.slice(0, 10) <= range.endDate;
+  return toBusinessDate(iso, DEFAULT_BRANCH_TIMEZONE) <= range.endDate;
 }
 
 function saleMs(sale: ICSale): number {
-  const raw = sale.statusUpdatedAt || sale.createdAt || '';
+  const raw = sale.createdAt || '';
   const t = new Date(raw).getTime();
   return Number.isFinite(t) ? t : 0;
 }
@@ -305,7 +306,7 @@ function indexOneWarehouseSaleProfits(
   for (const s of whSales) {
     if (!isMetal(s.settlementMode)) continue;
     if (String(s.orderStatus || '') !== 'completed') continue;
-    const saleIso = s.statusUpdatedAt || s.createdAt;
+    const saleIso = s.createdAt;
     if (!inRange(saleIso, range)) continue;
     const lot = s.metalPurchaseId ? lots.get(s.metalPurchaseId) : undefined;
     const saleG = Number(s.metalWeightG) || 0;
@@ -413,7 +414,7 @@ function computeOneWarehouse(
   for (const s of whSales) {
     if (!isMetal(s.settlementMode)) continue;
     if (String(s.orderStatus || '') !== 'completed') continue;
-    const saleIso = s.statusUpdatedAt || s.createdAt;
+    const saleIso = s.createdAt;
     if (!inRange(saleIso, range)) continue;
     const lot = s.metalPurchaseId ? lots.get(s.metalPurchaseId) : undefined;
     const saleG = Number(s.metalWeightG) || 0;

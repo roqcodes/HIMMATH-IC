@@ -12,6 +12,7 @@ import {
 } from '@/lib/icFunds/icTransferFundSync';
 import {
   ensureInrCounterpartyAccount,
+  ensureInrWarehouseAccount,
   ensureInrSystemAccount,
   metalInrJournalReferenceId,
   postInrJournalInTx,
@@ -135,6 +136,7 @@ export async function syncMetalPurchaseLedgers(
     hasAgent: Boolean(agentId),
     splitInrPaid: Number(purchase.split_inr_paid) || 0,
     splitAedPaid: Number(purchase.split_aed_paid) || 0,
+    hasWarehouse: Boolean(purchase.warehouse_id),
   });
   if (lines.length === 0) return;
 
@@ -145,6 +147,7 @@ export async function syncMetalPurchaseLedgers(
   );
   const needsCustomerAed = lines.some(l => l.debit === 'customer_aed' || l.credit === 'customer_aed');
   const needsMetalAed = lines.some(l => l.debit === 'metal_aed' || l.credit === 'metal_aed');
+  const needsWarehouseInr = lines.some(l => l.debit === 'warehouse_inr' || l.credit === 'warehouse_inr');
 
   // Resolve supplier sequentially first (requires a DB lookup to build its own query).
   const supplierAccountId = needsSupplier ? await resolveSupplierInrAccount() : null;
@@ -154,7 +157,8 @@ export async function syncMetalPurchaseLedgers(
 
   // Resolve all independent system accounts in parallel to cut sequential round-trips.
   const purchaseCounterpartyId = purchase.counterparty_id ? String(purchase.counterparty_id) : null;
-  const [metalStockInr, aedSettlementInr, aedAccountPair] = await Promise.all([
+  const warehouseId = purchase.warehouse_id ? String(purchase.warehouse_id) : null;
+  const [metalStockInr, aedSettlementInr, aedAccountPair, warehouseInr] = await Promise.all([
     needsMetalStock
       ? ensureInrSystemAccount(client, branchId, 'Metal Stock', 'inventory', 'metal_inventory')
       : Promise.resolve(null as string | null),
@@ -180,6 +184,9 @@ export async function syncMetalPurchaseLedgers(
           return { customerAed, metalAed };
         })()
       : Promise.resolve({ customerAed: null as string | null, metalAed: null as string | null }),
+    needsWarehouseInr && warehouseId
+      ? ensureInrWarehouseAccount(client, warehouseId, branchId)
+      : Promise.resolve(null as string | null),
   ]);
 
   if (needsAedSettlement && !aedSettlementInr) {
@@ -197,6 +204,8 @@ export async function syncMetalPurchaseLedgers(
         return supplierAccountId;
       case 'aed_settlement':
         return aedSettlementInr;
+      case 'warehouse_inr':
+        return warehouseInr;
       case 'metal_stock':
         return metalStockInr;
       case 'customer_aed':
@@ -340,7 +349,7 @@ export async function syncMetalSaleLedgers(
   const saleId = String(sale.id);
   const orderStatus = String(sale.order_status || '');
   const paymentMethod = normalizeMetalPaymentMethod(sale.metal_payment_method as string | null);
-  const voucherDate = ledgerVoucherDateFromInstant(sale.status_updated_at || sale.created_at, branchTz);
+  const voucherDate = ledgerVoucherDateFromInstant(sale.created_at, branchTz);
 
   await voidVoucherByReference(client, branchId, 'ic_sale', saleId);
   await voidVoucherByReference(client, branchId, 'metal_sale_aed', saleId);
@@ -396,6 +405,7 @@ export async function syncMetalSaleLedgers(
     hasAgent: Boolean(agentId),
     splitInrPaid: Number(sale.split_inr_paid) || 0,
     splitAedPaid: Number(sale.split_aed_paid) || 0,
+    hasWarehouse: Boolean(sale.warehouse_id),
   });
   if (lines.length === 0) return;
 
@@ -419,6 +429,7 @@ export async function syncMetalSaleLedgers(
       l.debit === 'metal_aed_proceeds' ||
       l.credit === 'metal_aed_proceeds',
   );
+  const needsWarehouseInr = lines.some(l => l.debit === 'warehouse_inr' || l.credit === 'warehouse_inr');
 
   // Resolve all independent system accounts in parallel to cut sequential round-trips.
   const saleCounterpartyId = sale.counterparty_id ? String(sale.counterparty_id) : null;
@@ -433,6 +444,7 @@ export async function syncMetalSaleLedgers(
     aedSettlementInr,
     metalAedProceedsId,
     aedAccountPairSale,
+    warehouseInr,
   ] = await Promise.all([
     needsCustomer
       ? ensureMetalSaleCustomerInrAccount(client, branchId, sale)
@@ -477,6 +489,9 @@ export async function syncMetalSaleLedgers(
           return { customerAed, metalAed };
         })()
       : Promise.resolve({ customerAed: null as string | null, metalAed: null as string | null }),
+    needsWarehouseInr && sale.warehouse_id
+      ? ensureInrWarehouseAccount(client, String(sale.warehouse_id), branchId)
+      : Promise.resolve(null as string | null),
   ]);
 
   if (needsCustomer && !customerAccountId) {
@@ -507,6 +522,8 @@ export async function syncMetalSaleLedgers(
         return customerAedAccountId;
       case 'aed_settlement':
         return aedSettlementInr;
+      case 'warehouse_inr':
+        return warehouseInr;
       case 'metal_stock':
         return metalStockInr;
       case 'metal_sales':

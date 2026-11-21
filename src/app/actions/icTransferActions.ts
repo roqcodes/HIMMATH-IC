@@ -44,7 +44,7 @@ import {
   remainingMetalGramsOnLot,
 } from '@/lib/icTransfer/metalInventory';
 import { sqlExcludeVoidIcSales } from '@/lib/icFunds/icTransferReportFilters';
-import { adjustWarehouseMetalStock, adjustWarehouseStock, logWarehouseStockTransaction } from '@/lib/warehouse/stockDb';
+import { adjustWarehouseMetalStock, logWarehouseStockTransaction } from '@/lib/warehouse/stockDb';
 import { assertICTransferSalesEnabledAction, getICTransferSettingsFromDb, assertWarehouseFulfillmentWorkflowAction } from '@/app/actions/icTransferSettingsActions';
 import {
   hasICSaleEditableFieldsChanged,
@@ -302,7 +302,6 @@ async function applyMetalSaleStock(
   const units = Number(icUnits) || 0;
   if (units <= 0) return;
   await logWarehouseStockTransaction(client, warehouseId, 'receive', units, 'metal_sale_inr', saleId);
-  await adjustWarehouseStock(client, warehouseId, units);
 }
 
 async function reverseMetalSaleStock(client: PoolClient, sale: MetalSaleStockRow): Promise<void> {
@@ -318,7 +317,6 @@ async function reverseMetalSaleStock(client: PoolClient, sale: MetalSaleStockRow
   if (saleId) {
     await logWarehouseStockTransaction(client, warehouseId, 'clear', units, 'metal_sale_inr', saleId);
   }
-  await adjustWarehouseStock(client, warehouseId, -units);
 }
 
 async function resolveEnteredByForBranch(branchSlug?: string) {
@@ -690,7 +688,7 @@ export async function dbAddICWarehouseAction(
            id, name, code, phone, commission, region_id, email, address, india_state, india_city,
            send_delivery_proof_to_customer, desk_kind, branch_id,
            opening_stock, opening_metal_g, opening_aed, opening_inr, current_stock, current_metal_g
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $14, $15)`,
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, ($16::numeric / 100000), $14, $15, $16, ($16::numeric / 100000), $14)`,
         [
           id,
           parsed.name,
@@ -705,7 +703,6 @@ export async function dbAddICWarehouseAction(
           parsed.sendDeliveryProofToCustomer ?? true,
           resolvedDesk,
           parsed.branchId || null,
-          opening.openingStock,
           opening.openingMetalG,
           opening.openingAed,
           opening.openingInr,
@@ -768,12 +765,27 @@ export async function dbUpdateICWarehouseAction(
     }
 
     const opening = openings ? parseWarehouseOpenings(openings) : null;
+    if (opening) {
+      const linkedInr = await query<{ id: string; opening_balance: string | number }>(
+        `SELECT id, opening_balance FROM inr_fund_accounts
+         WHERE source_type='ic_warehouse' AND source_id=$1 LIMIT 1`, [parsed.id],
+      );
+      if (linkedInr.rows[0] && Number(linkedInr.rows[0].opening_balance) !== opening.openingInr) {
+        const hasEntries = await query(
+          `SELECT 1 FROM inr_fund_vouchers
+           WHERE debit_account_id=$1 OR credit_account_id=$1 LIMIT 1`, [linkedInr.rows[0].id],
+        );
+        if (hasEntries.rows.length) {
+          return { success: false, error: 'Warehouse INR opening balance is locked after ledger entries. Post an INR adjustment instead.' };
+        }
+      }
+    }
     const res = await query(
       opening
         ? `UPDATE ic_warehouses
            SET name=$1, code=$2, phone=$3, commission=$4, region_id=$5, email=$6, address=$7,
                india_state=$8, india_city=$9, send_delivery_proof_to_customer=$10,
-               opening_stock=$12, opening_metal_g=$13, opening_aed=$14, opening_inr=$15
+               opening_stock=($15::numeric / 100000), opening_metal_g=$13, opening_aed=$14, opening_inr=$15
            WHERE id=$11 RETURNING *`
         : `UPDATE ic_warehouses
            SET name=$1, code=$2, phone=$3, commission=$4, region_id=$5, email=$6, address=$7,
@@ -1180,7 +1192,6 @@ export async function dbAddICPurchaseAction(
             'purchase',
             res.rows[0].id,
           );
-          await adjustWarehouseStock(client, parsed.warehouseId, normalized.units);
         }
       }
 
@@ -1565,7 +1576,6 @@ export async function dbAddICSaleAction(
           'sale',
           res.rows[0].id,
         );
-        await adjustWarehouseStock(client, salePayload.warehouseId, -normalized.units);
       }
 
       await syncICSaleFundLedger(String(res.rows[0].id), client, {
@@ -1761,13 +1771,6 @@ export async function dbUpdateICPurchaseAction(
         }
         if (newWarehouseId && newGrams) {
           await adjustWarehouseMetalStock(client, newWarehouseId, newGrams);
-        }
-      } else {
-        if (oldWarehouseId && oldUnits) {
-          await adjustWarehouseStock(client, oldWarehouseId, -oldUnits);
-        }
-        if (newWarehouseId && newUnits) {
-          await adjustWarehouseStock(client, newWarehouseId, newUnits);
         }
       }
 
@@ -2029,7 +2032,7 @@ export async function dbDeleteICPurchaseAction(id: string): Promise<DbActionResu
     if (preCheck.rows.length === 0) {
       return { success: false, error: 'Purchase not found' };
     }
-    const { warehouse_id, units, settlement_mode, metal_weight_g } = preCheck.rows[0];
+    const { warehouse_id, settlement_mode, metal_weight_g } = preCheck.rows[0];
 
     if (preCheck.rows[0].has_linked_sales) {
       return { success: false, error: 'Cannot delete a metal purchase that already has sales.' };
@@ -2046,8 +2049,6 @@ export async function dbDeleteICPurchaseAction(id: string): Promise<DbActionResu
 
       if (warehouse_id && settlement_mode === 'metal') {
         await adjustWarehouseMetalStock(client, warehouse_id, -(Number(metal_weight_g) || 0));
-      } else if (warehouse_id && units) {
-        await adjustWarehouseStock(client, warehouse_id, -Number(units));
       }
 
       await client.query('DELETE FROM ic_purchases WHERE id = $1', [parsedId]);
@@ -2059,7 +2060,7 @@ export async function dbDeleteICPurchaseAction(id: string): Promise<DbActionResu
              WHERE warehouse_id = $1
                AND order_status = 'completed'
                AND COALESCE(settlement_mode, 'cash') <> 'metal'
-               AND COALESCE(status_updated_at, created_at) >= $2
+               AND created_at >= $2
            ) AS has_later_sales`,
           [warehouse_id, preCheck.rows[0].created_at],
         );
@@ -2115,14 +2116,14 @@ export async function dbDeleteICSaleAction(id: string): Promise<DbActionResult<n
       const warehouseId = saleRow.warehouse_id ? String(saleRow.warehouse_id) : null;
       const wasCompleted = saleRow.order_status === 'completed';
       if (warehouseId && wasCompleted) {
-        const saleAt = saleRow.status_updated_at || saleRow.created_at;
+        const saleAt = saleRow.created_at;
         const laterSales = await client.query(
           `SELECT EXISTS (
              SELECT 1 FROM ic_sales
              WHERE warehouse_id = $1
                AND order_status = 'completed'
                AND COALESCE(settlement_mode, 'cash') <> 'metal'
-               AND COALESCE(status_updated_at, created_at) >= $2
+               AND created_at >= $2
            ) AS has_later_sales`,
           [warehouseId, saleAt],
         );

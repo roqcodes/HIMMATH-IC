@@ -122,6 +122,7 @@ type Props = {
   branchSlug: string;
   purchaseBranchId?: string;
   refreshToken?: number;
+  onLedgerChanged?: () => void;
 };
 
 export default function WarehouseDetailTabs({
@@ -131,6 +132,7 @@ export default function WarehouseDetailTabs({
   branchSlug,
   purchaseBranchId,
   refreshToken,
+  onLedgerChanged,
 }: Props) {
   const { icPurchases, icSales, icSuppliers, icWarehouses, branches } = useApp();
   const [tab, setTab] = useState<TabId>('all');
@@ -748,7 +750,10 @@ export default function WarehouseDetailTabs({
       <ViewPurchaseModal open={!!viewPurchase} purchase={viewPurchase} onClose={() => setViewPurchase(null)} />
       <AddPurchaseModal
         open={!!editPurchase}
-        onClose={() => setEditPurchase(null)}
+        onClose={() => {
+          if (editPurchase) onLedgerChanged?.();
+          setEditPurchase(null);
+        }}
         initialData={editPurchase || undefined}
         branchId={purchaseBranchId}
         warehouses={warehouse ? [warehouse] : undefined}
@@ -757,7 +762,10 @@ export default function WarehouseDetailTabs({
       <ViewSaleModal open={!!viewSale} sale={viewSale} onClose={() => setViewSale(null)} />
       <AddSaleModal
         open={!!editSale}
-        onClose={() => setEditSale(null)}
+        onClose={() => {
+          if (editSale) onLedgerChanged?.();
+          setEditSale(null);
+        }}
         initialData={editSale || undefined}
         branchId={purchaseBranchId}
         warehouses={warehouse ? [warehouse] : undefined}

@@ -1,4 +1,4 @@
-import { addCalendarDays } from '@/lib/businessTime';
+import { addCalendarDays, DEFAULT_BRANCH_TIMEZONE, todayInTimeZone } from '@/lib/businessTime';
 
 export type DateFilterId =
   | 'all-time'
@@ -53,7 +53,7 @@ export function resolveDateFilterRange(
     return { startDate: null, endDate: null };
   }
 
-  const todayStr = todayAnchor ?? new Date().toISOString().slice(0, 10);
+  const todayStr = todayAnchor ?? todayInTimeZone(DEFAULT_BRANCH_TIMEZONE);
   const [anchorY, anchorM, anchorD] = todayStr.split('-').map(Number);
   const anchor = new Date(Date.UTC(anchorY, anchorM - 1, anchorD));
   let startLimit = '';

@@ -87,7 +87,7 @@ import { getFormattedTxnId } from '@/lib/icTransferMappers';
 import { toIsoDateString } from '@/lib/toIsoDateString';
 import { validateVoucherAccounts } from '@/lib/icFunds/voucherRules';
 import { validateVoucherCurrencyPolicy, roundLedgerAmount } from '@/lib/icFunds/currencyPolicy';
-import { ensureInrCashTill, postInrVoucherInTx } from '@/lib/ledgers/inr/inrFundSync';
+import { ensureInrCashTill, postInrVoucherInTx, syncWarehouseCurrentStockFromInrAccounts } from '@/lib/ledgers/inr/inrFundSync';
 import {
   buildVoucherListFilter,
   clampVoucherListLimit,
@@ -114,6 +114,7 @@ import {
   icFundsBooksReportSchema,
   icFundsDateRangeSchema,
   icSettlementTradeReportSchema,
+  warehouseInrLedgerKpisSchema,
   postICFundVoucherSchema,
   updateICFundAccountSchema,
 } from '@/lib/validations/icFunds';
@@ -2193,7 +2194,7 @@ export async function deleteICFundVoucherAction(
   const voucherTable = ledgerBook === 'INR' ? 'inr_fund_vouchers' : 'ic_fund_vouchers';
 
   const lookup = await query(
-    `SELECT branch_id, status FROM ${voucherTable} WHERE id = $1 LIMIT 1`,
+    `SELECT branch_id, status${ledgerBook === 'INR' ? ', debit_account_id, credit_account_id' : ''} FROM ${voucherTable} WHERE id = $1 LIMIT 1`,
     [voucherId],
   );
   if (lookup.rows.length === 0) {
@@ -2222,6 +2223,10 @@ export async function deleteICFundVoucherAction(
         if (res.rows.length === 0) throw new Error('Voucher could not be voided');
         const { voidCapitalAllocationsForVoucher } = await import('@/lib/capital/allocation');
         await voidCapitalAllocationsForVoucher(client, voucherId, 'INR');
+        await syncWarehouseCurrentStockFromInrAccounts(client, [
+          String(lookup.rows[0].debit_account_id),
+          String(lookup.rows[0].credit_account_id),
+        ]);
       });
       await writeAuditLog({
         actor: access.user,
@@ -3518,7 +3523,7 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
          s.metal_purchase_id,
          s.metal_payment_method,
          s.split_aed_paid,
-         COALESCE(s.status_updated_at, s.created_at) AS sale_at,
+         s.created_at AS sale_at,
          w.name AS warehouse_name
        FROM ic_sales s
        JOIN ic_warehouses w ON w.id = s.warehouse_id
@@ -3547,6 +3552,54 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
 
     const warehouseMeta = new Map<string, string>();
     const warehouseOpening = new Map<string, { units: number; aed: number }>();
+    const warehouseInrMovement = new Map<string, { openingUnits: number; unitsIn: number; unitsOut: number; closingUnits: number }>();
+    const warehouseIds = warehousesRes.rows.map((row) => String(row.id));
+    if (warehouseIds.length) {
+      const accountRes = await query(
+        `SELECT id, source_id, opening_balance FROM inr_fund_accounts
+         WHERE branch_id=$2 AND source_type='ic_warehouse' AND source_id=ANY($1::varchar[])`,
+        [warehouseIds, HQ_IC_FUNDS_BRANCH_ID],
+      );
+      const accountByWarehouse = new Map<string, { id: string; opening: number }>();
+      for (const row of accountRes.rows) {
+        accountByWarehouse.set(String(row.source_id), { id: String(row.id), opening: Number(row.opening_balance) || 0 });
+      }
+      const inrAccountIds = [...accountByWarehouse.values()].map((row) => row.id);
+      const voucherRes = inrAccountIds.length
+        ? await query(
+            `SELECT debit_account_id, credit_account_id, amount, voucher_date
+             FROM inr_fund_vouchers WHERE status='active'
+               AND (debit_account_id=ANY($1::varchar[]) OR credit_account_id=ANY($1::varchar[]))`, [inrAccountIds],
+          )
+        : { rows: [] as Array<Record<string, unknown>> };
+      for (const [warehouseId, account] of accountByWarehouse) {
+        let balance = account.opening;
+        let opening = account.opening;
+        let debit = 0;
+        let credit = 0;
+        for (const voucher of voucherRes.rows) {
+          const amount = Number(voucher.amount) || 0;
+          const dateMs = new Date(String(voucher.voucher_date)).getTime();
+          const dr = String(voucher.debit_account_id) === account.id;
+          const cr = String(voucher.credit_account_id) === account.id;
+          if (!dr && !cr) continue;
+          const delta = (dr ? amount : 0) - (cr ? amount : 0);
+          if (periodStartMs != null && dateMs < periodStartMs) {
+            opening += delta;
+          } else if (periodEndMs == null || dateMs <= periodEndMs) {
+            if (dr) debit += amount;
+            if (cr) credit += amount;
+          }
+          if (periodEndMs == null || dateMs <= periodEndMs) balance += delta;
+        }
+        warehouseInrMovement.set(warehouseId, {
+          openingUnits: Number((opening / 100_000).toFixed(8)),
+          unitsIn: Number((debit / 100_000).toFixed(8)),
+          unitsOut: Number((credit / 100_000).toFixed(8)),
+          closingUnits: Number((balance / 100_000).toFixed(8)),
+        });
+      }
+    }
     for (const row of warehousesRes.rows) {
       const id = String(row.id);
       warehouseMeta.set(id, String(row.name ?? 'Warehouse'));
@@ -3816,9 +3869,12 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
     function movementForWarehouse(warehouseId: string) {
       const icEvents = icEventsForWarehouse(warehouseId);
       const metalEv = metalEventsByWarehouse.get(warehouseId) ?? [];
-      const openingUnits = icUnitStockAt(icEvents, periodStartMs);
-      const closingUnits = icUnitStockThrough(icEvents, periodEndMs);
-      const { unitsIn, unitsOut } = sumIcUnitsInPeriod(icEvents, periodStartMs, periodEndMs);
+      const ledgerUnits = warehouseInrMovement.get(warehouseId);
+      const openingUnits = ledgerUnits?.openingUnits ?? icUnitStockAt(icEvents, periodStartMs);
+      const closingUnits = ledgerUnits?.closingUnits ?? icUnitStockThrough(icEvents, periodEndMs);
+      const { unitsIn, unitsOut } = ledgerUnits
+        ? { unitsIn: ledgerUnits.unitsIn, unitsOut: ledgerUnits.unitsOut }
+        : sumIcUnitsInPeriod(icEvents, periodStartMs, periodEndMs);
       const openingMetalG = metalStockAt(metalEv, periodStartMs);
       const closingMetalG = metalStockThrough(metalEv, periodEndMs);
       const { metalInG, metalOutG } = metalMovementInPeriod(metalEv, periodStartMs, periodEndMs);
@@ -4090,6 +4146,101 @@ function buildTradeDateFilter(
     idx += 1;
   }
   return { sql, params, nextIndex: idx };
+}
+
+/** Read physical INR movements from each warehouse-linked INR ledger account. */
+export async function getWarehouseInrLedgerKpisAction(params: unknown): Promise<
+  ActionResult<Record<string, {
+    opening: number;
+    periodDebit: number;
+    periodCredit: number;
+    closing: number;
+    accountFound: boolean;
+  }>>
+> {
+  const parsed = warehouseInrLedgerKpisSchema.safeParse(params);
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0]?.message ?? 'Invalid input' };
+  }
+  const access = await requireICFundsAccess(parsed.data.branchId, 'read');
+  if (!access.ok) return { success: false, error: access.error };
+
+  try {
+    const warehouseIds = [...new Set(parsed.data.warehouseIds)];
+    const isHqLedger = isHqIcFundsBranchId(parsed.data.branchId);
+    const warehouseScopeSql = 'AND ($5::boolean OR w.branch_id = $6 OR w.branch_id IS NULL)';
+    const warehouses = await query(
+      `SELECT w.id::text AS warehouse_id, w.opening_inr,
+              a.id AS account_id, a.opening_balance,
+              COALESCE(SUM(CASE
+                WHEN $3::date IS NOT NULL AND v.voucher_date < $3::date THEN
+                  (CASE WHEN v.debit_account_id = a.id THEN v.amount ELSE 0 END)
+                  - (CASE WHEN v.credit_account_id = a.id THEN v.amount ELSE 0 END)
+                ELSE 0 END), 0) AS opening_net,
+              COALESCE(SUM(CASE
+                WHEN ($3::date IS NULL OR v.voucher_date >= $3::date)
+                 AND ($4::date IS NULL OR v.voucher_date <= $4::date)
+                 AND v.debit_account_id = a.id THEN v.amount
+                ELSE 0 END), 0) AS period_debit,
+              COALESCE(SUM(CASE
+                WHEN ($3::date IS NULL OR v.voucher_date >= $3::date)
+                 AND ($4::date IS NULL OR v.voucher_date <= $4::date)
+                 AND v.credit_account_id = a.id THEN v.amount
+                ELSE 0 END), 0) AS period_credit,
+              COALESCE(SUM(CASE
+                WHEN ($4::date IS NULL OR v.voucher_date <= $4::date) THEN
+                  (CASE WHEN v.debit_account_id = a.id THEN v.amount ELSE 0 END)
+                  - (CASE WHEN v.credit_account_id = a.id THEN v.amount ELSE 0 END)
+                ELSE 0 END), 0) AS closing_net
+       FROM ic_warehouses w
+       LEFT JOIN inr_fund_accounts a
+         ON a.branch_id = $2 AND a.source_type = 'ic_warehouse' AND a.source_id = w.id::text
+       LEFT JOIN inr_fund_vouchers v
+         ON v.branch_id = $2 AND v.status = 'active'
+        AND (v.debit_account_id = a.id OR v.credit_account_id = a.id)
+       WHERE w.id = ANY($1::uuid[]) ${warehouseScopeSql}
+       GROUP BY w.id, w.opening_inr, a.id, a.opening_balance`,
+      [
+        warehouseIds,
+        HQ_IC_FUNDS_BRANCH_ID,
+        parsed.data.startDate ?? null,
+        parsed.data.endDate ?? null,
+        isHqLedger,
+        parsed.data.branchId,
+      ],
+    );
+
+    const result: Record<string, {
+      opening: number;
+      periodDebit: number;
+      periodCredit: number;
+      closing: number;
+      accountFound: boolean;
+    }> = {};
+    for (const row of warehouses.rows) {
+      const id = String(row.warehouse_id);
+      const accountFound = Boolean(row.account_id);
+      const opening = accountFound
+        ? (Number(row.opening_balance) || 0) + (Number(row.opening_net) || 0)
+        : Number(row.opening_inr) || 0;
+      const periodDebit = Number(row.period_debit) || 0;
+      const periodCredit = Number(row.period_credit) || 0;
+      const closing = accountFound
+        ? (Number(row.opening_balance) || 0) + (Number(row.closing_net) || 0)
+        : Number(row.opening_inr) || 0;
+      result[id] = {
+        opening: Number(opening.toFixed(2)),
+        periodDebit: Number(periodDebit.toFixed(2)),
+        periodCredit: Number(periodCredit.toFixed(2)),
+        closing: Number(closing.toFixed(2)),
+        accountFound,
+      };
+    }
+    return { success: true, data: result };
+  } catch (err) {
+    logger.error({ err }, 'Failed to load warehouse INR ledger KPIs');
+    return { success: false, error: 'Failed to load warehouse INR balances' };
+  }
 }
 
 export async function getICSettlementTradeReportAction(params: unknown): Promise<

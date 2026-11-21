@@ -13,6 +13,7 @@ type Props = {
   metrics: WarehouseInventoryTotals;
   books: DealBookPair;
   rangeLabel: string;
+  inrLedgerStatus?: 'loading' | 'ready' | 'error';
 };
 
 /** Weighted avg AED **rate** per IC unit (~36), not a dirham amount. */
@@ -79,7 +80,15 @@ export function WarehouseKpiCell({
   );
 }
 
-export default function WarehouseInventoryKpiGrid({ metrics, books, rangeLabel }: Props) {
+export default function WarehouseInventoryKpiGrid({
+  metrics,
+  books,
+  rangeLabel,
+  inrLedgerStatus = 'ready',
+}: Props) {
+  const inrValue = (amount: number) =>
+    inrLedgerStatus === 'ready' ? <FmtLedgerInr amount={amount} /> : inrLedgerStatus === 'loading' ? 'Loading…' : '—';
+
   return (
     <div className="mb-8 flex flex-col gap-4">
       {/* Container 1: Inventory & Transactions */}
@@ -213,25 +222,30 @@ export default function WarehouseInventoryKpiGrid({ metrics, books, rangeLabel }
         </div>
 
         {/* INR Row */}
+        {inrLedgerStatus === 'error' ? (
+          <p role="status" className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+            Warehouse INR ledger is unavailable for this selection; reconcile the warehouse INR account.
+          </p>
+        ) : null}
         <div className="grid grid-cols-2 divide-x divide-slate-100 dark:divide-slate-800 sm:grid-cols-4">
           <WarehouseKpiCell 
             label="INR Opening" 
-            value={<FmtLedgerInr amount={books.inr.opening} />} 
+            value={inrValue(books.inr.opening)}
             tone="slate"
           />
           <WarehouseKpiCell 
-            label="INR Purchases (Dr)" 
-            value={<FmtLedgerInr amount={books.inr.periodDebit} />} 
+            label="INR In (Dr)"
+            value={inrValue(books.inr.periodDebit)}
             tone="red"
           />
           <WarehouseKpiCell 
-            label="INR Sales (Cr)" 
-            value={<FmtLedgerInr amount={books.inr.periodCredit} />} 
+            label="INR Out (Cr)"
+            value={inrValue(books.inr.periodCredit)}
             tone="emerald"
           />
           <WarehouseKpiCell 
             label="INR Closing" 
-            value={<FmtLedgerInr amount={books.inr.closing} />} 
+            value={inrValue(books.inr.closing)}
             tone={books.inr.closing >= 0 ? 'emerald' : 'red'}
           />
         </div>

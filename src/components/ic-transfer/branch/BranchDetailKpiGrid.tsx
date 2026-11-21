@@ -63,7 +63,7 @@ export default function BranchDetailKpiGrid({
             }
           />
           <WarehouseKpiCell
-            label="Branch bank balance"
+            label="cash balance"
             value={bankBalance != null ? <FmtLedgerAed amount={bankBalance} /> : '—'}
             tone="blue"
             sub={
@@ -119,7 +119,7 @@ export default function BranchDetailKpiGrid({
           <div className="px-3 py-2">
             <div className="flex items-baseline justify-between">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                Branch bank balance (AED)
+                cash balance (AED)
               </span>
             </div>
             <p className="text-base font-bold tabular-nums text-slate-900 sm:text-lg dark:text-slate-100">
@@ -148,7 +148,7 @@ export default function BranchDetailKpiGrid({
             count={kpis.cashCount}
           />
           <WarehouseKpiCell
-            label="Bank account balance"
+            label="cash balance"
             value={bankBalance != null ? <FmtLedgerAed amount={bankBalance} /> : '—'}
             tone={bankBalance == null || bankBalance >= 0 ? 'amber' : 'red'}
           />

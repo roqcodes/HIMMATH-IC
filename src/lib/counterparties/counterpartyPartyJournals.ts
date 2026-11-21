@@ -38,7 +38,7 @@ export function augmentPartyJournalsWithMetalProfit(
     if (!line || line.currency !== 'INR' || Math.abs(line.amount) < 0.005) continue;
     if (hasMetalSaleProfitVoucher(vouchers, s.id)) continue;
 
-    const iso = s.statusUpdatedAt || s.createdAt || new Date().toISOString();
+    const iso = s.createdAt || new Date().toISOString();
     const date = iso.slice(0, 10);
     memos.push({
       id: `${PROFIT_MEMO_PREFIX}${s.id}`,

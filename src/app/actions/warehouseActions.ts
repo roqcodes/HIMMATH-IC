@@ -2,7 +2,7 @@
 
 import { query, withTransaction } from '@/lib/db';
 import { scaleSaleFinancials } from '@/lib/icTransfer/saleUnits';
-import { adjustWarehouseStock, logWarehouseStockTransaction } from '@/lib/warehouse/stockDb';
+import { logWarehouseStockTransaction } from '@/lib/warehouse/stockDb';
 import { getSessionUser } from '@/lib/auth';
 import { createCognitoUserAction, deleteCognitoUserAction } from './cognitoActions';
 import { logger } from '@/lib/logger';
@@ -615,7 +615,6 @@ export async function completeDeliveryWithUnits(
           'sale',
           parsed.orderId,
         );
-        await adjustWarehouseStock(client, warehouseId, -delivered);
       }
 
       const awaitingAdmin = finalOrderStatus === 'delivery_pending_admin';

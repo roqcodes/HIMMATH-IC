@@ -45,7 +45,6 @@ import {
   type ICSettlementMode,
 } from '@/lib/icTransfer/metalSettlement';
 import { remainingIcStockWac } from '@/lib/icTransfer/dealProfit';
-import { computeWarehouseIcUnitsOnHand } from '@/lib/icTransfer/warehouseIcStock';
 import {
   applyLabFieldChange,
   emptyLabFields,
@@ -368,12 +367,9 @@ export default function AddSaleModal({
   const warehouseAvailable =
     warehouseId
       ? (warehouseAvailableById[warehouseId] ??
-        computeWarehouseIcUnitsOnHand(
-          icPurchases,
-          icSales,
-          warehouseId,
-          allowedWarehouses.find(w => w.id === warehouseId)?.openingStock ??
-            icWarehouses.find(w => w.id === warehouseId)?.openingStock ??
+        Number(
+          allowedWarehouses.find(w => w.id === warehouseId)?.currentStock ??
+            icWarehouses.find(w => w.id === warehouseId)?.currentStock ??
             0,
         ))
       : null;

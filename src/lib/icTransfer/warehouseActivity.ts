@@ -1,9 +1,10 @@
 import { isDateInRange, type DateFilterRange } from '@/lib/dateFilterRange';
+import { DEFAULT_BRANCH_TIMEZONE, toBusinessDate } from '@/lib/businessTime';
 import type { ICPurchase, ICSale } from '@/types';
 
 export function txnInWarehouseRange(createdAt: string | undefined, range: DateFilterRange): boolean {
   if (!createdAt) return !range.startDate && !range.endDate;
-  return isDateInRange(createdAt.slice(0, 10), range);
+  return isDateInRange(toBusinessDate(createdAt, DEFAULT_BRANCH_TIMEZONE), range);
 }
 
 export function filterWarehousePurchases(

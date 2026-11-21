@@ -2,6 +2,7 @@ import { roundMoney } from '@/lib/icFunds/currencyPolicy';
 import { isMetalAedPayment } from '@/lib/domain/books';
 import { bookedMetalAed, bookedMetalInr } from '@/lib/icTransfer/metalSplit';
 import { isDateInRange, type DateFilterRange } from '@/lib/dateFilterRange';
+import { DEFAULT_BRANCH_TIMEZONE, toBusinessDate } from '@/lib/businessTime';
 import type { LedgerFlowSnapshot } from '@/lib/icFunds/ledgerKpiMetrics';
 import { netMetalInr } from '@/lib/icTransfer/labTest';
 import { allocateMetalLotCostInr } from '@/lib/icTransfer/metalLotCost';
@@ -14,7 +15,7 @@ export type DealBookPair = {
 
 function txnDate(createdAt?: string): string | null {
   if (!createdAt) return null;
-  return createdAt.slice(0, 10);
+  return toBusinessDate(createdAt, DEFAULT_BRANCH_TIMEZONE);
 }
 
 function beforeRange(date: string | null, range: DateFilterRange): boolean {

@@ -16,7 +16,8 @@ export type MetalJournalRole =
   | 'metal_profit'
   | 'metal_aed'
   | 'metal_aed_proceeds'
-  | 'metal_fx';
+  | 'metal_fx'
+  | 'warehouse_inr';
 
 export type MetalJournalLine = {
   book: MetalJournalBook;
@@ -35,6 +36,7 @@ export type MetalPurchaseJournalInput = {
   hasAgent: boolean;
   splitInrPaid?: number | null;
   splitAedPaid?: number | null;
+  hasWarehouse?: boolean;
 };
 
 export type MetalSaleJournalInput = {
@@ -53,6 +55,7 @@ export type MetalSaleJournalInput = {
   hasAgent: boolean;
   splitInrPaid?: number | null;
   splitAedPaid?: number | null;
+  hasWarehouse?: boolean;
 };
 
 function amt(value: number): number {
@@ -72,7 +75,7 @@ export function planMetalPurchaseJournals(input: MetalPurchaseJournalInput): Met
         book: 'INR',
         referenceType: 'metal_purchase',
         debit: 'metal_stock',
-        credit: 'supplier',
+        credit: input.hasWarehouse ? 'warehouse_inr' : 'supplier',
         amount: grossInr,
         label: 'Bought metal',
       });
@@ -81,7 +84,7 @@ export function planMetalPurchaseJournals(input: MetalPurchaseJournalInput): Met
       lines.push({
         book: 'INR',
         referenceType: 'lab_test_purchase',
-        debit: 'supplier',
+        debit: input.hasWarehouse ? 'warehouse_inr' : 'supplier',
         credit: 'metal_stock',
         amount: labInr,
         label: 'Lab deducted (purchase)',
@@ -104,7 +107,7 @@ export function planMetalPurchaseJournals(input: MetalPurchaseJournalInput): Met
         book: 'INR',
         referenceType: 'metal_purchase',
         debit: 'metal_stock',
-        credit: 'supplier',
+        credit: input.hasWarehouse ? 'warehouse_inr' : 'supplier',
         amount: legs.paidInr,
         label: 'Bought metal (INR)',
       });
@@ -192,7 +195,7 @@ export function planMetalSaleJournals(input: MetalSaleJournalInput): MetalJourna
       lines.push({
         book: 'INR',
         referenceType: 'metal_sale_receipt',
-        debit: 'customer',
+        debit: input.hasWarehouse ? 'warehouse_inr' : 'customer',
         credit: 'metal_sales',
         amount: saleGrossInr,
         label: 'Sold metal',
@@ -203,7 +206,7 @@ export function planMetalSaleJournals(input: MetalSaleJournalInput): MetalJourna
         book: 'INR',
         referenceType: 'lab_test_sale',
         debit: 'metal_sales',
-        credit: 'customer',
+        credit: input.hasWarehouse ? 'warehouse_inr' : 'customer',
         amount: saleLabInr,
         label: 'Lab deducted (sale)',
       });
@@ -293,7 +296,7 @@ export function planMetalSaleJournals(input: MetalSaleJournalInput): MetalJourna
       lines.push({
         book: 'INR',
         referenceType: 'metal_sale_receipt',
-        debit: 'customer',
+        debit: input.hasWarehouse ? 'warehouse_inr' : 'customer',
         credit: 'metal_sales',
         amount: legs.paidInr,
         label: 'Sold metal (INR)',

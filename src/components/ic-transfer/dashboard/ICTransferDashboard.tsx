@@ -7,7 +7,10 @@ import { ChartCard, PageShell } from '../ui';
 import { useApp } from '@/context/AppContext';
 import { getCustomersBySlug } from '@/app/actions/customerActions';
 import { resolveDateFilterRange, isDateInRange, getDateFilterLabel } from '@/lib/dateFilterRange';
+import { DEFAULT_BRANCH_TIMEZONE, toBusinessDate } from '@/lib/businessTime';
 import ICTransferDealBookKpiStrips from '@/components/ic-transfer/shared/ICTransferDealBookKpiStrips';
+import { HQ_IC_FUNDS_BRANCH_ID } from '@/lib/icFunds/hqBranch';
+import { useWarehouseInrLedgerKpis } from '@/lib/icTransfer/useWarehouseInrLedgerKpis';
 import {
   computeCombinedTradeBookKpis,
   countPurchasesInRange,
@@ -196,22 +199,43 @@ export default function ICTransferDashboard() {
     );
   }, [scopedSales, icWarehouses, selectedRegionIds, branchSlug, branches, allBranches, currentSlug]);
 
-  const tradeBookKpis = useMemo(
-    () => {
-      const activeBranch = branches.find(b => b.slug === currentSlug)
-        || allBranches.find(b => b.slug === currentSlug);
-      const activeBranchId = activeBranch?.id;
-      const warehousesForKpi = icWarehouses.filter(
-        w => (!branchSlug ? !w.branchId : w.branchId === activeBranchId)
-          && matchesSelectedRegions(w.regionId, selectedRegionIds),
-      );
-      return computeCombinedTradeBookKpis(scopedPurchasesForKpi, scopedSalesForKpi, range, {
-        aed: warehousesForKpi.reduce((sum, w) => sum + (Number(w.openingAed) || 0), 0),
-        inr: warehousesForKpi.reduce((sum, w) => sum + (Number(w.openingInr) || 0), 0),
-      });
-    },
-    [scopedPurchasesForKpi, scopedSalesForKpi, range, icWarehouses, selectedRegionIds, branchSlug, branches, allBranches, currentSlug],
+  const warehousesForKpi = useMemo(() => {
+    const activeBranch = branches.find(b => b.slug === currentSlug)
+      || allBranches.find(b => b.slug === currentSlug);
+    const activeBranchId = activeBranch?.id;
+    return icWarehouses.filter(
+      w => (!branchSlug ? !w.branchId : w.branchId === activeBranchId)
+        && matchesSelectedRegions(w.regionId, selectedRegionIds),
+    );
+  }, [icWarehouses, selectedRegionIds, branchSlug, branches, allBranches, currentSlug]);
+  const { data: warehouseInrLedgers, status: inrLedgerStatus } = useWarehouseInrLedgerKpis({
+    branchId: branchSlug
+      ? (branches.find(b => b.slug === currentSlug)?.id || allBranches.find(b => b.slug === currentSlug)?.id || HQ_IC_FUNDS_BRANCH_ID)
+      : HQ_IC_FUNDS_BRANCH_ID,
+    warehouseIds: warehousesForKpi.map((warehouse) => warehouse.id),
+    startDate: range.startDate,
+    endDate: range.endDate,
+  });
+  const dealBookKpis = useMemo(
+    () => computeCombinedTradeBookKpis(scopedPurchasesForKpi, scopedSalesForKpi, range, {
+      aed: warehousesForKpi.reduce((sum, w) => sum + (Number(w.openingAed) || 0), 0),
+      inr: warehousesForKpi.reduce((sum, w) => sum + (Number(w.openingInr) || 0), 0),
+    }),
+    [scopedPurchasesForKpi, scopedSalesForKpi, range, warehousesForKpi],
   );
+  const tradeBookKpis = useMemo(() => {
+    const inr = Object.values(warehouseInrLedgers).reduce(
+      (sum, ledger) => ({
+        opening: sum.opening + ledger.opening,
+        periodDebit: sum.periodDebit + ledger.periodDebit,
+        periodCredit: sum.periodCredit + ledger.periodCredit,
+        closing: sum.closing + ledger.closing,
+        accountFound: sum.accountFound && ledger.accountFound,
+      }),
+      { opening: 0, periodDebit: 0, periodCredit: 0, closing: 0, accountFound: true },
+    );
+    return { ...dealBookKpis, inr };
+  }, [dealBookKpis, warehouseInrLedgers]);
 
   const tradeCountHint = useMemo(() => {
     const p = countPurchasesInRange(scopedPurchasesForKpi, range);
@@ -220,7 +244,10 @@ export default function ICTransferDashboard() {
   }, [scopedPurchasesForKpi, scopedSalesForKpi, range]);
 
   const { filteredPurchases, filteredSales } = useMemo(() => {
-    const isFiltered = (dateStr: string) => !range.startDate && !range.endDate ? true : isDateInRange(dateStr, range);
+    const isFiltered = (dateStr: string) =>
+      !range.startDate && !range.endDate
+        ? true
+        : isDateInRange(toBusinessDate(dateStr, DEFAULT_BRANCH_TIMEZONE), range);
     
     const activeBranch = branches.find(b => b.slug === currentSlug)
       || allBranches.find(b => b.slug === currentSlug);
@@ -270,7 +297,8 @@ export default function ICTransferDashboard() {
     }
 
     const getGroupKey = (dateStr: string) => {
-      const d = new Date(dateStr);
+      const [year, month, day] = toBusinessDate(dateStr, DEFAULT_BRANCH_TIMEZONE).split('-').map(Number);
+      const d = new Date(year, month - 1, day, 12);
       if (groupByMonth) {
         return d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
       }
@@ -421,6 +449,7 @@ export default function ICTransferDashboard() {
         rangeLabel={rangeLabel}
         flow="combined"
         countHint={tradeCountHint}
+        inrLedgerStatus={inrLedgerStatus}
       />
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">

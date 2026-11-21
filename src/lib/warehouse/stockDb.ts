@@ -1,26 +1,5 @@
 import type { PoolClient } from 'pg';
 
-/** Atomically adjust warehouse on-hand IC units (positive = receive, negative = clear). */
-export async function adjustWarehouseStock(
-  client: PoolClient,
-  warehouseId: string,
-  deltaUnits: number,
-): Promise<void> {
-  if (!Number.isFinite(deltaUnits) || deltaUnits === 0) return;
-
-  const res = await client.query(
-    `UPDATE ic_warehouses
-     SET current_stock = current_stock + $2
-     WHERE id = $1
-     RETURNING current_stock`,
-    [warehouseId, deltaUnits],
-  );
-
-  if (res.rowCount === 0) {
-    throw new Error('Warehouse not found');
-  }
-}
-
 /** Atomically adjust warehouse metal grams (positive = receive, negative = clear). */
 export async function adjustWarehouseMetalStock(
   client: PoolClient,

@@ -31,7 +31,7 @@ export async function queryMetalPlPeriodKpis(opts: {
   const params: unknown[] = [];
   let idx = 1;
   const tz = resolveBranchTimeZone(branchTimeZone);
-  const saleCalendarDate = `(COALESCE(s.status_updated_at, s.created_at) AT TIME ZONE '${tz}')::date`;
+  const saleCalendarDate = `(s.created_at AT TIME ZONE '${tz}')::date`;
 
   const branchFilter = isHqLedger ? '' : `AND (w.branch_id = $${idx++} OR w.branch_id IS NULL)`;
   if (!isHqLedger) params.push(branchId);
@@ -61,7 +61,7 @@ export async function queryMetalPlPeriodKpis(opts: {
        s.service_charge,
        s.metal_purchase_id,
        s.metal_payment_method,
-       COALESCE(s.status_updated_at, s.created_at) AS sale_at
+       s.created_at AS sale_at
      FROM ic_sales s
      JOIN ic_warehouses w ON w.id = s.warehouse_id
      WHERE s.settlement_mode = 'metal'

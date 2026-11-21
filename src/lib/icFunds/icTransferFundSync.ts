@@ -7,7 +7,7 @@ import { validateVoucherCurrencyPolicy, roundLedgerAmount, IC_FUNDS_BASE_CURRENC
 import { metalInrSaleIcUnitsFromFields } from '@/lib/icTransfer/metalSplit';
 import { ensureHqIcFundsBranch } from '@/lib/icFunds/ensureHqBranch';
 import { HQ_IC_FUNDS_BRANCH_ID } from '@/lib/icFunds/hqBranch';
-import { computeIcCashAedTotal } from '@/lib/icTransfer/rateCalculations';
+import { computeIcCashAedTotal, INR_PER_UNIT } from '@/lib/icTransfer/rateCalculations';
 import {
   addPurchaseToPool,
   compareInventoryEvents,
@@ -45,6 +45,36 @@ const SALE_GHOST_STATUSES = new Set([
 const SALE_VOID_STATUSES = new Set<string>(IC_SALE_VOID_ORDER_STATUSES);
 const STARTER_TILLS = ['Collection', 'Fund', 'Cashier'] as const;
 const SYNC_ACTOR = 'IC Transfer sync';
+const INR_PER_IC_UNIT = INR_PER_UNIT;
+
+async function postWarehouseInrMovement(
+  client: DbClient,
+  warehouseIdRaw: unknown,
+  unitsRaw: unknown,
+  direction: 'in' | 'out',
+  voucherDate: string,
+  referenceType: string,
+  referenceId: string,
+  notes: string,
+): Promise<void> {
+  const warehouseId = String(warehouseIdRaw || '').trim();
+  const amount = roundLedgerAmount((Number(unitsRaw) || 0) * INR_PER_IC_UNIT);
+  const { voidInrVoucherByReference, ensureInrWarehouseAccount, ensureInrSystemAccount, postInrJournalInTx } =
+    await import('@/lib/ledgers/inr/inrFundSync');
+  await voidInrVoucherByReference(client, HQ_IC_FUNDS_BRANCH_ID, referenceType, referenceId);
+  if (!warehouseId || amount <= 0) return;
+  const warehouseAccount = await ensureInrWarehouseAccount(client, warehouseId, HQ_IC_FUNDS_BRANCH_ID);
+  const clearingAccount = await ensureInrSystemAccount(
+    client, HQ_IC_FUNDS_BRANCH_ID, 'Warehouse INR movement clearing', 'personal', 'warehouse_inr_movement_clearing',
+  );
+  if (!warehouseAccount) throw new Error(`Could not resolve INR account for warehouse ${warehouseId}`);
+  await postInrJournalInTx(client, {
+    branchId: HQ_IC_FUNDS_BRANCH_ID, voucherDate,
+    debitAccountId: direction === 'in' ? warehouseAccount : clearingAccount,
+    creditAccountId: direction === 'in' ? clearingAccount : warehouseAccount,
+    amount, notes, referenceType, referenceId,
+  });
+}
 
 async function lockFundAccounts(
   client: DbClient,
@@ -435,14 +465,14 @@ async function loadWarehouseInventoryEvents(
 
   const salesRes = await client.query(
     `SELECT id, units, unit_rate, aed_amount, service_charge, collected_units,
-            created_at, COALESCE(status_updated_at, created_at) AS completed_at
+            created_at, created_at AS completed_at
      FROM ic_sales
      WHERE warehouse_id = $1
        AND order_status = 'completed'
        AND COALESCE(settlement_mode, 'cash') <> 'metal'
        AND id <> $2::uuid
-       AND COALESCE(status_updated_at, created_at) <= $3::timestamptz
-     ORDER BY completed_at ASC, created_at ASC, id ASC`,
+       AND created_at <= $3::timestamptz
+     ORDER BY created_at ASC, id ASC`,
     [warehouseId, excludeSaleId, asOf],
   );
 
@@ -470,15 +500,15 @@ async function loadWarehouseInventoryEvents(
   const metalInrSalesRes = await client.query(
     `SELECT id, units, unit_rate, aed_amount, settlement_mode, metal_payment_method,
             inr_total, lab_total_inr, split_inr_paid,
-            COALESCE(status_updated_at, created_at) AS completed_at, created_at
+            created_at AS completed_at, created_at
      FROM ic_sales
      WHERE warehouse_id = $1
        AND order_status = 'completed'
        AND COALESCE(settlement_mode, 'cash') = 'metal'
        AND COALESCE(metal_payment_method, '') <> 'AED'
        AND id <> $2::uuid
-       AND COALESCE(status_updated_at, created_at) <= $3::timestamptz
-     ORDER BY completed_at ASC, created_at ASC, id ASC`,
+       AND created_at <= $3::timestamptz
+     ORDER BY created_at ASC, id ASC`,
     [warehouseId, excludeSaleId, asOf],
   );
 
@@ -527,13 +557,13 @@ async function loadGlobalInventoryEvents(
 
   const salesRes = await client.query(
     `SELECT id, units, unit_rate, aed_amount, service_charge, collected_units,
-            created_at, COALESCE(status_updated_at, created_at) AS completed_at
+            created_at, created_at AS completed_at
      FROM ic_sales
      WHERE order_status = 'completed'
        AND COALESCE(settlement_mode, 'cash') <> 'metal'
        AND id <> $2::uuid
-       AND COALESCE(status_updated_at, created_at) <= $3::timestamptz
-     ORDER BY completed_at ASC, created_at ASC, id ASC`,
+       AND created_at <= $3::timestamptz
+     ORDER BY created_at ASC, id ASC`,
     [asOf, excludeSaleId, asOf],
   );
 
@@ -553,14 +583,14 @@ async function loadGlobalInventoryEvents(
   const metalInrSalesRes = await client.query(
     `SELECT id, units, unit_rate, aed_amount, settlement_mode, metal_payment_method,
             inr_total, lab_total_inr, split_inr_paid,
-            COALESCE(status_updated_at, created_at) AS completed_at, created_at
+            created_at AS completed_at, created_at
      FROM ic_sales
      WHERE order_status = 'completed'
        AND COALESCE(settlement_mode, 'cash') = 'metal'
        AND COALESCE(metal_payment_method, '') <> 'AED'
        AND id <> $2::uuid
-       AND COALESCE(status_updated_at, created_at) <= $3::timestamptz
-     ORDER BY completed_at ASC, created_at ASC, id ASC`,
+       AND created_at <= $3::timestamptz
+     ORDER BY created_at ASC, id ASC`,
     [asOf, excludeSaleId, asOf],
   );
 
@@ -631,7 +661,7 @@ async function postSaleMarginVouchers(
     return;
   }
   const warehouseId = sale.warehouse_id ? String(sale.warehouse_id) : null;
-  const asOf = sale.status_updated_at || sale.created_at;
+  const asOf = sale.created_at;
   const priorEvents = warehouseId
     ? await loadWarehouseInventoryEvents(client, warehouseId, String(sale.id), asOf)
     : await loadGlobalInventoryEvents(client, String(sale.id), asOf);
@@ -677,7 +707,7 @@ async function postSaleMarginVouchers(
     'ic_sales_profit',
   );
 
-  const voucherDate = ledgerVoucherDateFromInstant(sale.status_updated_at || sale.created_at, branchTz);
+  const voucherDate = ledgerVoucherDateFromInstant(sale.created_at, branchTz);
   const saleRef = String(sale.id);
   const avgLabel = margin.avgPurchaseRate.toFixed(4);
 
@@ -752,7 +782,7 @@ async function repairCompletedCashSaleMarginsForWarehouse(
      WHERE warehouse_id = $1
        AND order_status = 'completed'
        AND COALESCE(settlement_mode, 'cash') <> 'metal'
-     ORDER BY COALESCE(status_updated_at, created_at) ASC, created_at ASC, id ASC`,
+     ORDER BY created_at ASC, id ASC`,
     [warehouseId],
   );
   for (const row of res.rows) {
@@ -774,7 +804,7 @@ async function repairCompletedMetalSalesForPurchase(
      WHERE metal_purchase_id = $1
        AND settlement_mode = 'metal'
        AND order_status = 'completed'
-     ORDER BY COALESCE(status_updated_at, created_at) ASC, created_at ASC, id ASC`,
+     ORDER BY created_at ASC, id ASC`,
     [purchaseId],
   );
   if (res.rows.length === 0) return;
@@ -840,7 +870,7 @@ async function postCashIcSalePartyVoucher(
   await postVoucherInTx(client, {
     branchId,
     voucherType: 'journal',
-    voucherDate: ledgerVoucherDateFromInstant(sale.status_updated_at || sale.created_at, branchTz),
+    voucherDate: ledgerVoucherDateFromInstant(sale.created_at, branchTz),
     debitAccountId: customerAccountId,
     creditAccountId: incomeAccountId,
     amount,
@@ -1088,17 +1118,8 @@ export async function syncICWarehouseFundAccount(warehouseId: string): Promise<v
     if (aedAccountId) {
       await applyAedAccountOpening(db, aedAccountId, Number(row.opening_aed) || 0);
     }
-    const { ensureInrLinkedAccount, applyInrAccountOpening } = await import('@/lib/ledgers/inr/inrFundSync');
-    const inrAccountId = await ensureInrLinkedAccount(
-      db,
-      HQ_IC_FUNDS_BRANCH_ID,
-      'ic_warehouse',
-      warehouseId,
-      `Warehouse: ${String(row.name)}`,
-    );
-    if (inrAccountId) {
-      await applyInrAccountOpening(db, inrAccountId, Number(row.opening_inr) || 0);
-    }
+    const { ensureInrWarehouseAccount } = await import('@/lib/ledgers/inr/inrFundSync');
+    await ensureInrWarehouseAccount(db, warehouseId, HQ_IC_FUNDS_BRANCH_ID);
   } catch (err) {
     logger.error({ err, warehouseId }, 'Failed to sync IC warehouse fund account');
     throw err;
@@ -1120,6 +1141,8 @@ export async function syncICPurchaseToICFunds(
       const branchId = await resolvePurchaseBranchId(client, purchaseId);
       const branchTz = await loadBranchTimeZoneInTx(client, branchId);
       const metal = isMetalSettlement(purchase.settlement_mode);
+      const { voidInrVoucherByReference } = await import('@/lib/ledgers/inr/inrFundSync');
+      await voidInrVoucherByReference(client, HQ_IC_FUNDS_BRANCH_ID, 'ic_purchase_inr', purchaseId);
 
       if (metal) {
         const { syncMetalPurchaseLedgers } = await import('@/lib/metal/posting');
@@ -1134,7 +1157,17 @@ export async function syncICPurchaseToICFunds(
         return;
       }
 
+      const { voidMetalPurchaseLedgers } = await import('@/lib/metal/posting');
+      await voidMetalPurchaseLedgers(client, branchId, purchaseId);
+
       const units = Number(purchase.units) || 0;
+      const warehouseId = purchase.warehouse_id ? String(purchase.warehouse_id) : null;
+      if (warehouseId) {
+        await postWarehouseInrMovement(
+          client, warehouseId, units, 'in', ledgerVoucherDateFromInstant(purchase.created_at, branchTz),
+          'ic_purchase_inr', purchaseId, `Warehouse IC purchase ${purchaseId.slice(0, 8)}`,
+        );
+      }
       const amount = roundLedgerAmount(
         purchaseAedTotal(units, Number(purchase.unit_rate) || 0, purchase.aed_total),
       );
@@ -1190,7 +1223,6 @@ export async function syncICPurchaseToICFunds(
         referenceId: purchaseId,
       });
 
-      const warehouseId = purchase.warehouse_id ? String(purchase.warehouse_id) : null;
       if (warehouseId && !options?.skipWarehouseMarginRepair) {
         await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId, branchTz);
       }
@@ -1211,6 +1243,8 @@ export async function removeICPurchaseFromICFunds(purchaseId: string, transactio
       const { voidMetalPurchaseLedgers } = await import('@/lib/metal/posting');
       await voidMetalPurchaseLedgers(client, branchId, purchaseId);
       await voidVoucherByReference(client, branchId, 'ic_purchase', purchaseId);
+      const { voidInrVoucherByReference } = await import('@/lib/ledgers/inr/inrFundSync');
+      await voidInrVoucherByReference(client, HQ_IC_FUNDS_BRANCH_ID, 'ic_purchase_inr', purchaseId);
     };
     if (transactionClient) await remove(transactionClient);
     else await withTransaction(remove);
@@ -1242,9 +1276,12 @@ export async function syncICSaleToICFunds(
       const metal = isMetalSettlement(sale.settlement_mode);
 
       if (SALE_VOID_STATUSES.has(orderStatus)) {
+        const { voidInrVoucherByReference } = await import('@/lib/ledgers/inr/inrFundSync');
+        await voidInrVoucherByReference(client, HQ_IC_FUNDS_BRANCH_ID, 'ic_sale_inr', saleId);
+        await voidSaleMarginVouchers(client, branchId, saleId);
+        const { voidMetalSaleLedgers } = await import('@/lib/metal/posting');
+        await voidMetalSaleLedgers(client, branchId, saleId);
         if (metal) {
-          const { voidMetalSaleLedgers } = await import('@/lib/metal/posting');
-          await voidMetalSaleLedgers(client, branchId, saleId);
           const warehouseId = sale.warehouse_id ? String(sale.warehouse_id) : null;
           if (warehouseId && !options?.deferWarehouseMarginRepair) {
             await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId, branchTz);
@@ -1260,7 +1297,11 @@ export async function syncICSaleToICFunds(
         return;
       }
 
+      const { voidInrVoucherByReference } = await import('@/lib/ledgers/inr/inrFundSync');
+      await voidInrVoucherByReference(client, HQ_IC_FUNDS_BRANCH_ID, 'ic_sale_inr', saleId);
+
       if (metal) {
+        await voidSaleMarginVouchers(client, branchId, saleId);
         const { syncMetalSaleLedgers } = await import('@/lib/metal/posting');
         await syncMetalSaleLedgers(client, sale, branchId, branchTz);
         await voidMetalCashIcStockVoucher(client, saleId, branchId);
@@ -1269,6 +1310,21 @@ export async function syncICSaleToICFunds(
           await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId, branchTz);
         }
         return;
+      }
+
+      const { voidMetalSaleLedgers } = await import('@/lib/metal/posting');
+      await voidMetalSaleLedgers(client, branchId, saleId);
+
+      const warehouseId = sale.warehouse_id ? String(sale.warehouse_id) : null;
+      if (warehouseId && (orderStatus === 'completed' || orderStatus === 'delivery_pending_admin')) {
+        await postWarehouseInrMovement(
+          client, warehouseId, sale.units, 'out',
+          ledgerVoucherDateFromInstant(sale.created_at, branchTz),
+          'ic_sale_inr', saleId, `Warehouse IC sale ${saleId.slice(0, 8)}`,
+        );
+      } else {
+        const { voidInrVoucherByReference } = await import('@/lib/ledgers/inr/inrFundSync');
+        await voidInrVoucherByReference(client, HQ_IC_FUNDS_BRANCH_ID, 'ic_sale_inr', saleId);
       }
 
       const amount = (Number(sale.aed_amount) || 0) + (Number(sale.service_charge) || 0);
@@ -1345,6 +1401,8 @@ export async function removeICSaleFromICFunds(saleId: string, transactionClient?
       const { voidMetalSaleLedgers } = await import('@/lib/metal/posting');
       await voidMetalSaleLedgers(client, branchId, saleId);
       await voidVoucherByReference(client, branchId, 'ic_sale', saleId);
+      const { voidInrVoucherByReference } = await import('@/lib/ledgers/inr/inrFundSync');
+      await voidInrVoucherByReference(client, HQ_IC_FUNDS_BRANCH_ID, 'ic_sale_inr', saleId);
       await voidSaleMarginVouchers(client, branchId, saleId);
     };
     if (transactionClient) await remove(transactionClient);
