@@ -11,13 +11,17 @@ import {
 export async function syncICSaleFundLedger(
   saleId: string,
   client?: PoolClient,
-  options?: { deferWarehouseMarginRepair?: boolean },
+  options?: { deferWarehouseMarginRepair?: boolean; onlyCurrentSaleMargin?: boolean },
 ): Promise<void> {
   await syncICSaleToICFunds(saleId, client as DbClient | undefined, options);
 }
 
-export async function syncICPurchaseFundLedger(purchaseId: string, client?: PoolClient): Promise<void> {
-  await syncICPurchaseToICFunds(purchaseId, client as DbClient | undefined);
+export async function syncICPurchaseFundLedger(
+  purchaseId: string,
+  client?: PoolClient,
+  options?: { skipWarehouseMarginRepair?: boolean },
+): Promise<void> {
+  await syncICPurchaseToICFunds(purchaseId, client as DbClient | undefined, options);
 }
 
 export async function removeICSaleFundLedger(saleId: string, client?: PoolClient): Promise<void> {

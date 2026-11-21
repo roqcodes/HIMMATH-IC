@@ -1070,7 +1070,11 @@ export async function syncICWarehouseFundAccount(warehouseId: string): Promise<v
   }
 }
 
-export async function syncICPurchaseToICFunds(purchaseId: string, transactionClient?: DbClient): Promise<void> {
+export async function syncICPurchaseToICFunds(
+  purchaseId: string,
+  transactionClient?: DbClient,
+  options?: { skipWarehouseMarginRepair?: boolean },
+): Promise<void> {
   try {
     if (!transactionClient) await ensureHqIcFundsBranch();
     const sync = async (client: DbClient) => {
@@ -1085,9 +1089,11 @@ export async function syncICPurchaseToICFunds(purchaseId: string, transactionCli
       if (metal) {
         const { syncMetalPurchaseLedgers } = await import('@/lib/metal/posting');
         await syncMetalPurchaseLedgers(client, purchase, branchId, branchTz);
-        await repairCompletedMetalSalesForPurchase(client, purchaseId, branchId, branchTz);
+        if (!options?.skipWarehouseMarginRepair) {
+          await repairCompletedMetalSalesForPurchase(client, purchaseId, branchId, branchTz);
+        }
         const warehouseId = purchase.warehouse_id ? String(purchase.warehouse_id) : null;
-        if (warehouseId) {
+        if (warehouseId && !options?.skipWarehouseMarginRepair) {
           await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId, branchTz);
         }
         return;
@@ -1150,7 +1156,7 @@ export async function syncICPurchaseToICFunds(purchaseId: string, transactionCli
       });
 
       const warehouseId = purchase.warehouse_id ? String(purchase.warehouse_id) : null;
-      if (warehouseId) {
+      if (warehouseId && !options?.skipWarehouseMarginRepair) {
         await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId, branchTz);
       }
     };
@@ -1182,7 +1188,7 @@ export async function removeICPurchaseFromICFunds(purchaseId: string, transactio
 export async function syncICSaleToICFunds(
   saleId: string,
   transactionClient?: DbClient,
-  options?: { deferWarehouseMarginRepair?: boolean },
+  options?: { deferWarehouseMarginRepair?: boolean; onlyCurrentSaleMargin?: boolean },
 ): Promise<void> {
   try {
     if (!transactionClient) await ensureHqIcFundsBranch();
@@ -1216,7 +1222,7 @@ export async function syncICSaleToICFunds(
         await syncMetalSaleLedgers(client, sale, branchId, branchTz);
         await voidMetalCashIcStockVoucher(client, saleId, branchId);
         const warehouseId = sale.warehouse_id ? String(sale.warehouse_id) : null;
-        if (warehouseId && !options?.deferWarehouseMarginRepair) {
+        if (warehouseId && !options?.deferWarehouseMarginRepair && !options?.onlyCurrentSaleMargin) {
           await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId, branchTz);
         }
         return;
@@ -1235,7 +1241,11 @@ export async function syncICSaleToICFunds(
         const warehouseId = sale.warehouse_id ? String(sale.warehouse_id) : null;
         if (warehouseId) {
           if (!options?.deferWarehouseMarginRepair) {
-            await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId, branchTz);
+            if (options?.onlyCurrentSaleMargin) {
+              await postSaleMarginVouchers(client, sale, branchId, branchTz);
+            } else {
+              await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId, branchTz);
+            }
           }
         } else {
           await postSaleMarginVouchers(client, sale, branchId, branchTz);

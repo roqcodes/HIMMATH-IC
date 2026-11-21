@@ -1184,13 +1184,12 @@ export async function dbAddICPurchaseAction(
         }
       }
 
-      await syncICPurchaseFundLedger(String(res.rows[0].id), client);
+      await syncICPurchaseFundLedger(String(res.rows[0].id), client, { skipWarehouseMarginRepair: true });
 
       return res.rows[0];
     });
 
-    const purchaseRow = await loadICPurchaseRowById(String(row.id));
-    return { success: true, data: purchaseRow ?? mapICPurchaseRow(row) };
+    return { success: true, data: mapICPurchaseRow(row) };
   } catch (err: unknown) {
     logger.error({ err, purchase }, 'Validation error in dbAddICPurchaseAction');
     return { success: false, error: err instanceof Error ? err.message : 'Invalid data format' };
@@ -1571,14 +1570,13 @@ export async function dbAddICSaleAction(
 
       await syncICSaleFundLedger(String(res.rows[0].id), client, {
         deferWarehouseMarginRepair: options?.deferWarehouseMarginRepair === true,
+        onlyCurrentSaleMargin: options?.deferWarehouseMarginRepair !== true,
       });
 
       return res.rows[0];
     });
 
-  const saleId = String(row.id);
-  const saleRow = await loadICSaleRowById(saleId);
-  return { success: true, data: saleRow ?? mapICSaleRow(row) };
+  return { success: true, data: mapICSaleRow(row) };
   } catch (err: unknown) {
     if (options?.importKey && typeof err === 'object' && err !== null && 'code' in err && err.code === '23505') {
       return { success: false, error: 'This spreadsheet row was already imported.' };
