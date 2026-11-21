@@ -219,7 +219,7 @@ export default function BulkSalesImportModal({
       const buffer = await file.arrayBuffer();
       const fileDigest = await crypto.subtle.digest('SHA-256', buffer);
       setFileFingerprint(Array.from(new Uint8Array(fileDigest), byte => byte.toString(16).padStart(2, '0')).join(''));
-      await workbook.xlsx.load(buffer as unknown as Buffer);
+      await workbook.xlsx.load(buffer as unknown as Parameters<typeof workbook.xlsx.load>[0]);
       const sheet = workbook.worksheets[0];
       if (!sheet) throw new Error('The workbook has no worksheet.');
 
