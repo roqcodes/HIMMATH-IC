@@ -30,12 +30,13 @@ import { useOnIcFundsVoucherPosted } from '@/hooks/useOnIcFundsVoucherPosted';
 import { useWriteAccess } from '@/context/RbacWriteContext';
 import { fmtLedgerAed, fmtLedgerInr } from '@/lib/icFunds/format';
 import { buildLedgerAccountMetrics } from '@/lib/icFunds/ledgerKpiMetrics';
+import { indexSaleLineProfits } from '@/lib/icTransfer/dealProfit';
 import {
   getCounterpartyLedgerKpisAction,
   type CounterpartyLedgerKpis,
 } from '@/app/actions/icFundsActions';
 import type { ICBranchDeposit } from '@/types';
-import { filterCounterpartyDeposits } from '@/lib/counterparties/counterpartyActivity';
+import { filterCounterpartyDeposits, filterCounterpartySales } from '@/lib/counterparties/counterpartyActivity';
 
 type Props = {
   counterpartyId: string;
@@ -48,7 +49,7 @@ const EMPTY_KPIS: CounterpartyLedgerKpis = {
 };
 
 export default function CounterpartyDetailsClient({ counterpartyId, branchSlug }: Props) {
-  const { icSuppliers } = useApp();
+  const { icSuppliers, icPurchases, icSales, icWarehouses } = useApp();
   const { canWrite, buttonProps: wp } = useWriteAccess();
   const [editOpen, setEditOpen] = useState(false);
   const [ledger, setLedger] = useState<CounterpartyLedgerKpis>(EMPTY_KPIS);
@@ -81,6 +82,28 @@ export default function CounterpartyDetailsClient({ counterpartyId, branchSlug }
   const isManager = counterparty ? counterpartyIsManager(counterparty) : false;
   const isAgent = counterparty ? counterpartyIsAgent(counterparty) : false;
   const noPartyLedger = isManager || isAgent;
+
+  const periodSales = useMemo(
+    () => counterparty ? filterCounterpartySales(icSales, counterparty.id, range) : [],
+    [counterparty, icSales, range],
+  );
+  const saleProfits = useMemo(
+    () => indexSaleLineProfits({ purchases: icPurchases, sales: icSales, range, warehouses: icWarehouses }),
+    [icPurchases, icSales, icWarehouses, range],
+  );
+  const periodProfit = useMemo(() => {
+    let aed = 0;
+    let inr = 0;
+    for (const sale of periodSales) {
+      const profit = saleProfits.get(sale.id);
+      if (!profit) continue;
+      if (profit.currency === 'AED') aed += profit.amount;
+      else inr += profit.amount;
+      if (profit.secondaryCurrency === 'AED') aed += profit.secondaryAmount ?? 0;
+      if (profit.secondaryCurrency === 'INR') inr += profit.secondaryAmount ?? 0;
+    }
+    return { aed, inr };
+  }, [periodSales, saleProfits]);
 
   const reloadLedgerKpis = useCallback(() => {
     if (!counterparty?.id || noPartyLedger) return;
@@ -217,20 +240,28 @@ export default function CounterpartyDetailsClient({ counterpartyId, branchSlug }
       {!noPartyLedger ? (
         <>
           <AsicKpiStrip
-            columns={4}
-            metrics={buildLedgerAccountMetrics({
-              book: ledger.aed,
-              rangeLabel,
-              currency: 'AED',
-            })}
+            columns={5}
+            metrics={[
+              ...buildLedgerAccountMetrics({ book: ledger.aed, rangeLabel, currency: 'AED' }),
+              {
+                label: 'AED profit',
+                value: fmtLedgerAed(periodProfit.aed),
+                hint: `Deal profit Â· ${rangeLabel}`,
+                tone: periodProfit.aed > 0 ? 'emerald' : periodProfit.aed < 0 ? 'red' : 'slate',
+              },
+            ]}
           />
           <AsicKpiStrip
-            columns={4}
-            metrics={buildLedgerAccountMetrics({
-              book: ledger.inr,
-              rangeLabel,
-              currency: 'INR',
-            })}
+            columns={5}
+            metrics={[
+              ...buildLedgerAccountMetrics({ book: ledger.inr, rangeLabel, currency: 'INR' }),
+              {
+                label: 'INR profit',
+                value: fmtLedgerInr(periodProfit.inr),
+                hint: `Deal profit Â· ${rangeLabel}`,
+                tone: periodProfit.inr > 0 ? 'emerald' : periodProfit.inr < 0 ? 'red' : 'slate',
+              },
+            ]}
           />
         </>
       ) : null}

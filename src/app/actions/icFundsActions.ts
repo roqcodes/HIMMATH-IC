@@ -73,7 +73,7 @@ import {
 import { sqlExcludeVoidIcSales } from '@/lib/icFunds/icTransferReportFilters';
 import { isMetalAedPayment, normalizeMetalPaymentMethod } from '@/lib/domain/books';
 import { bookedMetalAed, bookedMetalInr } from '@/lib/icTransfer/metalSplit';
-import { syncICPurchaseToICFunds, syncICSaleToICFunds } from '@/lib/icFunds/icTransferFundSync';
+import { ensureLinkedAccount, syncICPurchaseToICFunds, syncICSaleToICFunds } from '@/lib/icFunds/icTransferFundSync';
 import {
   buildIcStockInventoryEvents,
   isDealSaleActive,
@@ -882,6 +882,34 @@ export async function listICFundAccountsLiteAction(
   } catch (err) {
     logger.error({ err, branchId, book }, 'Failed to list lite IC fund accounts');
     return [];
+  }
+}
+
+export async function ensureICBranchLockerAccountAction(
+  icBranchId: string,
+): Promise<ActionResult<{ accountId: string }>> {
+  const access = await requireICFundsAccess(HQ_IC_FUNDS_BRANCH_ID, 'write');
+  if (!access.ok) return { success: false, error: access.error };
+  const id = icBranchId.trim();
+  if (!id) return { success: false, error: 'Branch is required.' };
+
+  try {
+    const branchRes = await query(`SELECT id, name FROM ic_branches WHERE id = $1 LIMIT 1`, [id]);
+    if (branchRes.rows.length === 0) return { success: false, error: 'Branch not found.' };
+    await ensureHqIcFundsBranch();
+    const accountId = await withTransaction(client =>
+      ensureLinkedAccount(client, {
+        branchId: HQ_IC_FUNDS_BRANCH_ID,
+        sourceType: 'ic_branch',
+        sourceId: id,
+        name: String(branchRes.rows[0].name || id),
+      }),
+    );
+    if (!accountId) return { success: false, error: 'Could not create the branch locker account.' };
+    return { success: true, data: { accountId } };
+  } catch (err) {
+    logger.error({ err, icBranchId: id }, 'Failed to ensure branch locker account');
+    return { success: false, error: 'Could not prepare the branch locker account.' };
   }
 }
 

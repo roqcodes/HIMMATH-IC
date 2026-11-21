@@ -212,7 +212,6 @@ interface AppContextType extends AppState {
   ) => Promise<boolean>;
   updateICBranch: (
     id: string,
-    name: string,
     code: string,
     phone: string,
     email: string,
@@ -862,7 +861,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateICBranch = useTrackedCallback(async (
     id: string,
-    name: string,
     code: string,
     phone: string,
     email: string,
@@ -873,7 +871,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const res = await dbUpdateICBranchAction(
         id,
-        name,
         code.trim() || null,
         phone,
         email,

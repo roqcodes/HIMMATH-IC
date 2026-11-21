@@ -31,7 +31,7 @@ export default function WarehouseModal({
   onClose,
   onSaved,
 }: Props) {
-  const { addICWarehouse, updateICWarehouse } = useApp();
+  const { addICWarehouse, updateICWarehouse, deleteICWarehouse } = useApp();
   const isEdit = Boolean(warehouse?.id);
 
   const [name, setName] = useState('');
@@ -46,6 +46,7 @@ export default function WarehouseModal({
   const [openingInr, setOpeningInr] = useState('0');
   const [managerIds, setManagerIds] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const deskKind = warehouse?.deskKind ?? defaultDeskKind;
   const isBranchDesk = deskKind === 'branch';
@@ -157,6 +158,17 @@ export default function WarehouseModal({
     }
   };
 
+  const handleDelete = async () => {
+    if (!warehouse || !window.confirm(`Delete ${warehouse.name}? This is allowed only when it has no associated transactions, ledger entries, or stock.`)) return;
+    setIsDeleting(true);
+    const ok = await deleteICWarehouse(warehouse.id);
+    setIsDeleting(false);
+    if (ok) {
+      onSaved?.();
+      onClose();
+    }
+  };
+
   return (
     <Modal
       open={open}
@@ -173,14 +185,24 @@ export default function WarehouseModal({
       maxWidth="max-w-4xl w-[min(95vw,56rem)]"
       footer={
         <>
-          <button type="button" className={asicBtnOutline} onClick={onClose} disabled={isSaving}>
+          {isEdit ? (
+            <button
+              type="button"
+              className="mr-auto rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+              onClick={() => void handleDelete()}
+              disabled={isSaving || isDeleting}
+            >
+              {isDeleting ? 'Deleting…' : isBranchDesk ? 'Delete branch' : 'Delete warehouse'}
+            </button>
+          ) : null}
+          <button type="button" className={asicBtnOutline} onClick={onClose} disabled={isSaving || isDeleting}>
             Cancel
           </button>
           <button
             type="button"
             className={asicBtnPrimary}
             onClick={handleSave}
-            disabled={isSaving || !canSubmit}
+            disabled={isSaving || isDeleting || !canSubmit}
           >
             {isSaving ? 'Saving…' : isEdit ? 'Save changes' : 'Create warehouse'}
           </button>

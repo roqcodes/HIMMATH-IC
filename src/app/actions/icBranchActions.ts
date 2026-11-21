@@ -88,7 +88,6 @@ export async function dbAddICBranchAction(
 
 export async function dbUpdateICBranchAction(
   id: string,
-  name: string,
   code?: string | null,
   phone?: string,
   email?: string,
@@ -97,7 +96,7 @@ export async function dbUpdateICBranchAction(
   managerIds?: string[] | null,
 ): Promise<DbActionResult<ICBranch>> {
   try {
-    const parsed = branchBodySchema.parse({ name, code, phone, email, address, timezone });
+    const parsed = branchBodySchema.omit({ name: true }).parse({ code, phone, email, address, timezone });
     if (managerIds !== undefined) {
       const mgrErr = await validateIcBranchManagerIds(managerIds ?? []);
       if (mgrErr) return { success: false, error: mgrErr };
@@ -109,11 +108,10 @@ export async function dbUpdateICBranchAction(
     await withTransaction(async client => {
       await client.query(
         `UPDATE ic_branches
-         SET name = $2, code = $3, phone = $4, email = $5, address = $6, timezone = $7
+         SET code = $2, phone = $3, email = $4, address = $5, timezone = $6
          WHERE id = $1`,
         [
           id,
-          parsed.name.trim(),
           parsed.code?.trim() || null,
           parsed.phone?.trim() || null,
           parsed.email?.trim() || null,
@@ -130,6 +128,9 @@ export async function dbUpdateICBranchAction(
     if (!loaded) return { success: false, error: 'Branch not found after update.' };
     revalidatePath('/admin/branches');
     revalidatePath(`/admin/branches/[id]`, 'page');
+    // Branch details are rendered across the app; refresh previously visited
+    // routes after branch changes so their server-rendered details stay current.
+    revalidatePath('/', 'layout');
     return { success: true, data: loaded };
   } catch (error: unknown) {
     const conflict = entityCodeConflictMessage(error);
@@ -141,16 +142,57 @@ export async function dbUpdateICBranchAction(
 
 export async function dbDeleteICBranchAction(id: string): Promise<DbActionResult<void>> {
   try {
-    const dep = await query(
-      `SELECT 1 FROM ic_branch_deposits WHERE ic_branch_id = $1 LIMIT 1`,
-      [id],
-    );
-    if (dep.rows.length > 0) {
-      return { success: false, error: 'Cannot delete a branch that has customer deposits.' };
-    }
-    const del = await query(`DELETE FROM ic_branches WHERE id = $1 RETURNING id`, [id]);
-    if (del.rows.length === 0) return { success: false, error: 'Branch not found' };
+    const result = await withTransaction(async client => {
+      const branch = await client.query(`SELECT id FROM ic_branches WHERE id = $1 FOR UPDATE`, [id]);
+      if (branch.rows.length === 0) return { error: 'Branch not found' };
+
+      const dep = await client.query(
+        `SELECT 1 FROM ic_branch_deposits WHERE ic_branch_id = $1 LIMIT 1`,
+        [id],
+      );
+      if (dep.rows.length > 0) {
+        return { error: 'Cannot delete a branch with associated customer deposits.' };
+      }
+
+      const bankAccounts = await client.query(
+        `SELECT id, opening_balance FROM ic_fund_accounts
+         WHERE source_type = 'ic_branch' AND source_id = $1
+         FOR UPDATE`,
+        [id],
+      );
+      const accountIds = bankAccounts.rows.map(row => String(row.id));
+      if (accountIds.length > 0) {
+        if (bankAccounts.rows.some(row => Number(row.opening_balance) !== 0)) {
+          return { error: 'Cannot delete a branch with an opening balance in its associated bank account.' };
+        }
+        const vouchers = await client.query(
+          `SELECT 1 FROM ic_fund_vouchers
+           WHERE (debit_account_id = ANY($1::varchar[])
+              OR credit_account_id = ANY($1::varchar[]))
+             AND status IN ('active', 'pending')
+           LIMIT 1`,
+          [accountIds],
+        );
+        if (vouchers.rows.length > 0) {
+          return { error: 'Cannot delete a branch with entries in its associated bank account.' };
+        }
+        await client.query(
+          `DELETE FROM ic_fund_accounts a
+           WHERE a.id = ANY($1::varchar[])
+             AND NOT EXISTS (
+               SELECT 1 FROM ic_fund_vouchers v
+               WHERE v.debit_account_id = a.id OR v.credit_account_id = a.id
+             )`,
+          [accountIds],
+        );
+      }
+
+      await client.query(`DELETE FROM ic_branches WHERE id = $1`, [id]);
+      return { error: null };
+    });
+    if (result.error) return { success: false, error: result.error };
     revalidatePath('/admin/branches');
+    revalidatePath('/', 'layout');
     return { success: true };
   } catch (error: unknown) {
     logger.error({ error, id }, 'dbDeleteICBranchAction failed');

@@ -849,8 +849,65 @@ export async function dbUpdateICWarehouseAction(
 export async function dbDeleteICWarehouseAction(id: string): Promise<DbActionResult<void>> {
   try {
     const parsedId = z.string().min(1).parse(id);
-    const res = await query(`DELETE FROM ic_warehouses WHERE id=$1`, [parsedId]);
-    if (res.rowCount === 0) return { success: false, error: 'Warehouse not found' };
+    const result = await withTransaction(async client => {
+      const warehouseRes = await client.query(
+        `SELECT id, opening_aed, opening_inr, opening_stock, opening_metal_g, current_stock, current_metal_g
+         FROM ic_warehouses WHERE id = $1 FOR UPDATE`,
+        [parsedId],
+      );
+      if (warehouseRes.rows.length === 0) return { error: 'Warehouse not found' };
+
+      const activity = await client.query(
+        `SELECT EXISTS (SELECT 1 FROM ic_purchases WHERE warehouse_id = $1)
+          OR EXISTS (SELECT 1 FROM ic_sales WHERE warehouse_id = $1)
+          OR EXISTS (SELECT 1 FROM ic_warehouse_transactions WHERE warehouse_id = $1)
+          OR EXISTS (
+            SELECT 1 FROM ic_fund_accounts a
+            LEFT JOIN ic_fund_vouchers v
+              ON (v.debit_account_id = a.id OR v.credit_account_id = a.id) AND v.status IN ('active', 'pending')
+            WHERE a.source_type = 'ic_warehouse' AND a.source_id = $1
+              AND (v.id IS NOT NULL OR a.opening_balance <> 0)
+          )
+          OR EXISTS (
+            SELECT 1 FROM inr_fund_accounts a
+            LEFT JOIN inr_fund_vouchers v
+              ON (v.debit_account_id = a.id OR v.credit_account_id = a.id) AND v.status IN ('active', 'pending')
+            WHERE a.source_type = 'ic_warehouse' AND a.source_id = $1
+              AND (v.id IS NOT NULL OR a.opening_balance <> 0)
+          ) AS has_entries`,
+        [parsedId],
+      );
+      const row = warehouseRes.rows[0];
+      const hasOpeningOrStock =
+        Number(row.opening_aed) !== 0 || Number(row.opening_inr) !== 0 ||
+        Number(row.opening_stock) !== 0 || Number(row.opening_metal_g) !== 0 ||
+        Number(row.current_stock) !== 0 || Number(row.current_metal_g) !== 0;
+      if (activity.rows[0]?.has_entries || hasOpeningOrStock) {
+        return { error: 'Cannot delete a warehouse with associated transactions, ledger entries, or stock.' };
+      }
+
+      await client.query(
+        `DELETE FROM ic_fund_accounts a
+         WHERE a.source_type = 'ic_warehouse' AND a.source_id = $1
+           AND NOT EXISTS (
+             SELECT 1 FROM ic_fund_vouchers v
+             WHERE v.debit_account_id = a.id OR v.credit_account_id = a.id
+           )`,
+        [parsedId],
+      );
+      await client.query(
+        `DELETE FROM inr_fund_accounts a
+         WHERE a.source_type = 'ic_warehouse' AND a.source_id = $1
+           AND NOT EXISTS (
+             SELECT 1 FROM inr_fund_vouchers v
+             WHERE v.debit_account_id = a.id OR v.credit_account_id = a.id
+           )`,
+        [parsedId],
+      );
+      await client.query(`DELETE FROM ic_warehouses WHERE id = $1`, [parsedId]);
+      return { error: null };
+    });
+    if (result.error) return { success: false, error: result.error };
     return { success: true };
   } catch (error: unknown) {
     logger.error({ error, id }, 'Error in dbDeleteICWarehouseAction');

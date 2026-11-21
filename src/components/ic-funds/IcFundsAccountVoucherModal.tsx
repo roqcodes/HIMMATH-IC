@@ -27,7 +27,11 @@ import {
   icVoucherDateAmountFieldClass,
   icVoucherFullRowFieldClass,
 } from '@/components/ic-transfer/shared/icTransferFormModalLayout';
-import { postICFundVoucherAction, listICFundAccountsLiteAction } from '@/app/actions/icFundsActions';
+import {
+  ensureICBranchLockerAccountAction,
+  postICFundVoucherAction,
+  listICFundAccountsLiteAction,
+} from '@/app/actions/icFundsActions';
 import { allowedAccountTypesForVoucher, voucherFieldLabels } from '@/lib/icFunds/voucherRules';
 import { IC_FUND_VOUCHER_LABELS } from '@/lib/icFunds/constants';
 import {
@@ -106,9 +110,17 @@ export default function IcFundsAccountVoucherModal({
   const { entityLedgerById } = useICTransferModalSnapshots(open);
 
   const loadAccounts = useCallback(async () => {
+    if (fixedIcBranchId && book === 'AED') {
+      const ensured = await ensureICBranchLockerAccountAction(fixedIcBranchId);
+      if (!ensured.success) {
+        setAccounts([]);
+        showToast(ensured.error, 'error');
+        return;
+      }
+    }
     const lite = await listICFundAccountsLiteAction(branchId, book);
     setAccounts(lite);
-  }, [branchId, book]);
+  }, [branchId, book, fixedIcBranchId, showToast]);
 
   useEffect(() => {
     if (!open) return;

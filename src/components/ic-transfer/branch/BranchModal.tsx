@@ -36,7 +36,7 @@ function parseStoredBranchAddress(raw?: string | null): {
 }
 
 export default function BranchModal({ open, branch, onClose, onSaved }: Props) {
-  const { addICBranch, updateICBranch } = useApp();
+  const { addICBranch, updateICBranch, deleteICBranch } = useApp();
   const isEdit = Boolean(branch?.id);
 
   const [name, setName] = useState('');
@@ -49,6 +49,7 @@ export default function BranchModal({ open, branch, onClose, onSaved }: Props) {
   const [timezone, setTimezone] = useState('Asia/Dubai');
   const [managerIds, setManagerIds] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -87,7 +88,6 @@ export default function BranchModal({ open, branch, onClose, onSaved }: Props) {
     if (isEdit && branch) {
       ok = await updateICBranch(
         branch.id,
-        name.trim(),
         code.trim(),
         phone.trim(),
         email.trim(),
@@ -113,6 +113,17 @@ export default function BranchModal({ open, branch, onClose, onSaved }: Props) {
     }
   };
 
+  const handleDelete = async () => {
+    if (!branch || !window.confirm(`Delete ${branch.name}? This is allowed only when the branch has no deposits or bank account entries.`)) return;
+    setIsDeleting(true);
+    const ok = await deleteICBranch(branch.id);
+    setIsDeleting(false);
+    if (ok) {
+      onSaved?.();
+      onClose();
+    }
+  };
+
   return (
     <Modal
       open={open}
@@ -121,14 +132,24 @@ export default function BranchModal({ open, branch, onClose, onSaved }: Props) {
       maxWidth="max-w-4xl w-[min(95vw,56rem)]"
       footer={
         <>
-          <button type="button" className={asicBtnOutline} onClick={onClose} disabled={isSaving}>
+          {isEdit ? (
+            <button
+              type="button"
+              className="mr-auto rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+              onClick={() => void handleDelete()}
+              disabled={isSaving || isDeleting}
+            >
+              {isDeleting ? 'Deleting…' : 'Delete branch'}
+            </button>
+          ) : null}
+          <button type="button" className={asicBtnOutline} onClick={onClose} disabled={isSaving || isDeleting}>
             Cancel
           </button>
           <button
             type="button"
             className={asicBtnPrimary}
             onClick={handleSave}
-            disabled={isSaving || !canSubmit}
+            disabled={isSaving || isDeleting || !canSubmit}
           >
             {isSaving ? 'Saving…' : isEdit ? 'Save changes' : 'Create branch'}
           </button>
@@ -141,13 +162,14 @@ export default function BranchModal({ open, branch, onClose, onSaved }: Props) {
             title="Branch"
             description="UAE shop — customer AED deposits and branch cash till."
           >
-            <AsicFormField label="Name *" htmlFor="branch-name" className={fieldClass}>
+            <AsicFormField label={isEdit ? 'Name' : 'Name *'} htmlFor="branch-name" className={fieldClass}>
               <input
                 id="branch-name"
                 className={asicInput}
                 placeholder="e.g. Dubai Marina"
                 value={name}
                 onChange={e => setName(e.target.value)}
+                readOnly={isEdit}
                 autoFocus
               />
             </AsicFormField>
