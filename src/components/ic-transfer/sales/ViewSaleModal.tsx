@@ -64,6 +64,9 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
   const displayCustomerName = liveSale
     ? getAdminSaleCustomerName(liveSale, branchName, branches)
     : '';
+  const managerName = liveSale?.managerId
+    ? icSuppliers.find(supplier => supplier.id === liveSale.managerId)?.name || '—'
+    : '—';
   const endCustomerId = liveSale ? getSaleEndCustomerId(liveSale, branchName) : undefined;
   const endCustomerName = liveSale ? getSaleEndCustomerName(liveSale, branchName, branches) : '';
   const orderImageLabel = liveSale ? getSaleOrderImageLabel(liveSale, branchName) : 'Original Order Image';
@@ -201,6 +204,11 @@ export default function ViewSaleModal({ open, onClose, sale, onEdit, workflowVar
                   {formatICSaleTransactionTypeLabel(liveSale.transactionType)}
                 </span>
               </div>
+            </div>
+
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Manager</p>
+              <p className="mt-0.5 text-sm font-semibold text-slate-900">{managerName}</p>
             </div>
 
             {/* Calculations Box */}
