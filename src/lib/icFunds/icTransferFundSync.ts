@@ -1179,7 +1179,11 @@ export async function removeICPurchaseFromICFunds(purchaseId: string, transactio
   }
 }
 
-export async function syncICSaleToICFunds(saleId: string, transactionClient?: DbClient): Promise<void> {
+export async function syncICSaleToICFunds(
+  saleId: string,
+  transactionClient?: DbClient,
+  options?: { deferWarehouseMarginRepair?: boolean },
+): Promise<void> {
   try {
     if (!transactionClient) await ensureHqIcFundsBranch();
     const sync = async (client: DbClient) => {
@@ -1197,7 +1201,7 @@ export async function syncICSaleToICFunds(saleId: string, transactionClient?: Db
           const { voidMetalSaleLedgers } = await import('@/lib/metal/posting');
           await voidMetalSaleLedgers(client, branchId, saleId);
           const warehouseId = sale.warehouse_id ? String(sale.warehouse_id) : null;
-          if (warehouseId) {
+          if (warehouseId && !options?.deferWarehouseMarginRepair) {
             await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId, branchTz);
           }
         } else {
@@ -1212,7 +1216,7 @@ export async function syncICSaleToICFunds(saleId: string, transactionClient?: Db
         await syncMetalSaleLedgers(client, sale, branchId, branchTz);
         await voidMetalCashIcStockVoucher(client, saleId, branchId);
         const warehouseId = sale.warehouse_id ? String(sale.warehouse_id) : null;
-        if (warehouseId) {
+        if (warehouseId && !options?.deferWarehouseMarginRepair) {
           await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId, branchTz);
         }
         return;
@@ -1230,7 +1234,9 @@ export async function syncICSaleToICFunds(saleId: string, transactionClient?: Db
       if (orderStatus === 'completed') {
         const warehouseId = sale.warehouse_id ? String(sale.warehouse_id) : null;
         if (warehouseId) {
-          await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId, branchTz);
+          if (!options?.deferWarehouseMarginRepair) {
+            await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId, branchTz);
+          }
         } else {
           await postSaleMarginVouchers(client, sale, branchId, branchTz);
         }
@@ -1244,6 +1250,20 @@ export async function syncICSaleToICFunds(saleId: string, transactionClient?: Db
     logger.error({ err, saleId }, 'Failed to sync IC sale to IC Funds');
     throw err;
   }
+}
+
+/** Rebuild cash IC COGS/profit vouchers after a batch of completed sales has been inserted. */
+export async function repairICSaleMarginsForWarehouse(warehouseId: string): Promise<void> {
+  await ensureHqIcFundsBranch();
+  await withTransaction(async client => {
+    const branchTz = await loadBranchTimeZoneInTx(client, HQ_IC_FUNDS_BRANCH_ID);
+    await repairCompletedCashSaleMarginsForWarehouse(
+      client,
+      warehouseId,
+      HQ_IC_FUNDS_BRANCH_ID,
+      branchTz,
+    );
+  });
 }
 
 /** Void HQ AED/INR journals for a sale (safe after the sale row is deleted). */

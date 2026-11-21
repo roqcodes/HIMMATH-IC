@@ -37,6 +37,7 @@ import ICTransferDateFilterBar from '@/components/ic-transfer/shared/ICTransferD
 import SalesDataTable, { type SalesTab } from './sales-data-table';
 import { getAdminSaleCustomerName } from '@/lib/icTransfer/branchOrderOwnership';
 import { indexSaleLineProfits } from '@/lib/icTransfer/dealProfit';
+import BulkSalesImportModal from './BulkSalesImportModal';
 
 export default function ICTransferSales() {
   const {
@@ -62,6 +63,7 @@ export default function ICTransferSales() {
   const [isTogglingSales, setIsTogglingSales] = useState(false);
   const { selectedRegionIds } = useICTransferRegionFilter();
   const [modalOpen, setModalOpen] = useState(false);
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [selectedSale, setSelectedSale] = useState<ICSale | null>(null);
   const [search, setSearch] = useState('');
@@ -354,6 +356,7 @@ export default function ICTransferSales() {
           canManageGlobalSettings={canManageGlobalSettings}
           isTogglingSales={isTogglingSales}
           onAddSale={() => canWrite && setModalOpen(true)}
+          onImport={() => canWrite && setBulkImportOpen(true)}
           onSalesToggle={handleSalesToggle}
           addDisabled={salesPaused || !canWrite}
         />
@@ -435,6 +438,13 @@ export default function ICTransferSales() {
           setSelectedSale(null);
         }}
         initialData={selectedSale || undefined}
+      />
+      <BulkSalesImportModal
+        open={bulkImportOpen}
+        onClose={() => setBulkImportOpen(false)}
+        branchId={branches.find(b => b.slug === currentSlug)?.id || allBranches.find(b => b.slug === currentSlug)?.id}
+        branchSlug={branchSlug}
+        onCompleted={refetchData}
       />
       <ViewSaleModal
         open={viewModalOpen}

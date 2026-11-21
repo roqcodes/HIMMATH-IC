@@ -11,6 +11,7 @@ type SalesHeaderProps = {
   canManageGlobalSettings: boolean;
   isTogglingSales: boolean;
   onAddSale: () => void;
+  onImport: () => void;
   onSalesToggle: (enabled: boolean) => void;
   addDisabled?: boolean;
 };
@@ -66,6 +67,7 @@ export default function SalesHeader({
   canManageGlobalSettings,
   isTogglingSales,
   onAddSale,
+  onImport,
   onSalesToggle,
   addDisabled,
 }: SalesHeaderProps) {
@@ -93,6 +95,14 @@ export default function SalesHeader({
           ) : salesPaused ? (
             <span className="text-[10px] font-medium text-amber-700">Sales paused</span>
           ) : null}
+          <button
+            type="button"
+            onClick={addBlocked ? undefined : onImport}
+            {...wp({ disabled: addBlocked })}
+            className={`${asicBtnPrimary} gap-1.5${addBlocked ? ' cursor-not-allowed opacity-50' : ''}`}
+          >
+            Import XLSX
+          </button>
           <button
             type="button"
             onClick={addBlocked ? undefined : onAddSale}

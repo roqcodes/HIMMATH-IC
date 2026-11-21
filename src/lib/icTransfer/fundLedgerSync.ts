@@ -8,8 +8,12 @@ import {
 } from '@/lib/icFunds/icTransferFundSync';
 
 /** Bridge IC Transfer lifecycle events into the IC Funds cash book. */
-export async function syncICSaleFundLedger(saleId: string, client?: PoolClient): Promise<void> {
-  await syncICSaleToICFunds(saleId, client as DbClient | undefined);
+export async function syncICSaleFundLedger(
+  saleId: string,
+  client?: PoolClient,
+  options?: { deferWarehouseMarginRepair?: boolean },
+): Promise<void> {
+  await syncICSaleToICFunds(saleId, client as DbClient | undefined, options);
 }
 
 export async function syncICPurchaseFundLedger(purchaseId: string, client?: PoolClient): Promise<void> {

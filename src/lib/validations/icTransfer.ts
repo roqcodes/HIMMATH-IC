@@ -179,6 +179,7 @@ const purchaseFieldsBaseSchema = z.object({
   labWeightG: z.number().nonnegative().optional().nullable(),
   labChargeInrPerG: z.number().nonnegative().optional().nullable(),
   labTotalInr: z.number().nonnegative().optional().nullable(),
+  createdAt: z.string().datetime().optional(),
 });
 
 const purchaseFieldsSchema = purchaseFieldsBaseSchema.transform(data => ({

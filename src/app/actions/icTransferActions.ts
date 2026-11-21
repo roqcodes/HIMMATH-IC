@@ -79,7 +79,11 @@ import {
   removeICSaleFundLedger,
   removeICPurchaseFundLedger,
 } from '@/lib/icTransfer/fundLedgerSync';
-import { syncICSupplierFundAccount, syncICWarehouseFundAccount } from '@/lib/icFunds/icTransferFundSync';
+import {
+  repairICSaleMarginsForWarehouse,
+  syncICSupplierFundAccount,
+  syncICWarehouseFundAccount,
+} from '@/lib/icFunds/icTransferFundSync';
 import { ensureHqIcFundsBranch } from '@/lib/icFunds/ensureHqBranch';
 import { parseAedInrOpenings, parseWarehouseOpenings, type AedInrOpenings, type WarehouseOpenings } from '@/lib/icFunds/entityOpenings';
 import { syncWarehouseIcStockColumn } from '@/lib/icTransfer/warehouseIcStock';
@@ -1315,11 +1319,22 @@ export async function listAvailableMetalLotsAction(
 }
 
 export async function dbAddICSaleAction(
-  sale: Omit<ICSale, 'id' | 'createdAt' | 'enteredBy' | 'enteredByName' | 'enteredByUserId'>,
+  sale: Omit<ICSale, 'id' | 'enteredBy' | 'enteredByName' | 'enteredByUserId'>,
   branchSlug?: string,
+  options?: { forceComplete?: boolean; deferWarehouseMarginRepair?: boolean; importKey?: string },
 ): Promise<DbActionResult<ICSale>> {
   try {
     const parsed = addSaleSchema.parse(sale);
+    const importKey = options?.importKey?.trim() || null;
+    if (importKey) {
+      const existingImport = await query(
+        `SELECT id FROM ic_sales WHERE idempotency_key = $1 LIMIT 1`,
+        [importKey],
+      );
+      if (existingImport.rows.length > 0) {
+        return { success: false, error: 'This spreadsheet row was already imported.' };
+      }
+    }
     const slug = branchSlug && branchSlug !== 'superadmin' ? branchSlug : undefined;
 
     const [salesGuard, transferSettings, userRes] = await Promise.all([
@@ -1392,9 +1407,11 @@ export async function dbAddICSaleAction(
           },
         })
       : null;
-    const instantComplete = isMetalSale || !transferSettings.warehouseFulfillmentEnabled;
+    const instantComplete =
+      isMetalSale || !transferSettings.warehouseFulfillmentEnabled || options?.forceComplete === true;
     let initialOrderStatus = instantComplete ? 'completed' : salePayload.warehouseId ? 'accepted' : 'pending';
     let fulfillmentHandler = salePayload.fulfillmentHandler === 'branch' ? 'branch' : 'hq_admin';
+    const saleCreatedAt = parsed.createdAt ? new Date(parsed.createdAt) : new Date();
     const statusUpdatedBy = instantComplete ? enteredBy : null;
 
     if (!salePayload.warehouseId?.trim()) {
@@ -1422,7 +1439,7 @@ export async function dbAddICSaleAction(
       };
     }
 
-    const normalized = metalLotSale
+    const normalizedBase = metalLotSale
       ? metalLotSale
       : resolveNormalizedSale({
           settlementMode: salePayload.settlementMode ?? parsed.settlementMode,
@@ -1437,6 +1454,10 @@ export async function dbAddICSaleAction(
           labTotalInr: Number(salePayload.labTotalInr ?? parsed.labTotalInr ?? 0),
           serviceCharge: salePayload.serviceCharge ?? parsed.serviceCharge,
         });
+    const normalized =
+      options?.forceComplete && normalizedBase.settlementMode === 'cash'
+        ? { ...normalizedBase, units: Number((Number(salePayload.units ?? parsed.units) || 0).toFixed(8)) }
+        : normalizedBase;
 
     const collectedUnitsFinal = instantComplete ? normalized.units : null;
 
@@ -1464,8 +1485,8 @@ export async function dbAddICSaleAction(
           collected_units, status_updated_at, status_updated_by,
           settlement_mode, metal_weight_g, metal_rate_inr_per_g, metal_rate_aed_per_g, inr_total,
           metal_purchase_id, metal_payment_method, aed_agent_id, split_inr_paid, split_aed_paid,
-          lab_weight_g, lab_charge_inr_per_g, lab_total_inr
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35) RETURNING *`,
+          lab_weight_g, lab_charge_inr_per_g, lab_total_inr, created_at, idempotency_key
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37) RETURNING *`,
         [
           salePayload.customerName,
           salePayload.orderCustomerName || null,
@@ -1487,7 +1508,7 @@ export async function dbAddICSaleAction(
           salePayload.bank || null,
           fulfillmentHandler,
           collectedUnitsFinal,
-          instantComplete ? new Date() : null,
+          instantComplete ? saleCreatedAt : null,
           statusUpdatedBy,
           normalized.settlementMode,
           normalized.metalWeightG,
@@ -1502,6 +1523,8 @@ export async function dbAddICSaleAction(
           saleLabDb.labWeightG,
           saleLabDb.labChargeInrPerG,
           saleLabDb.labTotalInr,
+          saleCreatedAt,
+          importKey,
         ],
       );
 
@@ -1546,7 +1569,9 @@ export async function dbAddICSaleAction(
         await adjustWarehouseStock(client, salePayload.warehouseId, -normalized.units);
       }
 
-      await syncICSaleFundLedger(String(res.rows[0].id), client);
+      await syncICSaleFundLedger(String(res.rows[0].id), client, {
+        deferWarehouseMarginRepair: options?.deferWarehouseMarginRepair === true,
+      });
 
       return res.rows[0];
     });
@@ -1555,6 +1580,9 @@ export async function dbAddICSaleAction(
   const saleRow = await loadICSaleRowById(saleId);
   return { success: true, data: saleRow ?? mapICSaleRow(row) };
   } catch (err: unknown) {
+    if (options?.importKey && typeof err === 'object' && err !== null && 'code' in err && err.code === '23505') {
+      return { success: false, error: 'This spreadsheet row was already imported.' };
+    }
     logger.error({ err, sale }, 'Error in dbAddICSaleAction');
     return { success: false, error: err instanceof Error ? err.message : 'Database error' };
   }
@@ -1749,6 +1777,64 @@ export async function dbUpdateICPurchaseAction(
     logger.error({ err, id, updates }, 'Error in dbUpdateICPurchaseAction');
     return { success: false, error: err instanceof Error ? err.message : 'Database error' };
   }
+}
+
+export async function dbBulkImportICSalesAction(
+  sales: Array<{
+    rowNumber: number;
+    importKey: string;
+    sale: Omit<ICSale, 'id' | 'enteredBy' | 'enteredByName' | 'enteredByUserId'>;
+  }>,
+  branchSlug?: string,
+): Promise<DbActionResult<{
+  imported: number;
+  importedRows: number[];
+  failures: Array<{ rowNumber: number; error: string }>;
+}>> {
+  if (!Array.isArray(sales) || sales.length === 0) {
+    return { success: false, error: 'No valid sales were supplied.' };
+  }
+  if (sales.length > 500) {
+    return { success: false, error: 'Import is limited to 500 sales at a time.' };
+  }
+
+  const ordered = sales
+    .sort((a, b) =>
+      new Date(a.sale.createdAt || 0).getTime() - new Date(b.sale.createdAt || 0).getTime()
+      || a.rowNumber - b.rowNumber,
+    );
+  const failures: Array<{ rowNumber: number; error: string }> = [];
+  const importedRows: number[] = [];
+  const touchedWarehouses = new Set<string>();
+  let imported = 0;
+
+  for (const item of ordered) {
+    const result = await dbAddICSaleAction(item.sale, branchSlug, {
+      forceComplete: true,
+      deferWarehouseMarginRepair: true,
+      importKey: item.importKey,
+    });
+    if (!result.success || !result.data) {
+      failures.push({ rowNumber: item.rowNumber, error: result.error || 'Sale could not be imported.' });
+      continue;
+    }
+    imported += 1;
+    importedRows.push(item.rowNumber);
+    if (result.data.warehouseId) touchedWarehouses.add(result.data.warehouseId);
+  }
+
+  for (const warehouseId of touchedWarehouses) {
+    try {
+      await repairICSaleMarginsForWarehouse(warehouseId);
+    } catch (error) {
+      failures.push({
+        rowNumber: 0,
+        error: `Sales were inserted, but warehouse ${warehouseId} margin ledgers could not be rebuilt: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      });
+    }
+  }
+
+  return { success: true, data: { imported, importedRows, failures } };
 }
 
 export async function dbUpdateICSaleAction(
