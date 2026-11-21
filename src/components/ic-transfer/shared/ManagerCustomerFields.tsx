@@ -12,7 +12,7 @@ import {
 } from '@/lib/icTransfer/branchPortalScope';
 import { filterCounterpartiesByKind } from '@/lib/counterparties/roles';
 import { buildCounterpartySearchOptions } from '@/lib/icTransfer/entitySearchOptions';
-import { CUSTOMER_FIELD_LABEL, MANAGER_FIELD_LABEL } from '@/lib/counterparties/labels';
+import { CUSTOMER_FIELD_LABEL, MANAGER_FIELD_LABEL, PURCHASE_COUNTERPARTY_FIELD_LABEL } from '@/lib/counterparties/labels';
 import type { EntityLedgerBalances } from '@/lib/icTransfer/entitySearchOptions';
 import type { ICSupplier } from '@/types';
 
@@ -130,7 +130,7 @@ export default function ManagerCustomerFields({
         )}
       </ICTransferFormField>
       {managerOnly ? null : (
-        <ICTransferFormField label={`${CUSTOMER_FIELD_LABEL} *`} compact={inline || contentsGrid} className="min-w-0">
+        <ICTransferFormField label={`${mode === 'purchase' ? PURCHASE_COUNTERPARTY_FIELD_LABEL : CUSTOMER_FIELD_LABEL} *`} compact={inline || contentsGrid} className="min-w-0">
           <EntitySearchSelect
             options={customerOptions}
             selectedId={customerId}
