@@ -184,8 +184,8 @@ export default function CounterpartyDetailTabs({
   );
 
   const saleProfits = useMemo(
-    () => indexSaleLineProfits({ purchases: icPurchases, sales: icSales, range }),
-    [icPurchases, icSales, range],
+    () => indexSaleLineProfits({ purchases: icPurchases, sales: icSales, range, warehouses: icWarehouses }),
+    [icPurchases, icSales, icWarehouses, range],
   );
 
   const sortedActivity = useMemo(

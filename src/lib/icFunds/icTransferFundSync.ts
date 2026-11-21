@@ -15,6 +15,7 @@ import {
   computeSaleMargin,
   purchaseAedTotal,
   resolveSaleMarginFromPool,
+  warehouseOpeningBalanceEvent,
   type RemainingStockPool,
   type WarehouseInventoryEvent,
 } from '@/lib/icFunds/warehouseProfit';
@@ -420,6 +421,14 @@ async function loadWarehouseInventoryEvents(
   );
 
   const events: WarehouseInventoryEvent[] = [];
+  const openingRes = await client.query(
+    `SELECT opening_stock, opening_aed FROM ic_warehouses WHERE id = $1 LIMIT 1`,
+    [warehouseId],
+  );
+  const openingEvent = warehouseOpeningBalanceEvent(openingRes.rows[0]
+    ? { units: Number(openingRes.rows[0].opening_stock) || 0, aed: Number(openingRes.rows[0].opening_aed) || 0 }
+    : undefined);
+  if (openingEvent) events.push(openingEvent);
 
   for (const row of purchasesRes.rows) {
     const units = Number(row.units) || 0;
@@ -1188,7 +1197,11 @@ export async function removeICPurchaseFromICFunds(purchaseId: string, transactio
 export async function syncICSaleToICFunds(
   saleId: string,
   transactionClient?: DbClient,
-  options?: { deferWarehouseMarginRepair?: boolean; onlyCurrentSaleMargin?: boolean },
+  options?: {
+    deferWarehouseMarginRepair?: boolean;
+    onlyCurrentSaleMargin?: boolean;
+    repairWarehouseMarginsOnVoid?: boolean;
+  },
 ): Promise<void> {
   try {
     if (!transactionClient) await ensureHqIcFundsBranch();
@@ -1213,6 +1226,10 @@ export async function syncICSaleToICFunds(
         } else {
           await voidVoucherByReference(client, branchId, 'ic_sale', saleId);
           await voidSaleMarginVouchers(client, branchId, saleId);
+          const warehouseId = sale.warehouse_id ? String(sale.warehouse_id) : null;
+          if (warehouseId && options?.repairWarehouseMarginsOnVoid) {
+            await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId, branchTz);
+          }
         }
         return;
       }
@@ -1232,6 +1249,10 @@ export async function syncICSaleToICFunds(
       if (amount <= 0 || (!SALE_GHOST_STATUSES.has(orderStatus) && orderStatus !== 'completed')) {
         await voidVoucherByReference(client, branchId, 'ic_sale', saleId);
         await voidSaleMarginVouchers(client, branchId, saleId);
+        const warehouseId = sale.warehouse_id ? String(sale.warehouse_id) : null;
+        if (warehouseId && options?.repairWarehouseMarginsOnVoid) {
+          await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId, branchTz);
+        }
         return;
       }
 
@@ -1252,6 +1273,12 @@ export async function syncICSaleToICFunds(
         }
       } else {
         await voidSaleMarginVouchers(client, branchId, saleId);
+        if (options?.repairWarehouseMarginsOnVoid) {
+          const warehouseId = sale.warehouse_id ? String(sale.warehouse_id) : null;
+          if (warehouseId) {
+            await repairCompletedCashSaleMarginsForWarehouse(client, warehouseId, branchId, branchTz);
+          }
+        }
       }
     };
     if (transactionClient) await sync(transactionClient);
@@ -1263,9 +1290,11 @@ export async function syncICSaleToICFunds(
 }
 
 /** Rebuild cash IC COGS/profit vouchers after a batch of completed sales has been inserted. */
-export async function repairICSaleMarginsForWarehouse(warehouseId: string): Promise<void> {
-  await ensureHqIcFundsBranch();
-  await withTransaction(async client => {
+export async function repairICSaleMarginsForWarehouse(
+  warehouseId: string,
+  transactionClient?: DbClient,
+): Promise<void> {
+  const repair = async (client: DbClient) => {
     const branchTz = await loadBranchTimeZoneInTx(client, HQ_IC_FUNDS_BRANCH_ID);
     await repairCompletedCashSaleMarginsForWarehouse(
       client,
@@ -1273,7 +1302,13 @@ export async function repairICSaleMarginsForWarehouse(warehouseId: string): Prom
       HQ_IC_FUNDS_BRANCH_ID,
       branchTz,
     );
-  });
+  };
+  if (transactionClient) {
+    await repair(transactionClient);
+  } else {
+    await ensureHqIcFundsBranch();
+    await withTransaction(repair);
+  }
 }
 
 /** Void HQ AED/INR journals for a sale (safe after the sale row is deleted). */

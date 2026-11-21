@@ -35,6 +35,20 @@ export type WarehouseInventorySale = {
 
 export type WarehouseInventoryEvent = WarehouseInventoryPurchase | WarehouseInventorySale;
 
+export type WarehouseOpeningBalance = {
+  units: number;
+  aed: number;
+};
+
+export function warehouseOpeningBalanceEvent(
+  balance: WarehouseOpeningBalance | undefined,
+): WarehouseInventoryPurchase | null {
+  const units = Number(balance?.units) || 0;
+  const cost = Number(balance?.aed) || 0;
+  if (units <= 0 || cost <= 0) return null;
+  return { kind: 'purchase', at: 0, sortKey: 'opening-balance', units, cost };
+}
+
 export type SaleMarginInput = {
   units: number;
   collectedUnits?: number | null;

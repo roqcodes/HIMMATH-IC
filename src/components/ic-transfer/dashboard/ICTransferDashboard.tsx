@@ -357,6 +357,7 @@ export default function ICTransferDashboard() {
       purchases: icPurchases.filter(p => !p.warehouseId || allowedWarehouseIds.has(p.warehouseId)),
       sales: scopedSales.filter(s => !s.warehouseId || allowedWarehouseIds.has(s.warehouseId)),
       range,
+      warehouses: icWarehouses.filter(w => allowedWarehouseIds.has(w.id)),
     });
 
     return {

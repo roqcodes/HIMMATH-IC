@@ -184,6 +184,7 @@ function computeRow(
     sales: warehouseSales,
     range,
     warehouseId: warehouse.id,
+    warehouses: [warehouse],
   });
 
   const currentStock = computeWarehouseIcUnitsOnHand(

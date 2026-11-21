@@ -5,13 +5,18 @@ import {
   syncICPurchaseToICFunds,
   removeICSaleFromICFunds,
   removeICPurchaseFromICFunds,
+  repairICSaleMarginsForWarehouse,
 } from '@/lib/icFunds/icTransferFundSync';
 
 /** Bridge IC Transfer lifecycle events into the IC Funds cash book. */
 export async function syncICSaleFundLedger(
   saleId: string,
   client?: PoolClient,
-  options?: { deferWarehouseMarginRepair?: boolean; onlyCurrentSaleMargin?: boolean },
+  options?: {
+    deferWarehouseMarginRepair?: boolean;
+    onlyCurrentSaleMargin?: boolean;
+    repairWarehouseMarginsOnVoid?: boolean;
+  },
 ): Promise<void> {
   await syncICSaleToICFunds(saleId, client as DbClient | undefined, options);
 }
@@ -30,4 +35,8 @@ export async function removeICSaleFundLedger(saleId: string, client?: PoolClient
 
 export async function removeICPurchaseFundLedger(purchaseId: string, client?: PoolClient): Promise<void> {
   await removeICPurchaseFromICFunds(purchaseId, client as DbClient | undefined);
+}
+
+export async function repairICSaleMarginsFundLedger(warehouseId: string, client?: PoolClient): Promise<void> {
+  await repairICSaleMarginsForWarehouse(warehouseId, client as DbClient | undefined);
 }

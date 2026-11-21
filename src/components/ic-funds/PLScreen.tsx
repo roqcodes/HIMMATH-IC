@@ -68,7 +68,7 @@ export default function PLScreen({
   slug: string;
   portal?: 'admin' | 'branch';
 }) {
-  const { branches, icPurchases, icSales } = useApp();
+  const { branches, icPurchases, icSales, icWarehouses } = useApp();
   const { alert } = useConfirmDialog();
   const branch = branches.find(b => b.slug === slug);
   const {
@@ -149,8 +149,9 @@ export default function PLScreen({
         purchases: icPurchases,
         sales: icSales,
         range: { startDate: startDate || null, endDate: endDate || null },
+        warehouses: icWarehouses,
       }),
-    [icPurchases, icSales, startDate, endDate],
+    [icPurchases, icSales, icWarehouses, startDate, endDate],
   );
 
   const dealKpiMetrics = useMemo(

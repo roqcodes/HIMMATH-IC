@@ -3792,18 +3792,8 @@ export async function getICWarehousePLReportAction(params: unknown): Promise<
     function icEventsForWarehouse(warehouseId: string): WarehouseInventoryEvent[] {
       const purchases = purchasesByWarehouse.get(warehouseId) ?? [];
       const sales = (salesByWarehouseForIc.get(warehouseId) ?? []).filter(isDealSaleActive);
-      const events = buildIcStockInventoryEvents(purchases, sales);
       const opening = warehouseOpening.get(warehouseId);
-      if (opening && opening.units > 0 && opening.aed > 0) {
-        events.push({
-          kind: 'purchase',
-          at: 0,
-          sortKey: 'opening-balance',
-          units: opening.units,
-          cost: opening.aed,
-        });
-      }
-      return events;
+      return buildIcStockInventoryEvents(purchases, sales, undefined, opening);
     }
 
     function movementForWarehouse(warehouseId: string) {

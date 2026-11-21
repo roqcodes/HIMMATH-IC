@@ -176,8 +176,9 @@ export default function WarehouseDetailTabs({
         sales: icSales,
         range,
         warehouseId,
+        warehouses: icWarehouses,
       }),
-    [icPurchases, icSales, range, warehouseId],
+    [icPurchases, icSales, icWarehouses, range, warehouseId],
   );
 
   const getSupplierName = useCallback(

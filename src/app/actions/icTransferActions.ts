@@ -1721,6 +1721,13 @@ export async function dbUpdateICPurchaseAction(
     const isMetalPurchase = normalized.settlementMode === 'metal';
     const oldGrams = Number(existingRow.metal_weight_g) || 0;
     const newGrams = isMetalPurchase ? Number(normalized.metalWeightG) || 0 : 0;
+    const canSkipMarginRepair =
+      normalized.settlementMode === 'cash' &&
+      existingRow.settlement_mode !== 'metal' &&
+      oldWarehouseId === (newWarehouseId ?? null) &&
+      oldUnits === normalized.units &&
+      Number(existingRow.unit_rate) === normalized.unitRate &&
+      Number(existingRow.aed_total) === normalized.aedTotal;
 
     await ensureHqIcFundsBranch();
     const res = await withTransaction(async (client) => {
@@ -1764,13 +1771,12 @@ export async function dbUpdateICPurchaseAction(
         }
       }
 
-      await syncICPurchaseFundLedger(parsedId, client);
+      await syncICPurchaseFundLedger(parsedId, client, { skipWarehouseMarginRepair: canSkipMarginRepair });
 
       return updateRes.rows[0];
     });
 
-    const purchaseRow = await loadICPurchaseRowById(parsedId);
-    return { success: true, data: purchaseRow ?? mapICPurchaseRow(res) };
+    return { success: true, data: mapICPurchaseRow(res) };
   } catch (err: unknown) {
     logger.error({ err, id, updates }, 'Error in dbUpdateICPurchaseAction');
     return { success: false, error: err instanceof Error ? err.message : 'Database error' };
@@ -1994,13 +2000,17 @@ export async function dbUpdateICSaleAction(
         }
       }
 
-      await syncICSaleFundLedger(parsedId, client);
+      const saleIsCompleted = String(updateRes.rows[0].order_status || '') === 'completed';
+      await syncICSaleFundLedger(parsedId, client, {
+        onlyCurrentSaleMargin: saleIsCompleted,
+        repairWarehouseMarginsOnVoid:
+          existingRow.order_status === 'completed' && !saleIsCompleted,
+      });
 
       return updateRes.rows[0];
     });
 
-    const saleRow = await loadICSaleRowById(parsedId);
-    return { success: true, data: saleRow ?? mapICSaleRow(row) };
+    return { success: true, data: mapICSaleRow(row) };
   } catch (err: unknown) {
     logger.error({ err, id, updates }, 'Error in dbUpdateICSaleAction');
     return { success: false, error: err instanceof Error ? err.message : 'Database error' };
@@ -2011,7 +2021,9 @@ export async function dbDeleteICPurchaseAction(id: string): Promise<DbActionResu
   try {
     const parsedId = z.string().min(1).parse(id);
     const preCheck = await query(
-      `SELECT warehouse_id, units, settlement_mode, metal_weight_g FROM ic_purchases WHERE id = $1`,
+      `SELECT p.warehouse_id, p.units, p.settlement_mode, p.metal_weight_g, p.created_at,
+              EXISTS (SELECT 1 FROM ic_sales s WHERE s.metal_purchase_id = p.id) AS has_linked_sales
+       FROM ic_purchases p WHERE p.id = $1`,
       [parsedId],
     );
     if (preCheck.rows.length === 0) {
@@ -2019,11 +2031,7 @@ export async function dbDeleteICPurchaseAction(id: string): Promise<DbActionResu
     }
     const { warehouse_id, units, settlement_mode, metal_weight_g } = preCheck.rows[0];
 
-    const linkedSales = await query(
-      `SELECT id FROM ic_sales WHERE metal_purchase_id = $1 LIMIT 1`,
-      [parsedId],
-    );
-    if (linkedSales.rows.length > 0) {
+    if (preCheck.rows[0].has_linked_sales) {
       return { success: false, error: 'Cannot delete a metal purchase that already has sales.' };
     }
 
@@ -2043,6 +2051,22 @@ export async function dbDeleteICPurchaseAction(id: string): Promise<DbActionResu
       }
 
       await client.query('DELETE FROM ic_purchases WHERE id = $1', [parsedId]);
+
+      if (warehouse_id && settlement_mode !== 'metal') {
+        const laterSales = await client.query(
+          `SELECT EXISTS (
+             SELECT 1 FROM ic_sales
+             WHERE warehouse_id = $1
+               AND order_status = 'completed'
+               AND COALESCE(settlement_mode, 'cash') <> 'metal'
+               AND COALESCE(status_updated_at, created_at) >= $2
+           ) AS has_later_sales`,
+          [warehouse_id, preCheck.rows[0].created_at],
+        );
+        if (laterSales.rows[0]?.has_later_sales) {
+          await repairICSaleMarginsForWarehouse(String(warehouse_id), client);
+        }
+      }
     });
     return { success: true, data: null };
   } catch (err: unknown) {
@@ -2054,10 +2078,10 @@ export async function dbDeleteICPurchaseAction(id: string): Promise<DbActionResu
 export async function dbDeleteICSaleAction(id: string): Promise<DbActionResult<null>> {
   try {
     const parsedId = z.string().min(1).parse(id);
-    const saleRes = await query(
-      `SELECT * FROM ic_sales WHERE id = $1 LIMIT 1`,
-      [parsedId],
-    );
+    const [saleRes, transferSettings] = await Promise.all([
+      query(`SELECT * FROM ic_sales WHERE id = $1 LIMIT 1`, [parsedId]),
+      getICTransferSettingsFromDb(),
+    ]);
     if (saleRes.rows.length === 0) {
       return { success: false, error: 'Sale not found' };
     }
@@ -2066,7 +2090,6 @@ export async function dbDeleteICSaleAction(id: string): Promise<DbActionResult<n
       return { success: false, error: 'Branch-managed orders must be deleted by the branch manager' };
     }
     const isMetalSale = saleRow.settlement_mode === 'metal';
-    const transferSettings = await getICTransferSettingsFromDb();
     if (
       !isMetalSale &&
       saleRow.order_status === 'completed' &&
@@ -2088,6 +2111,25 @@ export async function dbDeleteICSaleAction(id: string): Promise<DbActionResult<n
         await reverseMetalSaleStock(client, saleRow);
       }
       await client.query('DELETE FROM ic_sales WHERE id = $1', [parsedId]);
+
+      const warehouseId = saleRow.warehouse_id ? String(saleRow.warehouse_id) : null;
+      const wasCompleted = saleRow.order_status === 'completed';
+      if (warehouseId && wasCompleted) {
+        const saleAt = saleRow.status_updated_at || saleRow.created_at;
+        const laterSales = await client.query(
+          `SELECT EXISTS (
+             SELECT 1 FROM ic_sales
+             WHERE warehouse_id = $1
+               AND order_status = 'completed'
+               AND COALESCE(settlement_mode, 'cash') <> 'metal'
+               AND COALESCE(status_updated_at, created_at) >= $2
+           ) AS has_later_sales`,
+          [warehouseId, saleAt],
+        );
+        if (laterSales.rows[0]?.has_later_sales) {
+          await repairICSaleMarginsForWarehouse(warehouseId, client);
+        }
+      }
     });
     return { success: true, data: null };
   } catch (err: unknown) {

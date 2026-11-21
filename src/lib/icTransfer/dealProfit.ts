@@ -17,9 +17,11 @@ import { isSaleCompleted } from '@/lib/icTransfer/saleUnits';
 import {
   remainingStockWac,
   simulateWarehouseInventory,
+  warehouseOpeningBalanceEvent,
+  type WarehouseOpeningBalance,
   type WarehouseInventoryEvent,
 } from '@/lib/icFunds/warehouseProfit';
-import type { ICPurchase, ICSale } from '@/types';
+import type { ICWarehouse, ICPurchase, ICSale } from '@/types';
 
 export type DealProfitSlice = {
   cashGrossProfitAed: number;
@@ -196,8 +198,11 @@ export function buildIcStockInventoryEvents(
   purchases: ICPurchase[],
   sales: ICSale[],
   throughIso?: (iso: string | undefined) => boolean,
+  openingBalance?: WarehouseOpeningBalance,
 ): WarehouseInventoryEvent[] {
+  const openingEvent = warehouseOpeningBalanceEvent(openingBalance);
   return [
+    ...(openingEvent ? [openingEvent] : []),
     ...icStockPurchaseEvents(purchases, throughIso),
     ...icStockInflowFromMetalInrSales(sales, throughIso),
     ...icStockSaleEvents(sales, throughIso),
@@ -234,6 +239,7 @@ export function indexSaleLineProfits(options: {
   sales: ICSale[];
   range?: DateFilterRange;
   warehouseId?: string;
+  warehouses?: Pick<ICWarehouse, 'id' | 'openingStock' | 'openingAed'>[];
 }): Map<string, SaleLineProfit> {
   const range: DateFilterRange = options.range ?? { startDate: null, endDate: null };
   const scopedPurchases = options.warehouseId
@@ -244,6 +250,12 @@ export function indexSaleLineProfits(options: {
     : options.sales;
 
   const warehouseIds = new Set<string>();
+  const openingByWarehouse = new Map(
+    (options.warehouses ?? []).map(warehouse => [warehouse.id, {
+      units: Number(warehouse.openingStock) || 0,
+      aed: Number(warehouse.openingAed) || 0,
+    }]),
+  );
   for (const p of scopedPurchases) {
     if (p.warehouseId) warehouseIds.add(p.warehouseId);
   }
@@ -253,7 +265,13 @@ export function indexSaleLineProfits(options: {
 
   const out = new Map<string, SaleLineProfit>();
   for (const id of warehouseIds) {
-    for (const [saleId, line] of indexOneWarehouseSaleProfits(id, scopedPurchases, scopedSales, range)) {
+    for (const [saleId, line] of indexOneWarehouseSaleProfits(
+      id,
+      scopedPurchases,
+      scopedSales,
+      range,
+      openingByWarehouse.get(id),
+    )) {
       out.set(saleId, line);
     }
   }
@@ -265,12 +283,13 @@ function indexOneWarehouseSaleProfits(
   purchases: ICPurchase[],
   sales: ICSale[],
   range: DateFilterRange,
+  openingBalance?: WarehouseOpeningBalance,
 ): Map<string, SaleLineProfit> {
   const out = new Map<string, SaleLineProfit>();
   const whPurchases = purchases.filter(p => p.warehouseId === warehouseId);
   const whSales = sales.filter(s => s.warehouseId === warehouseId && isDealSaleActive(s));
   const through = (iso: string | undefined) => throughEnd(iso, range);
-  const events = buildIcStockInventoryEvents(whPurchases, whSales, through);
+  const events = buildIcStockInventoryEvents(whPurchases, whSales, through, openingBalance);
   const { saleMargins } = simulateWarehouseInventory(events);
 
   for (const s of whSales) {
@@ -317,6 +336,7 @@ export function computeDealProfit(options: {
   sales: ICSale[];
   range: DateFilterRange;
   warehouseId?: string;
+  warehouses?: Pick<ICWarehouse, 'id' | 'openingStock' | 'openingAed'>[];
 }): DealProfitSlice {
   const { purchases, sales, range, warehouseId } = options;
   const scopedPurchases = warehouseId
@@ -335,8 +355,14 @@ export function computeDealProfit(options: {
   }
 
   const slices: DealProfitSlice[] = [];
+  const openingByWarehouse = new Map(
+    (options.warehouses ?? []).map(warehouse => [warehouse.id, {
+      units: Number(warehouse.openingStock) || 0,
+      aed: Number(warehouse.openingAed) || 0,
+    }]),
+  );
   for (const id of warehouseIds) {
-    slices.push(computeOneWarehouse(id, scopedPurchases, scopedSales, range));
+    slices.push(computeOneWarehouse(id, scopedPurchases, scopedSales, range, openingByWarehouse.get(id)));
   }
   return sumDealProfit(slices);
 }
@@ -346,12 +372,13 @@ function computeOneWarehouse(
   purchases: ICPurchase[],
   sales: ICSale[],
   range: DateFilterRange,
+  openingBalance?: WarehouseOpeningBalance,
 ): DealProfitSlice {
   const whPurchases = purchases.filter(p => p.warehouseId === warehouseId);
   const whSales = sales.filter(s => s.warehouseId === warehouseId && isDealSaleActive(s));
 
   const through = (iso: string | undefined) => throughEnd(iso, range);
-  const events = buildIcStockInventoryEvents(whPurchases, whSales, through);
+  const events = buildIcStockInventoryEvents(whPurchases, whSales, through, openingBalance);
 
   const cashSalesInPeriod = whSales.filter(
     s => !isMetal(s.settlementMode) && inRange(s.createdAt, range),
@@ -432,12 +459,10 @@ export function remainingIcStockWac(
 ): { units: number; rate: number } {
   const whPurchases = purchases.filter(p => p.warehouseId === warehouseId);
   const whSales = sales.filter(s => s.warehouseId === warehouseId && isDealSaleActive(s));
-  const events = buildIcStockInventoryEvents(whPurchases, whSales);
-  const stock = Number(openingStock) || 0;
-  const aed = Number(openingAed) || 0;
-  if (stock > 0 && aed > 0) {
-    events.push({ kind: 'purchase', at: 0, sortKey: 'opening-balance', units: stock, cost: aed });
-  }
+  const events = buildIcStockInventoryEvents(whPurchases, whSales, undefined, {
+    units: Number(openingStock) || 0,
+    aed: Number(openingAed) || 0,
+  });
   const { pool } = simulateWarehouseInventory(events);
   return {
     units: pool.units,
