@@ -30,6 +30,23 @@ type Props = {
 };
 
 const fieldClass = 'w-full max-w-none';
+const OPENING_AVG_RATE_DECIMALS = 2;
+
+function roundOpeningAvgRate(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Number(value.toFixed(OPENING_AVG_RATE_DECIMALS));
+}
+
+function formatOpeningAvgRate(value: number): string {
+  if (!Number.isFinite(value)) return '';
+  return roundOpeningAvgRate(value).toFixed(OPENING_AVG_RATE_DECIMALS);
+}
+
+function parseOpeningAvgRateInput(value: string): number | null {
+  const parsed = parseRateInputValue(value);
+  if (parsed === null) return null;
+  return roundOpeningAvgRate(parsed);
+}
 
 export default function WarehouseModal({
   open,
@@ -67,7 +84,7 @@ export default function WarehouseModal({
 
   const autofillOpeningAed = (inrStr: string, rateStr: string) => {
     const inr = parseFormAmount(inrStr) ?? 0;
-    const rate = parseRateInputValue(rateStr) ?? 0;
+    const rate = parseOpeningAvgRateInput(rateStr) ?? 0;
     const stock = inr > 0 ? inr / INR_PER_UNIT : 0;
     setOpeningAed(formatAmount(computeIcCashAedTotal(stock, rate)));
   };
@@ -91,7 +108,7 @@ export default function WarehouseModal({
           : (Number(warehouse.openingInr) || 0) / INR_PER_UNIT;
       const aed = Number(warehouse.openingAed) || 0;
       const impliedRate = stock > 0 && aed > 0 ? computeIcCashRateFromTotals(stock, aed) : 0;
-      setOpeningAvgRate(impliedRate > 0 ? formatRateInputValue(impliedRate) : '');
+      setOpeningAvgRate(impliedRate > 0 ? formatOpeningAvgRate(impliedRate) : '');
       setOpeningAed(formatAmount(aed));
       setManagerIds(warehouse.managerIds ? [...warehouse.managerIds] : []);
     } else {
@@ -132,7 +149,7 @@ export default function WarehouseModal({
     const sendDeliveryProofToCustomer = warehouse ? warehouse.sendDeliveryProofToCustomer !== false : true;
     const metalG = parseFormAmount(openingMetalG);
     const inr = parseFormAmount(openingInr);
-    const avgRate = parseRateInputValue(openingAvgRate);
+    const avgRate = parseOpeningAvgRateInput(openingAvgRate);
     if (metalG === null || inr === null) {
       alert('Enter valid opening balances');
       setIsSaving(false);
@@ -373,8 +390,12 @@ export default function WarehouseModal({
                   inputMode="decimal"
                   value={openingAvgRate}
                   onChange={e => setOpeningAvgRate(e.target.value)}
-                  placeholder="e.g. 36.5"
-                  disabled={openingInrAmount <= 0}
+                  onBlur={() => {
+                    const r = parseOpeningAvgRateInput(openingAvgRate);
+                    if (r === null) return;
+                    setOpeningAvgRate(formatOpeningAvgRate(r));
+                  }}
+                  placeholder="e.g. 36.50"
                 />
               </AsicFormField>
               <AsicFormField

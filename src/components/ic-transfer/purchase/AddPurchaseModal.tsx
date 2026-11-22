@@ -382,7 +382,11 @@ export default function AddPurchaseModal({
       labChargeInrPerG: initialData?.labChargeInrPerG,
       labTotalInr: initialData?.labTotalInr,
     });
-    setLab(nextLab);
+    setLab(
+      nextLab.labWeightG > 0 || nextMetal.metalWeightG <= 0
+        ? nextLab
+        : applyLabFieldChange(nextLab, 'weight', nextMetal.metalWeightG),
+    );
 
   }, [open, purchaseModalOpenSession, initialData?.id, lockedWarehouseId]);
 
@@ -449,6 +453,9 @@ export default function AddPurchaseModal({
   const onMetalField = useCallback(
     (field: 'weight' | 'rateInr' | 'sheetRateAed' | 'totalInr' | 'totalAed', n: number) => {
       setMetal(prev => applyMetalFieldChange(prev, field, n));
+      if (field === 'weight') {
+        setLab(prev => applyLabFieldChange(prev, 'weight', n));
+      }
     },
     [],
   );
