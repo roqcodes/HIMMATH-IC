@@ -858,21 +858,21 @@ export async function dbDeleteICWarehouseAction(id: string): Promise<DbActionRes
       if (warehouseRes.rows.length === 0) return { error: 'Warehouse not found' };
 
       const activity = await client.query(
-        `SELECT EXISTS (SELECT 1 FROM ic_purchases WHERE warehouse_id = $1)
-          OR EXISTS (SELECT 1 FROM ic_sales WHERE warehouse_id = $1)
-          OR EXISTS (SELECT 1 FROM ic_warehouse_transactions WHERE warehouse_id = $1)
+        `SELECT EXISTS (SELECT 1 FROM ic_purchases WHERE warehouse_id::text = $1::text)
+          OR EXISTS (SELECT 1 FROM ic_sales WHERE warehouse_id::text = $1::text)
+          OR EXISTS (SELECT 1 FROM ic_warehouse_transactions WHERE warehouse_id::text = $1::text)
           OR EXISTS (
             SELECT 1 FROM ic_fund_accounts a
             LEFT JOIN ic_fund_vouchers v
               ON (v.debit_account_id = a.id OR v.credit_account_id = a.id) AND v.status IN ('active', 'pending')
-            WHERE a.source_type = 'ic_warehouse' AND a.source_id = $1
+            WHERE a.source_type = 'ic_warehouse' AND a.source_id = $1::text
               AND (v.id IS NOT NULL OR a.opening_balance <> 0)
           )
           OR EXISTS (
             SELECT 1 FROM inr_fund_accounts a
             LEFT JOIN inr_fund_vouchers v
               ON (v.debit_account_id = a.id OR v.credit_account_id = a.id) AND v.status IN ('active', 'pending')
-            WHERE a.source_type = 'ic_warehouse' AND a.source_id = $1
+            WHERE a.source_type = 'ic_warehouse' AND a.source_id = $1::text
               AND (v.id IS NOT NULL OR a.opening_balance <> 0)
           ) AS has_entries`,
         [parsedId],
