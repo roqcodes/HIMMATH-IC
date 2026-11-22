@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Modal from '@/components/ui/Modal';
 import AsicFormField from '@/components/asic/AsicFormField';
 import ModalFormSection from '@/components/ui/ModalFormSection';
@@ -10,7 +10,15 @@ import { useApp } from '@/context/AppContext';
 import { parseFormAmount } from '@/lib/parseFormAmount';
 import type { ICWarehouse } from '@/types';
 import WarehouseManagersField from '@/components/ic-transfer/settings/WarehouseManagersField';
-import { INR_PER_UNIT } from '@/lib/icTransfer/rateCalculations';
+import {
+  computeIcCashAedTotal,
+  computeIcCashRateFromTotals,
+  formatAmount,
+  formatRateInputValue,
+  INR_PER_UNIT,
+  parseRateInputValue,
+} from '@/lib/icTransfer/rateCalculations';
+import { icPurchaseReadOnlyInput } from '@/components/ic-transfer/shared/icTransferFormModalLayout';
 
 type Props = {
   open: boolean;
@@ -42,8 +50,10 @@ export default function WarehouseModal({
   const [city, setCity] = useState('');
   const [state, setState] = useState('');
   const [openingMetalG, setOpeningMetalG] = useState('0');
-  const [openingAed, setOpeningAed] = useState('0');
   const [openingInr, setOpeningInr] = useState('0');
+  const [openingAvgRate, setOpeningAvgRate] = useState('');
+  const [openingAed, setOpeningAed] = useState('0');
+  const skipAedAutofillRef = useRef(false);
   const [managerIds, setManagerIds] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -51,11 +61,20 @@ export default function WarehouseModal({
   const deskKind = warehouse?.deskKind ?? defaultDeskKind;
   const isBranchDesk = deskKind === 'branch';
   const openingInrAmount = parseFormAmount(openingInr) ?? 0;
-  const openingAedAmount = parseFormAmount(openingAed) ?? 0;
-  const openingIcStock = openingInrAmount / INR_PER_UNIT;
+  const openingIcStock = openingInrAmount > 0 ? openingInrAmount / INR_PER_UNIT : 0;
+  const openingUnitsDisplay =
+    openingIcStock > 0 ? formatRateInputValue(openingIcStock, 8) : '0';
+
+  const autofillOpeningAed = (inrStr: string, rateStr: string) => {
+    const inr = parseFormAmount(inrStr) ?? 0;
+    const rate = parseRateInputValue(rateStr) ?? 0;
+    const stock = inr > 0 ? inr / INR_PER_UNIT : 0;
+    setOpeningAed(formatAmount(computeIcCashAedTotal(stock, rate)));
+  };
 
   useEffect(() => {
     if (!open) return;
+    skipAedAutofillRef.current = true;
     if (warehouse) {
       setName(warehouse.name || '');
       setCode(warehouse.code || '');
@@ -65,8 +84,15 @@ export default function WarehouseModal({
       setCity(warehouse.indiaCity || '');
       setState(warehouse.indiaState || '');
       setOpeningMetalG(String(warehouse.openingMetalG ?? 0));
-      setOpeningAed(String(warehouse.openingAed ?? 0));
       setOpeningInr(String(warehouse.openingInr ?? 0));
+      const stock =
+        Number(warehouse.openingStock) > 0
+          ? Number(warehouse.openingStock)
+          : (Number(warehouse.openingInr) || 0) / INR_PER_UNIT;
+      const aed = Number(warehouse.openingAed) || 0;
+      const impliedRate = stock > 0 && aed > 0 ? computeIcCashRateFromTotals(stock, aed) : 0;
+      setOpeningAvgRate(impliedRate > 0 ? formatRateInputValue(impliedRate) : '');
+      setOpeningAed(formatAmount(aed));
       setManagerIds(warehouse.managerIds ? [...warehouse.managerIds] : []);
     } else {
       setName('');
@@ -77,11 +103,21 @@ export default function WarehouseModal({
       setCity('');
       setState('');
       setOpeningMetalG('0');
-      setOpeningAed('0');
       setOpeningInr('0');
+      setOpeningAvgRate('');
+      setOpeningAed('0');
       setManagerIds([]);
     }
   }, [open, warehouse]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (skipAedAutofillRef.current) {
+      skipAedAutofillRef.current = false;
+      return;
+    }
+    autofillOpeningAed(openingInr, openingAvgRate);
+  }, [open, openingInr, openingAvgRate]);
 
   const canSubmit =
     name.trim().length > 0 && (!isBranchDesk || managerIds.length > 0);
@@ -95,9 +131,9 @@ export default function WarehouseModal({
     const stateTrim = state.trim();
     const sendDeliveryProofToCustomer = warehouse ? warehouse.sendDeliveryProofToCustomer !== false : true;
     const metalG = parseFormAmount(openingMetalG);
-    const aed = parseFormAmount(openingAed);
     const inr = parseFormAmount(openingInr);
-    if (metalG === null || aed === null || inr === null) {
+    const avgRate = parseRateInputValue(openingAvgRate);
+    if (metalG === null || inr === null) {
       alert('Enter valid opening balances');
       setIsSaving(false);
       return;
@@ -108,6 +144,22 @@ export default function WarehouseModal({
       return;
     }
     const stock = inr / INR_PER_UNIT;
+    if (inr > 0 && (avgRate === null || avgRate < 0)) {
+      alert('Enter opening average rate (AED per IC unit)');
+      setIsSaving(false);
+      return;
+    }
+    const aed = parseFormAmount(openingAed);
+    if (aed === null) {
+      alert('Enter valid opening AED');
+      setIsSaving(false);
+      return;
+    }
+    if (aed < 0) {
+      alert('Opening AED cannot be negative');
+      setIsSaving(false);
+      return;
+    }
     const openings = {
       openingMetalG: metalG,
       openingAed: aed,
@@ -298,26 +350,8 @@ export default function WarehouseModal({
             </ModalFormSection>
             <ModalFormSection
               title="Opening balances"
-              description="Starting metal, cash books, and IC units. AED/INR lock after ledger entries exist."
+              description="INR and AED books; AED autofills from units × rate but can be overridden. Balances lock after ledger entries exist."
             >
-              <AsicFormField label="Opening metal (g)" htmlFor="warehouse-opening-metal" className={fieldClass}>
-                <input
-                  id="warehouse-opening-metal"
-                  className={`${asicInput} tabular-nums`}
-                  inputMode="decimal"
-                  value={openingMetalG}
-                  onChange={e => setOpeningMetalG(e.target.value)}
-                />
-              </AsicFormField>
-              <AsicFormField label="Opening AED" htmlFor="warehouse-opening-aed" className={fieldClass}>
-                <input
-                  id="warehouse-opening-aed"
-                  className={`${asicInput} tabular-nums`}
-                  inputMode="decimal"
-                  value={openingAed}
-                  onChange={e => setOpeningAed(e.target.value)}
-                />
-              </AsicFormField>
               <AsicFormField label="Opening INR" htmlFor="warehouse-opening-inr" className={fieldClass}>
                 <input
                   id="warehouse-opening-inr"
@@ -328,29 +362,56 @@ export default function WarehouseModal({
                 />
               </AsicFormField>
               <AsicFormField
-                label="Opening IC stock (units)"
-                htmlFor="warehouse-opening-stock"
-                className={fieldClass}
-                hint={`Calculated from INR opening ÷ ₹${INR_PER_UNIT.toLocaleString('en-IN')}.`}
-              >
-                <input
-                  id="warehouse-opening-stock"
-                  className={`${asicInput} tabular-nums`}
-                  value={openingIcStock.toFixed(8)}
-                  readOnly
-                />
-              </AsicFormField>
-              <AsicFormField
-                label="Opening average rate (AED/unit)"
+                label="Avg rate (AED / unit)"
                 htmlFor="warehouse-opening-rate"
                 className={fieldClass}
-                hint="Calculated from AED opening ÷ opening IC stock."
+                hint={`Sheet rate per IC unit (1 unit = ₹${INR_PER_UNIT.toLocaleString('en-IN')}). AED opening = units × rate × 100.`}
               >
                 <input
                   id="warehouse-opening-rate"
                   className={`${asicInput} tabular-nums`}
-                  value={openingIcStock > 0 ? (openingAedAmount / openingIcStock / 100).toFixed(2) : '0.00'}
+                  inputMode="decimal"
+                  value={openingAvgRate}
+                  onChange={e => setOpeningAvgRate(e.target.value)}
+                  placeholder="e.g. 36.5"
+                  disabled={openingInrAmount <= 0}
+                />
+              </AsicFormField>
+              <AsicFormField
+                label="Opening IC units"
+                htmlFor="warehouse-opening-stock"
+                className={fieldClass}
+                hint={`From INR opening ÷ ₹${INR_PER_UNIT.toLocaleString('en-IN')}.`}
+              >
+                <input
+                  id="warehouse-opening-stock"
+                  className={`${asicInput} ${icPurchaseReadOnlyInput} tabular-nums w-full`}
+                  value={openingUnitsDisplay}
                   readOnly
+                  aria-readonly
+                />
+              </AsicFormField>
+              <AsicFormField
+                label="Opening AED"
+                htmlFor="warehouse-opening-aed"
+                className={fieldClass}
+                hint="Autofilled from IC units and avg rate; edit if needed."
+              >
+                <input
+                  id="warehouse-opening-aed"
+                  className={`${asicInput} tabular-nums`}
+                  inputMode="decimal"
+                  value={openingAed}
+                  onChange={e => setOpeningAed(e.target.value)}
+                />
+              </AsicFormField>
+              <AsicFormField label="Opening metal (g)" htmlFor="warehouse-opening-metal" className={fieldClass}>
+                <input
+                  id="warehouse-opening-metal"
+                  className={`${asicInput} tabular-nums`}
+                  inputMode="decimal"
+                  value={openingMetalG}
+                  onChange={e => setOpeningMetalG(e.target.value)}
                 />
               </AsicFormField>
             </ModalFormSection>
