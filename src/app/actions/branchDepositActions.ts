@@ -10,6 +10,7 @@ import {
   postVoucherInTx,
   syncICBranchDepositToICFunds,
   voidVoucherByReference,
+  deleteVouchersByReference,
 } from '@/lib/icFunds/icTransferFundSync';
 import { ensureHqIcFundsBranch } from '@/lib/icFunds/ensureHqBranch';
 import { mapBranchDepositRow } from '@/lib/icTransfer/branchDepositMapper';
@@ -200,6 +201,7 @@ export async function deleteBranchDepositAction(slug: string, depositId: string)
     await withTransaction(async client => {
       // 1. Void the IC Funds journal inside the same tx (atomic with delete)
       await voidVoucherByReference(client, HQ_IC_FUNDS_BRANCH_ID, 'ic_branch_deposit', id);
+      await deleteVouchersByReference(client, HQ_IC_FUNDS_BRANCH_ID, ['ic_branch_deposit'], id);
 
       // 2. Delete the deposit row
       const del = await client.query(`DELETE FROM ic_branch_deposits WHERE id = $1 RETURNING id`, [id]);

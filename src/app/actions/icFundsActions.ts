@@ -2516,8 +2516,18 @@ export async function getICFundStatementAction(params: {
 
     const vRes = await query(
       `SELECT ${VOUCHER_DETAIL_SELECT_COLUMNS},
-         COALESCE(debit_branch.name, credit_branch.name, deposit_branch.name) AS transaction_branch_name
+         COALESCE(purchase_warehouse.name, sale_warehouse.name, debit_branch.name, credit_branch.name,
+           debit_warehouse.name, credit_warehouse.name, deposit_branch.name) AS transaction_branch_name
        ${VOUCHER_FROM_SQL}
+       LEFT JOIN ic_purchases statement_purchase
+         ON v.reference_type IN ('ic_purchase', 'metal_purchase_aed', 'ic_purchase_inr', 'metal_purchase', 'lab_test_purchase')
+        AND statement_purchase.id::text = split_part(v.reference_id, '#', 1)
+       LEFT JOIN ic_sales statement_sale
+         ON v.reference_type IN ('ic_sale', 'metal_sale_aed', 'metal_sale_ic_stock', 'metal_fx_profit',
+           'ic_sale_cogs', 'ic_sale_profit', 'ic_sale_inr', 'metal_sale_profit', 'metal_sale_receipt', 'metal_sale_cogs', 'lab_test_sale')
+        AND statement_sale.id::text = split_part(v.reference_id, '#', 1)
+       LEFT JOIN ic_warehouses purchase_warehouse ON purchase_warehouse.id = statement_purchase.warehouse_id
+       LEFT JOIN ic_warehouses sale_warehouse ON sale_warehouse.id = statement_sale.warehouse_id
        LEFT JOIN ic_branch_deposits statement_deposit
          ON v.reference_type = 'ic_branch_deposit'
         AND statement_deposit.id::text = v.reference_id
@@ -2531,6 +2541,12 @@ export async function getICFundStatementAction(params: {
         AND (credit_branch.id::text = ca.source_id
           OR 'branch_cash_wh_' || credit_branch.id::text = ca.source_id
           OR credit_branch.id = statement_deposit.ic_branch_id)
+       LEFT JOIN ic_warehouses debit_warehouse
+         ON (da.source_type = 'ic_warehouse' AND debit_warehouse.id::text = da.source_id)
+          OR (da.source_type = 'ic_branch' AND 'branch_cash_wh_' || debit_warehouse.id::text = da.source_id)
+       LEFT JOIN ic_warehouses credit_warehouse
+         ON (ca.source_type = 'ic_warehouse' AND credit_warehouse.id::text = ca.source_id)
+          OR (ca.source_type = 'ic_branch' AND 'branch_cash_wh_' || credit_warehouse.id::text = ca.source_id)
        LEFT JOIN ic_branches deposit_branch ON deposit_branch.id = statement_deposit.ic_branch_id
        WHERE ${clauses.join(' AND ')}
        ORDER BY v.voucher_date ASC, v.voucher_no ASC, v.created_at ASC`,
@@ -2723,8 +2739,28 @@ export async function getInrFundStatementAction(params: {
     }
 
     const vRes = await query(
-      `${INR_VOUCHER_DETAIL_SELECT_SQL}
-       WHERE ${clauses.join(' AND ')}
+      `SELECT v.*,
+         COALESCE(purchase_warehouse.name, sale_warehouse.name, debit_branch.name, credit_branch.name,
+           debit_warehouse.name, credit_warehouse.name) AS transaction_branch_name
+       FROM (${INR_VOUCHER_DETAIL_SELECT_SQL} WHERE ${clauses.join(' AND ')}) v
+       JOIN inr_fund_accounts da ON da.id = v.debit_account_id
+       JOIN inr_fund_accounts ca ON ca.id = v.credit_account_id
+       LEFT JOIN ic_purchases statement_purchase
+         ON v.reference_type IN ('ic_purchase_inr', 'metal_purchase', 'lab_test_purchase')
+        AND statement_purchase.id::text = split_part(v.reference_id, '#', 1)
+       LEFT JOIN ic_sales statement_sale
+         ON v.reference_type IN ('ic_sale_inr', 'metal_sale_profit', 'metal_sale_receipt', 'metal_sale_cogs', 'lab_test_sale')
+        AND statement_sale.id::text = split_part(v.reference_id, '#', 1)
+       LEFT JOIN ic_warehouses purchase_warehouse ON purchase_warehouse.id = statement_purchase.warehouse_id
+       LEFT JOIN ic_warehouses sale_warehouse ON sale_warehouse.id = statement_sale.warehouse_id
+       LEFT JOIN ic_branches debit_branch
+         ON da.source_type = 'ic_branch' AND debit_branch.id::text = da.source_id
+       LEFT JOIN ic_branches credit_branch
+         ON ca.source_type = 'ic_branch' AND credit_branch.id::text = ca.source_id
+       LEFT JOIN ic_warehouses debit_warehouse
+         ON da.source_type = 'ic_warehouse' AND debit_warehouse.id::text = da.source_id
+       LEFT JOIN ic_warehouses credit_warehouse
+         ON ca.source_type = 'ic_warehouse' AND credit_warehouse.id::text = ca.source_id
        ORDER BY v.voucher_date ASC, v.voucher_no ASC, v.created_at ASC`,
       values,
     );
@@ -2754,6 +2790,7 @@ export async function getInrFundStatementAction(params: {
       const counterpartyAccountId = debit > 0 ? v.creditAccountId : v.debitAccountId;
       lines.push({
         date: v.voucherDate,
+        branchName: row.transaction_branch_name ? String(row.transaction_branch_name) : undefined,
         voucherNo: v.voucherNo,
         voucherType: v.voucherType,
         particulars: counterparty,

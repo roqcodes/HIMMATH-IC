@@ -917,6 +917,33 @@ export async function voidVoucherByReference(
   );
 }
 
+/** Permanently remove journals for a deleted source after their allocations have been voided. */
+export async function deleteVouchersByReference(
+  client: DbClient,
+  branchId: string,
+  referenceTypes: string[],
+  referenceId: string,
+  includeDerivedReferences = false,
+): Promise<void> {
+  for (const table of ['ic_fund_vouchers', 'inr_fund_vouchers'] as const) {
+    const matching = await client.query(
+      `SELECT id FROM ${table}
+       WHERE branch_id = $1 AND reference_type = ANY($2::text[])
+         AND (reference_id = $3 OR ($4::boolean AND reference_id LIKE $5))`,
+      [branchId, referenceTypes, referenceId, includeDerivedReferences, `${referenceId}#%`],
+    );
+    const ids = matching.rows.map(row => String(row.id));
+    if (ids.length === 0) continue;
+    await client.query(
+      `UPDATE ic_capital_allocations
+       SET status = 'void'
+       WHERE source_voucher_id = ANY($1::text[]) AND source_book = $2 AND status = 'active'`,
+      [ids, table === 'ic_fund_vouchers' ? 'AED' : 'INR'],
+    );
+    await client.query(`DELETE FROM ${table} WHERE id = ANY($1::text[])`, [ids]);
+  }
+}
+
 export async function postVoucherInTx(
   client: DbClient,
   params: {
@@ -1245,6 +1272,9 @@ export async function removeICPurchaseFromICFunds(purchaseId: string, transactio
       await voidVoucherByReference(client, branchId, 'ic_purchase', purchaseId);
       const { voidInrVoucherByReference } = await import('@/lib/ledgers/inr/inrFundSync');
       await voidInrVoucherByReference(client, HQ_IC_FUNDS_BRANCH_ID, 'ic_purchase_inr', purchaseId);
+      await deleteVouchersByReference(client, branchId, [
+        'ic_purchase', 'metal_purchase_aed', 'ic_purchase_inr', 'metal_purchase', 'lab_test_purchase',
+      ], purchaseId);
     };
     if (transactionClient) await remove(transactionClient);
     else await withTransaction(remove);
@@ -1404,6 +1434,11 @@ export async function removeICSaleFromICFunds(saleId: string, transactionClient?
       const { voidInrVoucherByReference } = await import('@/lib/ledgers/inr/inrFundSync');
       await voidInrVoucherByReference(client, HQ_IC_FUNDS_BRANCH_ID, 'ic_sale_inr', saleId);
       await voidSaleMarginVouchers(client, branchId, saleId);
+      await deleteVouchersByReference(client, branchId, [
+        'ic_sale', 'metal_sale_aed', 'metal_sale_ic_stock', 'metal_fx_profit',
+        'ic_sale_cogs', 'ic_sale_profit', 'ic_sale_inr', 'metal_sale_profit',
+        'metal_sale_receipt', 'metal_sale_cogs', 'lab_test_sale',
+      ], saleId, true);
     };
     if (transactionClient) await remove(transactionClient);
     else await withTransaction(remove);
