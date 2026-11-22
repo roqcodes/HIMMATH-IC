@@ -33,8 +33,8 @@ export default function FinancialReportFilterPanel({ date, filters }: Props) {
 
         <div className="h-px bg-slate-200/90 dark:bg-[var(--theme-border-subtle)]" aria-hidden />
 
-        <div>
-          <p className={`${sectionEyebrow} mb-2`}>Filters</p>
+        <div className="rounded-lg border border-slate-200/90 bg-white px-3 py-3 shadow-[inset_0_1px_0_rgb(255_255_255/0.6)] dark:border-[var(--theme-border)] dark:bg-[var(--theme-surface)]">
+          <p className={`${sectionEyebrow} mb-3`}>Filters</p>
           <ReportFilterBar {...filters} />
         </div>
       </div>

@@ -33,7 +33,8 @@ export type ReportFilterBarProps = {
   showFundLedgerBookTab?: boolean;
 };
 
-const fieldCell = 'flex min-w-0 flex-col justify-end gap-1';
+const fieldCell = 'flex min-w-0 flex-col gap-1';
+const controlSlot = 'min-h-8';
 
 function SelectFilter<T extends string>({
   id,
@@ -55,7 +56,7 @@ function SelectFilter<T extends string>({
       <label className={icfLabel} htmlFor={id}>
         {label}
       </label>
-      <select id={id} className={icfInput} value={value} onChange={e => onChange(e.target.value as T)}>
+      <select id={id} className={`${icfInput} ${controlSlot}`} value={value} onChange={e => onChange(e.target.value as T)}>
         {options.map(o => (
           <option key={o.value} value={o.value}>
             {o.label}
@@ -141,14 +142,23 @@ export default function ReportFilterBar({
   const selectedAccountDetail =
     accountOptions?.find(o => o.value === (accountId ?? ''))?.detail?.trim() || '';
 
+  const statementAccount =
+    reportView === 'statement' && statementMode === 'account';
+
+  const filterGridClass = statementAccount
+    ? 'grid w-full grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-12 xl:gap-x-3 xl:gap-y-3'
+    : 'grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4';
+
+  const showToolbar = Boolean(bookToggle || showClear || statementAccount);
+
   return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <div className="flex min-w-0 flex-nowrap items-end gap-3">
-        <div className={`${fieldCell} min-w-[8rem] flex-1`}>
+    <div className="flex min-w-0 flex-col gap-0">
+      <div className={filterGridClass}>
+        <div className={`${fieldCell} ${statementAccount ? 'sm:col-span-2 xl:col-span-3' : ''}`}>
           <label className={icfLabel} htmlFor="icf-report-search">
             Search
           </label>
-          <div className="relative min-w-0">
+          <div className={`relative min-w-0 ${controlSlot}`}>
             <svg
               width="15"
               height="15"
@@ -158,7 +168,7 @@ export default function ReportFilterBar({
               strokeWidth="2.5"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"
+              className="pointer-events-none absolute left-2.5 top-1/2 z-[1] -translate-y-1/2 text-slate-400"
               aria-hidden
             >
               <circle cx="11" cy="11" r="8" />
@@ -177,11 +187,13 @@ export default function ReportFilterBar({
         </div>
 
         {reportView === 'statement' && accountOptions && onAccountId ? (
-          <div className={`${fieldCell} min-w-[10rem] flex-[1.5]`}>
-            <span className={icfLabel}>Account or manager</span>
-            <div className="flex min-w-0 items-center gap-2">
+          <div className={`${fieldCell} ${statementAccount ? 'sm:col-span-2 xl:col-span-4' : 'sm:col-span-2'}`}>
+            <span className={icfLabel} id="icf-statement-account-label">
+              Account or manager
+            </span>
+            <div className={controlSlot}>
               <EntitySearchSelect
-                className="min-w-0 flex-1"
+                className="min-w-0 w-full"
                 selectedId={accountId ?? ''}
                 onSelectId={id => onAccountId(id)}
                 options={accountOptions}
@@ -189,40 +201,56 @@ export default function ReportFilterBar({
                 inputClassName={icfInput}
                 showDetailLine={false}
               />
-              {selectedAccountDetail ? (
-                <span className="shrink-0 text-[11px] font-medium text-slate-500 dark:text-[var(--theme-text-secondary)]">
-                  {selectedAccountDetail}
-                </span>
-              ) : null}
             </div>
+            {statementAccount ? (
+              <p
+                className="min-h-[1.125rem] truncate text-[11px] text-slate-500 dark:text-[var(--theme-text-secondary)]"
+                title={selectedAccountDetail || undefined}
+                aria-live="polite"
+              >
+                {selectedAccountDetail || '\u00a0'}
+              </p>
+            ) : selectedAccountDetail ? (
+              <p className="min-h-[1.125rem] truncate text-[11px] text-slate-500">{selectedAccountDetail}</p>
+            ) : (
+              <p className="min-h-[1.125rem]" aria-hidden>
+                {'\u00a0'}
+              </p>
+            )}
           </div>
         ) : null}
 
         {showWarehouseFilter && warehouseOptions && warehouseOptions.length > 0 ? (
-          <div className={`${fieldCell} w-44 min-w-[10rem] shrink-0`}>
+          <div className={fieldCell}>
             <span className={icfLabel}>Warehouse</span>
-            <EntitySearchSelect
-              selectedId={filters.warehouseId}
-              onSelectId={id => patch({ warehouseId: id })}
-              options={[{ value: '', label: 'All warehouses', detail: '' }, ...warehouseOptions]}
-              placeholder="All"
-              inputClassName={icfInput}
-              showDetailLine={false}
-            />
+            <div className={controlSlot}>
+              <EntitySearchSelect
+                selectedId={filters.warehouseId}
+                onSelectId={id => patch({ warehouseId: id })}
+                options={[{ value: '', label: 'All warehouses', detail: '' }, ...warehouseOptions]}
+                placeholder="All warehouses"
+                inputClassName={icfInput}
+                showDetailLine={false}
+                className="w-full"
+              />
+            </div>
           </div>
         ) : null}
 
         {showPartyFilter && counterpartyOptions && counterpartyOptions.length > 0 ? (
-          <div className={`${fieldCell} w-40 shrink-0`}>
+          <div className={`${fieldCell} ${statementAccount ? 'xl:col-span-2' : ''}`}>
             <span className={icfLabel}>Party</span>
-            <EntitySearchSelect
-              selectedId={filters.counterpartyId}
-              onSelectId={id => patch({ counterpartyId: id })}
-              options={[{ value: '', label: 'All parties', detail: '' }, ...counterpartyOptions]}
-              placeholder="All"
-              inputClassName={icfInput}
-              showDetailLine={false}
-            />
+            <div className={controlSlot}>
+              <EntitySearchSelect
+                selectedId={filters.counterpartyId}
+                onSelectId={id => patch({ counterpartyId: id })}
+                options={[{ value: '', label: 'All parties', detail: '' }, ...counterpartyOptions]}
+                placeholder="All parties"
+                inputClassName={icfInput}
+                showDetailLine={false}
+                className="w-full"
+              />
+            </div>
           </div>
         ) : null}
 
@@ -232,7 +260,7 @@ export default function ReportFilterBar({
             label="Voucher status"
             value={filters.voucherStatus}
             onChange={v => patch({ voucherStatus: v })}
-            className="w-40 shrink-0"
+            className={statementAccount ? 'xl:col-span-3' : ''}
             options={[
               { value: 'all', label: 'All statuses' },
               { value: 'posted', label: 'Posted' },
@@ -248,7 +276,6 @@ export default function ReportFilterBar({
             label="Expense type"
             value={filters.expenseKind}
             onChange={v => patch({ expenseKind: v })}
-            className="w-44 min-w-[10rem] shrink-0"
             options={[
               { value: 'all', label: 'All expenses' },
               { value: 'direct', label: 'Direct (COGS)' },
@@ -264,7 +291,6 @@ export default function ReportFilterBar({
               label="Transaction"
               value={filters.tradeType}
               onChange={v => patch({ tradeType: v })}
-              className="w-48 min-w-[11rem] shrink-0"
               options={[
                 { value: 'all', label: 'Purchases & sales' },
                 { value: 'purchase', label: 'Purchases only' },
@@ -276,7 +302,6 @@ export default function ReportFilterBar({
               label="Order status"
               value={filters.orderStatus}
               onChange={v => patch({ orderStatus: v })}
-              className="w-44 min-w-[10rem] shrink-0"
               options={[
                 { value: 'all', label: 'All order states' },
                 { value: 'open', label: 'Open orders' },
@@ -284,13 +309,13 @@ export default function ReportFilterBar({
                 { value: 'completed', label: 'Completed' },
               ]}
             />
-            <div className={`${fieldCell} w-44 min-w-[10rem] shrink-0`}>
+            <div className={fieldCell}>
               <span className={icfLabel} id="icf-include-void-label">
                 Options
               </span>
               <label
                 htmlFor="icf-include-void"
-                className="flex h-8 cursor-pointer items-center gap-2 rounded-lg border border-[var(--theme-border-field)] bg-white px-2.5 text-sm text-slate-700 dark:bg-[var(--theme-input-bg)] dark:text-[var(--theme-text)]"
+                className={`${controlSlot} flex cursor-pointer items-center gap-2 rounded-lg border border-[var(--theme-border-field)] bg-white px-2.5 text-sm text-slate-700 dark:bg-[var(--theme-input-bg)] dark:text-[var(--theme-text)]`}
               >
                 <input
                   id="icf-include-void"
@@ -305,26 +330,31 @@ export default function ReportFilterBar({
             </div>
           </>
         ) : null}
+      </div>
 
-        {bookToggle ? <div className="flex h-8 shrink-0 items-center">{bookToggle}</div> : null}
-
-        <div className="ml-auto flex h-8 shrink-0 items-center gap-2">
-          {activeCount > 0 ? (
-            <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold tabular-nums text-slate-600 dark:bg-[var(--theme-surface-muted)] dark:text-[var(--theme-text-secondary)]">
+      {showToolbar ? (
+        <div className="mt-3 flex min-h-9 flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 pt-2.5 dark:border-[var(--theme-border-subtle)]">
+          <div className="flex min-w-0 items-center">{bookToggle}</div>
+          <div className="flex shrink-0 items-center gap-2">
+            <span
+              className={`min-w-[6.5rem] text-right text-[11px] font-medium tabular-nums text-slate-500 transition-opacity dark:text-[var(--theme-text-secondary)] ${
+                activeCount > 0 ? 'opacity-100' : 'opacity-0'
+              }`}
+              aria-hidden={activeCount === 0}
+            >
               {activeCount} active
             </span>
-          ) : null}
-          {showClear ? (
             <button
               type="button"
-              className={icfBtnGhost}
+              className={`${icfBtnGhost} disabled:pointer-events-none disabled:opacity-40`}
+              disabled={!showClear}
               onClick={() => onChange({ ...DEFAULT_REPORT_FILTERS })}
             >
               Clear filters
             </button>
-          ) : null}
+          </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }
