@@ -26,30 +26,51 @@ export function useWarehouseInrLedgerKpis(options: {
     }
 
     let cancelled = false;
+    let requestInFlight = false;
     setStatus('loading');
-    void getWarehouseInrLedgerKpisAction({
-      branchId: options.branchId,
-      warehouseIds,
-      startDate: options.startDate ?? undefined,
-      endDate: options.endDate ?? undefined,
-    }).then((result) => {
-      if (cancelled) return;
-      if (!result.success) {
+
+    const refresh = async () => {
+      if (cancelled || requestInFlight) return;
+      requestInFlight = true;
+      try {
+        const result = await getWarehouseInrLedgerKpisAction({
+          branchId: options.branchId,
+          warehouseIds,
+          startDate: options.startDate ?? undefined,
+          endDate: options.endDate ?? undefined,
+        });
+        if (cancelled) return;
+        if (!result.success) {
+          setData({});
+          setStatus('error');
+          return;
+        }
+        const complete = warehouseIds.every((id) => result.data[id]?.accountFound);
+        setData(result.data);
+        setStatus(complete ? 'ready' : 'error');
+      } catch {
+        if (cancelled) return;
         setData({});
         setStatus('error');
-        return;
+      } finally {
+        requestInFlight = false;
       }
-      const complete = warehouseIds.every((id) => result.data[id]?.accountFound);
-      setData(result.data);
-      setStatus(complete ? 'ready' : 'error');
-    }).catch(() => {
-      if (cancelled) return;
-      setData({});
-      setStatus('error');
-    });
+    };
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void refresh();
+    };
+
+    void refresh();
+    window.addEventListener('focus', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    const interval = window.setInterval(refreshWhenVisible, 60_000);
 
     return () => {
       cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
   }, [warehouseIdsKey, options.branchId, options.startDate, options.endDate, options.refreshKey]);
 

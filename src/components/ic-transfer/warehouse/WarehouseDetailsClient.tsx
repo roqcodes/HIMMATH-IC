@@ -254,7 +254,10 @@ export default function WarehouseDetailsClient({
         open={editOpen}
         warehouse={warehouse}
         onClose={() => setEditOpen(false)}
-        onSaved={() => setEditOpen(false)}
+        onSaved={() => {
+          setEditOpen(false);
+          setInrLedgerRefreshToken(token => token + 1);
+        }}
       />
 
       <AddPurchaseModal

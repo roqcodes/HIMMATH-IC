@@ -303,6 +303,15 @@ const findBranchBySlug = (branches: Branch[], slug: string) =>
       b.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') === slug,
   );
 
+function saleWarehouseStockDelta(sale: ICSale): number {
+  if (sale.settlementMode === 'metal') {
+    return sale.orderStatus === 'completed' ? Number(sale.units) || 0 : 0;
+  }
+  return sale.orderStatus === 'completed' || sale.orderStatus === 'delivery_pending_admin'
+    ? -(Number(sale.units) || 0)
+    : 0;
+}
+
 function icStateFromAsicData(data: AsicData): Pick<
   AppState,
   | 'globalBranches'
@@ -1179,16 +1188,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
           icWarehouses: res.data!.warehouseId
             ? s.icWarehouses.map(w => {
                 if (w.id !== res.data!.warehouseId) return w;
-                if (res.data!.settlementMode === 'metal') {
-                  const grams = res.data!.metalWeightG || 0;
-                  const addUnits = Number(res.data!.units) || 0;
-                  return {
-                    ...w,
-                    currentMetalG: (w.currentMetalG ?? 0) - grams,
-                    currentStock: (w.currentStock ?? 0) + addUnits,
-                  };
-                }
-                return w;
+                const stockDelta = saleWarehouseStockDelta(res.data!);
+                const metalDelta = res.data!.settlementMode === 'metal'
+                  ? -(Number(res.data!.metalWeightG) || 0)
+                  : 0;
+                return stockDelta === 0 && metalDelta === 0
+                  ? w
+                  : {
+                      ...w,
+                      currentStock: (w.currentStock ?? 0) + stockDelta,
+                      currentMetalG: (w.currentMetalG ?? 0) + metalDelta,
+                    };
               })
             : s.icWarehouses,
         }));
@@ -1233,10 +1243,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const res = await dbUpdateICSaleAction(id, updates);
       if (res.success && res.data) {
-        setState(s => ({
-          ...s,
-          icSales: s.icSales.map(sItem => sItem.id === id ? res.data! : sItem),
-        }));
+        setState(s => {
+          const previous = s.icSales.find(sItem => sItem.id === id);
+          return {
+            ...s,
+            icSales: s.icSales.map(sItem => sItem.id === id ? res.data! : sItem),
+            icWarehouses: s.icWarehouses.map(w => {
+              const oldDelta = previous?.warehouseId === w.id ? saleWarehouseStockDelta(previous) : 0;
+              const newDelta = res.data!.warehouseId === w.id ? saleWarehouseStockDelta(res.data!) : 0;
+              const stockDelta = newDelta - oldDelta;
+              return stockDelta === 0
+                ? w
+                : { ...w, currentStock: (w.currentStock ?? 0) + stockDelta };
+            }),
+          };
+        });
         showToast('Sale saved');
         return true;
       }
