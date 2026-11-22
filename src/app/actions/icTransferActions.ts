@@ -785,7 +785,7 @@ export async function dbUpdateICWarehouseAction(
         ? `UPDATE ic_warehouses
            SET name=$1, code=$2, phone=$3, commission=$4, region_id=$5, email=$6, address=$7,
                india_state=$8, india_city=$9, send_delivery_proof_to_customer=$10,
-               opening_stock=($15::numeric / 100000), opening_metal_g=$13, opening_aed=$14, opening_inr=$15
+               opening_stock=$12, opening_metal_g=$13, opening_aed=$14, opening_inr=$15
            WHERE id=$11 RETURNING *`
         : `UPDATE ic_warehouses
            SET name=$1, code=$2, phone=$3, commission=$4, region_id=$5, email=$6, address=$7,
